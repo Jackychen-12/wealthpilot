@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://keyuchen-del.github.io/keyu/">Live Demo</a> &nbsp;|&nbsp;
+  <a href="https://keyuchen-del.github.io/wealthpilot/">Live Demo</a> &nbsp;|&nbsp;
   <a href="#features">Features</a> &nbsp;|&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;|&nbsp;
   <a href="#getting-started">Getting Started</a> &nbsp;|&nbsp;
@@ -21,7 +21,7 @@
   <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React 18" />
   <img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://github.com/keyuchen-del/keyu/actions/workflows/deploy.yml/badge.svg" alt="Deploy" />
+  <img src="https://github.com/keyuchen-del/wealthpilot/actions/workflows/deploy.yml/badge.svg" alt="Deploy" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
 </p>
 
@@ -108,13 +108,13 @@ src/
 
 ```bash
 # Clone
-git clone https://github.com/keyuchen-del/keyu.git
-cd keyu
+git clone https://github.com/keyuchen-del/wealthpilot.git
+cd wealthpilot
 
 # Install
 npm install
 
-# Dev server (http://localhost:5173/keyu/)
+# Dev server (http://localhost:5173/wealthpilot/)
 npm run dev
 
 # Production build
