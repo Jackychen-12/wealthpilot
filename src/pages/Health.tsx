@@ -6,6 +6,7 @@ import { AiInsight } from '../components/AiInsight'
 import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { healthDimensions } from '../data/mock'
+import type { PageProps } from '../types'
 
 const severityColor = {
   high: colors.danger,
@@ -18,7 +19,7 @@ const severityBg = {
   low: colors.successLight,
 }
 
-export function Health({ go }: { go: (k: string) => void }) {
+export function Health({ go }: PageProps) {
   return (
     <div className="screen">
       <Notch />

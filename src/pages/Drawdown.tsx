@@ -5,6 +5,7 @@ import { FollowUpBar } from '../components/FollowUpBar'
 import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { drawdownFunds, historicalDrawdown, riskPoints } from '../data/mock'
+import type { PageProps } from '../types'
 
 const severityColor = {
   high: colors.danger,
@@ -18,7 +19,7 @@ const severityBg = {
   low: colors.successLight,
 }
 
-export function Drawdown({ go }: { go: (k: string) => void }) {
+export function Drawdown({ go }: PageProps) {
   return (
     <div className="screen">
       <Notch />

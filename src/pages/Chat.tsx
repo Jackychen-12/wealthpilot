@@ -1,13 +1,31 @@
+import { useState } from 'react'
 import { Notch } from '../components/Notch'
 import { NavBar } from '../components/NavBar'
 import { AiBubble, UserBubble } from '../components/ChatBubble'
 import { QuickPills } from '../components/QuickPills'
 import { FollowUpBar } from '../components/FollowUpBar'
 import { Disclaimer } from '../components/Disclaimer'
+import { useTypingEffect } from '../hooks/useTypingEffect'
 import { colors } from '../utils/theme'
 import { chatMessages, chatQuickReplies } from '../data/mock'
+import type { PageProps } from '../types'
 
-export function Chat({ go }: { go: (k: string) => void }) {
+const lastAiText =
+  '创新药占比38.2%，同类中等偏上。相比上季度提升3.1个百分点，基金经理正在主动调整方向。'
+
+function TypingConclusion() {
+  const { displayed, done } = useTypingEffect(lastAiText, 25)
+  return (
+    <div style={{ marginTop: 10, color: colors.textSecondary }}>
+      {displayed}
+      {!done && <span className="typing-cursor" />}
+    </div>
+  )
+}
+
+export function Chat({ go }: PageProps) {
+  const [showQuick, setShowQuick] = useState(false)
+
   return (
     <div className="screen">
       <Notch />
@@ -56,20 +74,22 @@ export function Chat({ go }: { go: (k: string) => void }) {
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 10, color: colors.textSecondary }}>{msg.conclusion}</div>
+                <TypingConclusion />
               </AiBubble>
             )
           }
 
-          return (
-            <AiBubble key={i}>
-              {msg.content}
-            </AiBubble>
-          )
+          return <AiBubble key={i}>{msg.content}</AiBubble>
         })}
 
-        <QuickPills items={chatQuickReplies} />
-        <FollowUpBar />
+        <div
+          className="fade-in-up"
+          style={{ animationDelay: '1.8s' }}
+          onAnimationEnd={() => setShowQuick(true)}
+        >
+          <QuickPills items={chatQuickReplies} />
+        </div>
+        {showQuick && <FollowUpBar />}
         <Disclaimer />
       </div>
     </div>

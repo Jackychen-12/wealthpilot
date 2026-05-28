@@ -7,11 +7,12 @@ import { FollowUpBar } from '../components/FollowUpBar'
 import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { attributionByFund, attributionByIndustry, attributionByAsset } from '../data/mock'
+import type { PageProps } from '../types'
 
 const tabs = ['按基金', '按行业', '按资产类型']
 const datasets = [attributionByFund, attributionByIndustry, attributionByAsset]
 
-export function Attribution({ go }: { go: (k: string) => void }) {
+export function Attribution({ go }: PageProps) {
   const [tab, setTab] = useState(0)
 
   return (

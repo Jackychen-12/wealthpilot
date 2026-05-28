@@ -3,11 +3,12 @@ import { Tag } from '../components/Tag'
 import { MetricBox } from '../components/MetricBox'
 import { colors } from '../utils/theme'
 import { marketIndices, marketNews, headlines, portfolioSummary } from '../data/mock'
+import type { PageProps } from '../types'
 
 const B = colors.primary
 const Bb = colors.primaryLight
 
-export function Home({ go }: { go: (k: string) => void }) {
+export function Home({ go }: PageProps) {
   return (
     <div className="screen">
       <Notch />

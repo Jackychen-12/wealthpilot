@@ -6,8 +6,9 @@ import { FollowUpBar } from '../components/FollowUpBar'
 import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { portfolioSummary, weeklyKeyPoints, weeklyFocus } from '../data/mock'
+import type { PageProps } from '../types'
 
-export function WeeklyReport({ go }: { go: (k: string) => void }) {
+export function WeeklyReport({ go }: PageProps) {
   return (
     <div className="screen">
       <Notch />

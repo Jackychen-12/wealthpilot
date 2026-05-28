@@ -40,6 +40,7 @@ export function RadarChart() {
       <svg width="230" height="230" viewBox="0 0 230 230">
         {rings}
         <polygon
+          className="radar-polygon"
           points={dataPolygon}
           fill={colors.primary}
           fillOpacity="0.1"

@@ -1,4 +1,6 @@
-const tabs = [
+import type { ScreenKey } from '../types'
+
+const tabs: [ScreenKey, string][] = [
   ['home', '主页'],
   ['overview', '总览'],
   ['attribution', '归因'],
@@ -7,9 +9,9 @@ const tabs = [
   ['suggest', '建议'],
   ['weekly', '周报'],
   ['chat', '追问'],
-] as const
+]
 
-export function FloatingNav({ current, onNav }: { current: string; onNav: (k: string) => void }) {
+export function FloatingNav({ current, onNav }: { current: ScreenKey; onNav: (k: ScreenKey) => void }) {
   return (
     <div className="floating-nav">
       {tabs.map(([key, label]) => (

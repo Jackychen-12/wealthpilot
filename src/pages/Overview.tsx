@@ -5,10 +5,11 @@ import { Tag } from '../components/Tag'
 import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { portfolioSummary, topContributors, topDetractors } from '../data/mock'
+import type { PageProps } from '../types'
 
 const B = colors.primary
 
-export function Overview({ go }: { go: (k: string) => void }) {
+export function Overview({ go }: PageProps) {
   return (
     <div className="screen">
       <Notch />

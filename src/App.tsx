@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { PhoneFrame } from './components/PhoneFrame'
 import { FloatingNav } from './components/FloatingNav'
 import { Home } from './pages/Home'
@@ -9,8 +9,9 @@ import { Health } from './pages/Health'
 import { Suggestions } from './pages/Suggestions'
 import { WeeklyReport } from './pages/WeeklyReport'
 import { Chat } from './pages/Chat'
+import type { ScreenKey, PageProps } from './types'
 
-const screens: Record<string, React.ComponentType<{ go: (k: string) => void }>> = {
+const screens: Record<ScreenKey, React.ComponentType<PageProps>> = {
   home: Home,
   overview: Overview,
   attribution: Attribution,
@@ -48,10 +49,21 @@ const features = [
   },
 ]
 
-const badges = ['React', 'TypeScript', 'Vite', 'AI Agent', 'Portfolio Analysis', 'Risk Engine']
+const badges = ['React 18', 'TypeScript', 'Vite', 'AI Agent', 'Portfolio Analysis', 'Risk Engine']
 
 export function App() {
-  const [screen, setScreen] = useState('home')
+  const [screen, setScreen] = useState<ScreenKey>('home')
+  const [transitioning, setTransitioning] = useState(false)
+
+  const navigate = useCallback((target: ScreenKey) => {
+    if (target === screen) return
+    setTransitioning(true)
+    setTimeout(() => {
+      setScreen(target)
+      setTransitioning(false)
+    }, 150)
+  }, [screen])
+
   const Comp = screens[screen]
 
   return (
@@ -100,11 +112,13 @@ export function App() {
         </div>
 
         <PhoneFrame resetScroll={screen}>
-          <Comp go={setScreen} />
+          <div className={`screen-transition ${transitioning ? 'exit' : 'enter'}`}>
+            <Comp go={navigate} />
+          </div>
         </PhoneFrame>
       </div>
 
-      <FloatingNav current={screen} onNav={setScreen} />
+      <FloatingNav current={screen} onNav={navigate} />
     </>
   )
 }

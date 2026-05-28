@@ -3,6 +3,7 @@ import { NavBar } from '../components/NavBar'
 import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { suggestions, watchSignals } from '../data/mock'
+import type { PageProps } from '../types'
 
 const bgMap: Record<string, string> = {
   primaryLight: colors.primaryLight,
@@ -11,7 +12,7 @@ const bgMap: Record<string, string> = {
   accent: '#F0FEFF',
 }
 
-export function Suggestions({ go }: { go: (k: string) => void }) {
+export function Suggestions({ go }: PageProps) {
   return (
     <div className="screen">
       <Notch />
