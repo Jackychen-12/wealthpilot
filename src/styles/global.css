@@ -17,14 +17,109 @@ body {
   min-height: 100vh;
 }
 
-/* ─── App Layout ─── */
+/* ─── Landing Layout ─── */
 
-.app-layout {
+.landing-layout {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 64px;
   min-height: 100vh;
-  padding: 20px;
+  padding: 40px;
+}
+
+.landing-info {
+  max-width: 380px;
+  flex-shrink: 0;
+}
+
+.landing-logo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.landing-logo-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.landing-logo-text {
+  font-family: 'Inter', 'DM Sans', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #fff, #94A3B8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.5px;
+}
+
+.landing-tagline {
+  font-size: 14px;
+  color: #64748B;
+  margin-bottom: 28px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.landing-features {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.landing-feature {
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.landing-feature:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.landing-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.landing-badge {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #94A3B8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .landing-layout {
+    flex-direction: column;
+    gap: 32px;
+    padding: 20px;
+  }
+  .landing-info {
+    max-width: 100%;
+    text-align: center;
+  }
+  .landing-logo {
+    justify-content: center;
+  }
+  .landing-badges {
+    justify-content: center;
+  }
 }
 
 /* ─── Phone Frame ─── */
