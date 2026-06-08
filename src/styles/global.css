@@ -17,120 +17,14 @@ body {
   min-height: 100vh;
 }
 
-/* ─── Landing Layout ─── */
+/* ─── App Layout ─── */
 
-.landing-layout {
+.app-layout {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 80px;
   min-height: 100vh;
-  padding: 40px;
-}
-
-.landing-info {
-  max-width: 420px;
-  flex-shrink: 0;
-}
-
-.landing-logo {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 28px;
-}
-
-.landing-logo-icon {
-  width: 56px;
-  height: 56px;
-  background: linear-gradient(135deg, #2563EB, #0EA5E9);
-  border-radius: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.3);
-}
-
-.landing-logo-text {
-  font-family: 'Inter', 'DM Sans', sans-serif;
-  font-size: 32px;
-  font-weight: 800;
-  background: linear-gradient(135deg, #fff, #94A3B8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: -0.5px;
-}
-
-.landing-tagline {
-  font-size: 16px;
-  color: #64748B;
-  margin-bottom: 36px;
-  line-height: 1.6;
-  font-weight: 400;
-}
-
-.landing-features {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-bottom: 40px;
-}
-
-.landing-feature {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: background 0.2s;
-}
-
-.landing-feature:hover {
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.landing-feature-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 16px;
-}
-
-.landing-feature-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #F1F5F9;
-  margin-bottom: 2px;
-}
-
-.landing-feature-desc {
-  font-size: 12px;
-  color: #64748B;
-  line-height: 1.5;
-}
-
-.landing-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.landing-badge {
-  font-size: 11px;
-  padding: 5px 12px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #94A3B8;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-weight: 500;
-  letter-spacing: 0.3px;
+  padding: 20px;
 }
 
 /* ─── Phone Frame ─── */
