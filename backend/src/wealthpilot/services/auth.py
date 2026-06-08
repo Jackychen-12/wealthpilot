@@ -1,13 +1,10 @@
 """认证服务 — JWT + 密码哈希。"""
 
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 
 import jwt
-from passlib.context import CryptContext
-
-from wealthpilot.settings import get_settings
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SECRET_KEY = "wealthpilot-secret-change-in-production"
 ALGORITHM = "HS256"
@@ -15,11 +12,16 @@ ACCESS_TOKEN_EXPIRE_HOURS = 72
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    salt = secrets.token_hex(16)
+    hashed = hashlib.sha256((salt + password).encode()).hexdigest()
+    return f"{salt}${hashed}"
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    if "$" not in hashed:
+        return False
+    salt, stored_hash = hashed.split("$", 1)
+    return hashlib.sha256((salt + plain).encode()).hexdigest() == stored_hash
 
 
 def create_access_token(user_id: int, username: str) -> str:

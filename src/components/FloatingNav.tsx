@@ -8,6 +8,8 @@ const tabs: [ScreenKey, string][] = [
   ['health', '健康度'],
   ['weekly', '周报'],
   ['chat', 'AI'],
+  ['risk-profile', '风评'],
+  ['login', '我的'],
 ]
 
 export function FloatingNav({ current, onNav }: { current: ScreenKey; onNav: (k: ScreenKey) => void }) {

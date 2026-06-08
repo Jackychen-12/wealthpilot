@@ -8,6 +8,8 @@ export type ScreenKey =
   | 'weekly'
   | 'chat'
   | 'portfolio'
+  | 'login'
+  | 'risk-profile'
 
 export interface PageProps {
   go: (screen: ScreenKey) => void

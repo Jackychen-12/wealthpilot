@@ -1217,3 +1217,90 @@ body {
     font-size: 11px;
   }
 }
+
+/* ─── Dark Mode (in-app) ─── */
+
+.phone.dark {
+  background: #1A1D23;
+}
+
+.phone.dark .screen {
+  background: #1A1D23;
+}
+
+.phone.dark .card {
+  background: #242830;
+  border-color: #2E3440;
+}
+
+.phone.dark .card-title {
+  color: #E2E8F0;
+}
+
+.phone.dark .content {
+  color: #CBD5E1;
+}
+
+.phone.dark .nav {
+  background: #1A1D23;
+  border-color: #2E3440;
+}
+
+.phone.dark .entry-card {
+  background: #242830;
+  border-color: #2E3440;
+}
+
+.phone.dark .entry-summary {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.phone.dark .module-card {
+  background: #242830;
+  border-color: #2E3440;
+}
+
+.phone.dark .alert-box {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.phone.dark .chat-bubble-ai {
+  background: #242830;
+  color: #E2E8F0;
+}
+
+.phone.dark .bottom-bar {
+  background: #1A1D23;
+  border-color: #2E3440;
+}
+
+.phone.dark .bottom-input {
+  background: #242830;
+  color: #94A3B8;
+  border-color: #2E3440;
+}
+
+/* Dark mode toggle button */
+.dark-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  z-index: 100;
+  transition: background 0.2s;
+}
+
+.dark-toggle:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

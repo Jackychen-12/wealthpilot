@@ -10,6 +10,8 @@ import { Suggestions } from './pages/Suggestions'
 import { WeeklyReport } from './pages/WeeklyReport'
 import { Chat } from './pages/Chat'
 import { Portfolio } from './pages/Portfolio'
+import { Login } from './pages/Login'
+import { RiskProfile } from './pages/RiskProfile'
 import type { ScreenKey, PageProps } from './types'
 
 const screens: Record<ScreenKey, React.ComponentType<PageProps>> = {
@@ -22,6 +24,8 @@ const screens: Record<ScreenKey, React.ComponentType<PageProps>> = {
   weekly: WeeklyReport,
   chat: Chat,
   portfolio: Portfolio,
+  login: Login,
+  'risk-profile': RiskProfile,
 }
 
 interface ScreenInfo {
@@ -149,6 +153,31 @@ const screenInfoMap: Record<ScreenKey, ScreenInfo> = {
       '🔧 search_news — 市场新闻检索',
     ],
     tech: ['Claude tool_use', 'SSE Streaming', 'Prompt Caching'],
+  },
+  login: {
+    icon: '🔐',
+    iconBg: 'rgba(37,99,235,0.15)',
+    title: '账号管理',
+    subtitle: '注册/登录后数据与账号绑定，支持多设备同步',
+    points: [
+      'JWT 认证 — 72 小时有效期',
+      '多租户隔离 — 每个用户独立数据',
+      'bcrypt 密码加密 — 安全存储',
+      '免登录可用 — 跳过也能体验所有功能',
+    ],
+    tech: ['JWT', 'bcrypt', 'Multi-tenant'],
+  },
+  'risk-profile': {
+    icon: '📝',
+    iconBg: 'rgba(245,158,11,0.15)',
+    title: '风险偏好评估',
+    subtitle: '5 道问卷评估你的风险承受能力，匹配最适合的资产配置',
+    points: [
+      '投资经验 / 回撤承受 / 收益期望',
+      '资金期限 / 最大亏损容忍度',
+      '四类风险画像：保守/稳健/积极/激进',
+      '配置建议：债券 vs 权益比例指导',
+    ],
   },
 }
 

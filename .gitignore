@@ -2,3 +2,16 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+backend/data/
+backend/.env
+
+# IDE
+.idea/
+.vscode/

@@ -57,3 +57,23 @@ async def get_fund_rank(fund_code: str):
 async def get_macro():
     """宏观经济指标（PMI/CPI 等）。"""
     return get_macro_data_akshare()
+
+
+@router.get("/stock/{code}")
+async def get_stock(code: str):
+    """A股/ETF 实时行情。code 格式: sh600519 / sz000001"""
+    from wealthpilot.services.stock_data import fetch_stock_quote
+    result = await fetch_stock_quote(code)
+    if not result:
+        return {"error": f"股票 {code} 行情获取失败"}
+    return result
+
+
+@router.get("/crypto/{symbol}")
+async def get_crypto(symbol: str = "bitcoin"):
+    """加密货币价格（CoinGecko）。symbol: bitcoin/ethereum/solana"""
+    from wealthpilot.services.stock_data import fetch_crypto_price
+    result = await fetch_crypto_price(symbol)
+    if not result:
+        return {"error": f"{symbol} 价格获取失败"}
+    return result

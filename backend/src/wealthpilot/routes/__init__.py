@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from wealthpilot.routes.alerts import router as alerts_router
 from wealthpilot.routes.auth import router as auth_router
 from wealthpilot.routes.portfolio import router as portfolio_router
 from wealthpilot.routes.import_portfolio import router as import_router
@@ -18,3 +19,4 @@ api_router.include_router(market_router)
 api_router.include_router(analysis_router)
 api_router.include_router(chat_router)
 api_router.include_router(report_router)
+api_router.include_router(alerts_router)
