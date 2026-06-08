@@ -7,6 +7,7 @@ export type ScreenKey =
   | 'suggest'
   | 'weekly'
   | 'chat'
+  | 'portfolio'
 
 export interface PageProps {
   go: (screen: ScreenKey) => void

@@ -9,6 +9,7 @@ import { Health } from './pages/Health'
 import { Suggestions } from './pages/Suggestions'
 import { WeeklyReport } from './pages/WeeklyReport'
 import { Chat } from './pages/Chat'
+import { Portfolio } from './pages/Portfolio'
 import type { ScreenKey, PageProps } from './types'
 
 const screens: Record<ScreenKey, React.ComponentType<PageProps>> = {
@@ -20,6 +21,7 @@ const screens: Record<ScreenKey, React.ComponentType<PageProps>> = {
   suggest: Suggestions,
   weekly: WeeklyReport,
   chat: Chat,
+  portfolio: Portfolio,
 }
 
 const features = [
