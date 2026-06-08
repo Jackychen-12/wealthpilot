@@ -9,6 +9,7 @@ class PortfolioHolding(SQLModel, table=True):
     __tablename__ = "portfolio_holdings"
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(default=0, index=True, description="所属用户ID，0=公共/未登录")
     fund_code: str = Field(index=True, description="基金代码")
     fund_name: str = Field(description="基金名称")
     shares: float = Field(description="持有份额")

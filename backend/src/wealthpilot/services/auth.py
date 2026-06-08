@@ -1,0 +1,38 @@
+"""认证服务 — JWT + 密码哈希。"""
+
+from datetime import datetime, timedelta
+
+import jwt
+from passlib.context import CryptContext
+
+from wealthpilot.settings import get_settings
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+SECRET_KEY = "wealthpilot-secret-change-in-production"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_HOURS = 72
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+
+def create_access_token(user_id: int, username: str) -> str:
+    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    payload = {"sub": str(user_id), "username": username, "exp": expire}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None

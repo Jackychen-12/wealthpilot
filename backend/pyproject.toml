@@ -16,6 +16,10 @@ dependencies = [
     "sqlmodel>=0.0.22",
     "akshare>=1.14.0",
     "apscheduler>=3.10.0",
+    "python-multipart>=0.0.9",
+    "openpyxl>=3.1.0",
+    "pyjwt>=2.9.0",
+    "passlib[bcrypt]>=1.7.4",
 ]
 
 [project.optional-dependencies]
