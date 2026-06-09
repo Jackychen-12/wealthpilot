@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WealthPilot — AI 智能投顾 Agent</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+
+:root {
+  --bg-deep: #0a0e1a;
+  --bg-card: #111827;
+  --bg-card-hover: #1a2332;
+  --gold-primary: #c9a84c;
+  --gold-light: #e8d48b;
+  --gold-glow: rgba(201, 168, 76, 0.15);
+  --blue-accent: #3b82f6;
+  --blue-dim: #1e3a5f;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border: rgba(201, 168, 76, 0.12);
+  --radius: 16px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Grain overlay ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Ambient glow ── */
+.ambient {
+  position: fixed;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: 0;
+}
+.ambient-gold { background: var(--gold-primary); top: -200px; right: -100px; }
+.ambient-blue { background: var(--blue-accent); bottom: -200px; left: -100px; }
+
+/* ── Lang toggle ── */
+.lang-toggle {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 100;
+  display: flex;
+  gap: 2px;
+  background: rgba(17, 24, 39, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+.lang-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: transparent;
+  transition: all 0.2s;
+}
+.lang-btn.active {
+  background: var(--gold-primary);
+  color: var(--bg-deep);
+}
+
+/* ── Hero ── */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 120px 24px 80px;
+  z-index: 1;
+}
+
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gold-primary);
+  letter-spacing: 0.5px;
+  margin-bottom: 32px;
+  opacity: 0;
+  animation: fadeUp 0.8s 0.2s forwards;
+}
+.hero-eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold-primary);
+  animation: pulse-dot 2s infinite;
+}
+
+.hero h1 {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(48px, 8vw, 96px);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -2px;
+  margin-bottom: 24px;
+  opacity: 0;
+  animation: fadeUp 0.8s 0.4s forwards;
+}
+.hero h1 .gold {
+  background: linear-gradient(135deg, var(--gold-light), var(--gold-primary), #a67c2e);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-sub {
+  font-size: clamp(16px, 2vw, 20px);
+  color: var(--text-secondary);
+  max-width: 560px;
+  line-height: 1.7;
+  margin-bottom: 48px;
+  opacity: 0;
+  animation: fadeUp 0.8s 0.6s forwards;
+}
+
+.hero-ctas {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  opacity: 0;
+  animation: fadeUp 0.8s 0.8s forwards;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 28px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  transition: all 0.25s;
+}
+.btn-gold {
+  background: linear-gradient(135deg, var(--gold-primary), #a67c2e);
+  color: var(--bg-deep);
+  box-shadow: 0 4px 24px rgba(201, 168, 76, 0.3);
+}
+.btn-gold:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(201, 168, 76, 0.4);
+}
+.btn-outline {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+.btn-outline:hover {
+  border-color: var(--gold-primary);
+  color: var(--gold-primary);
+}
+
+/* ── Ticker ── */
+.ticker-wrap {
+  width: 100%;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 0;
+  position: relative;
+  z-index: 1;
+}
+.ticker {
+  display: flex;
+  gap: 48px;
+  animation: scroll-left 30s linear infinite;
+  width: max-content;
+}
+.ticker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.ticker-item .up { color: #22c55e; }
+.ticker-item .down { color: #ef4444; }
+
+/* ── Section ── */
+section {
+  position: relative;
+  z-index: 1;
+  padding: 100px 24px;
+}
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold-primary);
+  margin-bottom: 16px;
+}
+.section-label::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--gold-primary);
+}
+.section-title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(32px, 5vw, 52px);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -1px;
+  margin-bottom: 16px;
+}
+.section-desc {
+  font-size: 17px;
+  color: var(--text-secondary);
+  max-width: 520px;
+  line-height: 1.7;
+  margin-bottom: 56px;
+}
+
+/* ── Feature grid ── */
+.features {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.feature-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px 28px;
+  transition: all 0.35s;
+  opacity: 0;
+  transform: translateY(30px);
+}
+.feature-card.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.feature-card:hover {
+  background: var(--bg-card-hover);
+  border-color: rgba(201, 168, 76, 0.25);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+.feature-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin-bottom: 20px;
+}
+.fi-portfolio { background: linear-gradient(135deg, #064e3b, #065f46); }
+.fi-chat { background: linear-gradient(135deg, #312e81, #4338ca); }
+.fi-attribution { background: linear-gradient(135deg, #0c4a6e, #0369a1); }
+.fi-drawdown { background: linear-gradient(135deg, #7f1d1d, #991b1b); }
+.fi-health { background: linear-gradient(135deg, #14532d, #166534); }
+.fi-report { background: linear-gradient(135deg, #4a1d96, #6d28d9); }
+
+.feature-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.feature-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+/* ── Stats ── */
+.stats-section { background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.stats-grid {
+  max-width: 1000px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 32px;
+  text-align: center;
+}
+.stat-num {
+  font-family: 'Playfair Display', serif;
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--gold-primary);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.stat-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ── Tech stack ── */
+.tech-grid {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+.tech-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: all 0.25s;
+}
+.tech-badge:hover {
+  border-color: var(--gold-primary);
+  background: var(--bg-card-hover);
+}
+.tech-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+
+/* ── CTA ── */
+.cta-section {
+  text-align: center;
+  padding: 120px 24px;
+}
+.cta-section h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+.cta-section p {
+  color: var(--text-secondary);
+  font-size: 17px;
+  margin-bottom: 40px;
+}
+
+/* ── Footer ── */
+footer {
+  text-align: center;
+  padding: 40px 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Animations ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes scroll-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .feature-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 24px; }
+}
+@media (max-width: 600px) {
+  .feature-grid { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero { padding: 100px 20px 60px; }
+  section { padding: 60px 20px; }
+  .stat-num { font-size: 36px; }
+}
+
+/* ── i18n ── */
+[data-lang="en"] .zh { display: none; }
+[data-lang="zh"] .en { display: none; }
+</style>
+</head>
+<body data-lang="zh">
+
+<div class="ambient ambient-gold"></div>
+<div class="ambient ambient-blue"></div>
+
+<div class="lang-toggle">
+  <button class="lang-btn active" onclick="setLang('zh')">中文</button>
+  <button class="lang-btn" onclick="setLang('en')">EN</button>
+</div>
+
+<!-- ════ HERO ════ -->
+<section class="hero">
+  <div class="hero-eyebrow"><span class="dot"></span> <span class="zh">AI 驱动的投资决策</span><span class="en">AI-Powered Investment Decisions</span></div>
+  <h1>
+    <span class="zh">你的 AI<br><span class="gold">投资顾问</span></span>
+    <span class="en">Your AI<br><span class="gold">Wealth Pilot</span></span>
+  </h1>
+  <p class="hero-sub">
+    <span class="zh">真实行情 · Claude AI 对话 · 持仓分析 · 风险洞察<br>全栈 Agent，不只是一个 Dashboard</span>
+    <span class="en">Real market data · Claude AI chat · Portfolio analysis · Risk insights<br>A full-stack Agent, not just a dashboard</span>
+  </p>
+  <div class="hero-ctas">
+    <a href="https://jackychen-12.github.io/wealthpilot/" class="btn btn-gold" target="_blank">
+      <span class="zh">体验 Demo</span><span class="en">Live Demo</span> →
+    </a>
+    <a href="https://github.com/Jackychen-12/wealthpilot" class="btn btn-outline" target="_blank">
+      GitHub ↗
+    </a>
+  </div>
+</section>
+
+<!-- ════ TICKER ════ -->
+<div class="ticker-wrap">
+  <div class="ticker" id="ticker"></div>
+</div>
+
+<!-- ════ FEATURES ════ -->
+<section class="features">
+  <div class="section-label"><span class="zh">核心功能</span><span class="en">FEATURES</span></div>
+  <h2 class="section-title">
+    <span class="zh">六大模块，覆盖<br>完整投资工作流</span>
+    <span class="en">Six Modules for<br>the Full Investment Workflow</span>
+  </h2>
+  <p class="section-desc">
+    <span class="zh">从录入持仓到 AI 对话追问，从收益归因到风险预警，每一步都有数据支撑。</span>
+    <span class="en">From portfolio entry to AI conversations, from return attribution to risk alerts — every step backed by data.</span>
+  </p>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon fi-portfolio">💼</div>
+      <div class="feature-title"><span class="zh">持仓管理</span><span class="en">Portfolio Management</span></div>
+      <div class="feature-desc">
+        <span class="zh">手动录入、CSV 批量导入、截图 OCR 识别。实时拉取最新净值，自动计算盈亏。</span>
+        <span class="en">Manual entry, CSV bulk import, screenshot OCR. Real-time NAV, auto P&L calculation.</span>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-chat">🤖</div>
+      <div class="feature-title"><span class="zh">AI 对话</span><span class="en">AI Chat</span></div>
+      <div class="feature-desc">
+        <span class="zh">Claude Agent + 5 个实时工具。基金查询、净值走势、收益计算、横向对比、新闻搜索。</span>
+        <span class="en">Claude Agent + 5 real-time tools. Fund lookup, NAV trends, return calc, comparison, news search.</span>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-attribution">📈</div>
+      <div class="feature-title"><span class="zh">收益归因</span><span class="en">Return Attribution</span></div>
+      <div class="feature-desc">
+        <span class="zh">三维度拆解：按基金、按行业、按资产类型。配置效应 vs 选择效应分离。</span>
+        <span class="en">Three-dimensional breakdown: by fund, industry, asset type. Allocation vs selection effect.</span>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-drawdown">📉</div>
+      <div class="feature-title"><span class="zh">回撤分析</span><span class="en">Drawdown Analysis</span></div>
+      <div class="feature-desc">
+        <span class="zh">三层归因：宏观→持仓→历史参照。最大回撤 + 恢复天数 + 高风险预警。</span>
+        <span class="en">Three-layer attribution: macro → holdings → historical. Max drawdown + recovery days + risk alerts.</span>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-health">🩺</div>
+      <div class="feature-title"><span class="zh">健康度雷达</span><span class="en">Health Radar</span></div>
+      <div class="feature-desc">
+        <span class="zh">五维度体检：收益表现、波动控制、持仓分散度、风格匹配度、风险收益比。</span>
+        <span class="en">5D checkup: return performance, volatility control, diversification, style match, risk-reward ratio.</span>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-report">📋</div>
+      <div class="feature-title"><span class="zh">AI 周报</span><span class="en">AI Weekly Report</span></div>
+      <div class="feature-desc">
+        <span class="zh">Claude 自动生成结构化周报：摘要、关键归因、下周关注、AI 洞察。</span>
+        <span class="en">Claude auto-generates structured weekly: summary, key points, focus areas, AI insights.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ STATS ════ -->
+<section class="stats-section">
+  <div class="stats-grid">
+    <div>
+      <div class="stat-num" data-count="24">0</div>
+      <div class="stat-label"><span class="zh">REST API 端点</span><span class="en">REST API Endpoints</span></div>
+    </div>
+    <div>
+      <div class="stat-num" data-count="5">0</div>
+      <div class="stat-label"><span class="zh">AI Agent 工具</span><span class="en">AI Agent Tools</span></div>
+    </div>
+    <div>
+      <div class="stat-num" data-count="9">0</div>
+      <div class="stat-label"><span class="zh">页面 / 视图</span><span class="en">Pages / Views</span></div>
+    </div>
+    <div>
+      <div class="stat-num" data-count="4">0</div>
+      <div class="stat-label"><span class="zh">免费数据源</span><span class="en">Free Data Sources</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ TECH ════ -->
+<section style="text-align:center">
+  <div class="section-label" style="justify-content:center"><span class="zh">技术栈</span><span class="en">TECH STACK</span></div>
+  <h2 class="section-title" style="text-align:center">
+    <span class="zh">全栈，真实数据，零付费墙</span>
+    <span class="en">Full-Stack, Real Data, Zero Paywall</span>
+  </h2>
+  <p class="section-desc" style="margin:0 auto 48px;text-align:center">
+    <span class="zh">市场数据完全免费，AI 功能可选。不配 Key 也能用大部分功能。</span>
+    <span class="en">Market data is completely free. AI features are optional. Most features work without any API key.</span>
+  </p>
+  <div class="tech-grid">
+    <div class="tech-badge"><span class="tech-dot" style="background:#61dafb"></span> React 18</div>
+    <div class="tech-badge"><span class="tech-dot" style="background:#3178c6"></span> TypeScript</div>
+    <div class="tech-badge"><span class="tech-dot" style="background:#009688"></span> FastAPI</div>
+    <div class="tech-badge"><span class="tech-dot" style="background:#7c3aed"></span> Claude AI</div>
+    <div class="tech-badge"><span class="tech-dot" style="background:#ff6b35"></span> AKShare</div>
+    <div class="tech-badge"><span class="tech-dot" style="background:#f59e0b"></span> SQLite</div>
+    <div class="tech-badge"><span class="tech-dot" style="background:#2496ed"></span> Docker</div>
+    <div class="tech-badge"><span class="tech-dot" style="background:#ef4444"></span> SSE Streaming</div>
+  </div>
+</section>
+
+<!-- ════ CTA ════ -->
+<section class="cta-section">
+  <h2>
+    <span class="zh">三条命令，<span style="color:var(--gold-primary)">跑起来</span></span>
+    <span class="en">Three Commands to <span style="color:var(--gold-primary)">Get Started</span></span>
+  </h2>
+  <p>
+    <span class="zh">克隆 → 启动后端 → 启动前端。就这样。</span>
+    <span class="en">Clone → start backend → start frontend. That's it.</span>
+  </p>
+  <div style="max-width:540px;margin:0 auto 40px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px 24px;text-align:left;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-secondary);line-height:2">
+    <span style="color:var(--text-muted)">$</span> <span style="color:var(--gold-light)">git clone</span> github.com/Jackychen-12/wealthpilot<br>
+    <span style="color:var(--text-muted)">$</span> <span style="color:var(--gold-light)">cd</span> backend && uv sync && uv run uvicorn ...<br>
+    <span style="color:var(--text-muted)">$</span> <span style="color:var(--gold-light)">npm</span> install && npm run dev
+  </div>
+  <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
+    <a href="https://jackychen-12.github.io/wealthpilot/" class="btn btn-gold" target="_blank">
+      <span class="zh">打开 Demo</span><span class="en">Open Demo</span> →
+    </a>
+    <a href="https://github.com/Jackychen-12/wealthpilot" class="btn btn-outline" target="_blank">
+      <span class="zh">查看源码</span><span class="en">View Source</span> ↗
+    </a>
+  </div>
+</section>
+
+<footer>
+  WealthPilot &copy; 2026 · MIT License · Built with Claude AI
+</footer>
+
+<script>
+// ── Language toggle ──
+function setLang(lang) {
+  document.body.dataset.lang = lang;
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.textContent.trim() === (lang === 'zh' ? '中文' : 'EN')));
+}
+
+// ── Ticker ──
+const stocks = [
+  ['上证指数', '3,247.58', '+0.82%', true],
+  ['深证成指', '10,486.32', '+1.14%', true],
+  ['创业板指', '2,089.15', '+1.53%', true],
+  ['沪深300', '3,821.44', '+0.95%', true],
+  ['中证500', '5,673.28', '-0.23%', false],
+  ['科创50', '987.62', '+2.17%', true],
+  ['恒生指数', '18,234.56', '-0.41%', false],
+  ['纳斯达克', '17,892.44', '+0.67%', true],
+];
+const tickerEl = document.getElementById('ticker');
+const tickerHTML = stocks.map(([n,v,c,up]) =>
+  `<div class="ticker-item">${n} <strong style="color:var(--text-primary)">${v}</strong> <span class="${up?'up':'down'}">${c}</span></div>`
+).join('');
+tickerEl.innerHTML = tickerHTML + tickerHTML;
+
+// ── Scroll reveal ──
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.15 });
+document.querySelectorAll('.feature-card').forEach((el, i) => {
+  el.style.transitionDelay = `${i * 0.08}s`;
+  obs.observe(el);
+});
+
+// ── Counter animation ──
+const counterObs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (!e.isIntersecting) return;
+    const el = e.target;
+    const target = parseInt(el.dataset.count);
+    let current = 0;
+    const step = Math.ceil(target / 30);
+    const timer = setInterval(() => {
+      current += step;
+      if (current >= target) { current = target; clearInterval(timer); }
+      el.textContent = current;
+    }, 40);
+    counterObs.unobserve(el);
+  });
+}, { threshold: 0.5 });
+document.querySelectorAll('[data-count]').forEach(el => counterObs.observe(el));
+</script>
+</body>
+</html>

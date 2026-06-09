@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://jackychen-12.github.io/wealthpilot/">Live Demo</a> &nbsp;|&nbsp;
+  <a href="https://jackychen-12.github.io/wealthpilot/showcase.html">Showcase</a> &nbsp;|&nbsp;
   <a href="#architecture--架构">Architecture</a> &nbsp;|&nbsp;
   <a href="#api-reference">API Reference</a>
 </p>
