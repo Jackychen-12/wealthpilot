@@ -6,16 +6,13 @@
 
 <p align="center">
   <strong>AI-Powered Investment Advisory Agent</strong><br/>
-  <sub>智能投顾 Agent — 基于 Claude AI 的持仓分析、风险洞察与投资决策辅助</sub>
+  <strong>智能投顾 Agent — 基于 Claude AI 的持仓分析、风险洞察与投资决策辅助</strong>
 </p>
 
 <p align="center">
   <a href="https://jackychen-12.github.io/wealthpilot/">Live Demo</a> &nbsp;|&nbsp;
-  <a href="#features">Features</a> &nbsp;|&nbsp;
-  <a href="#architecture">Architecture</a> &nbsp;|&nbsp;
-  <a href="#getting-started">Getting Started</a> &nbsp;|&nbsp;
-  <a href="#api-reference">API Reference</a> &nbsp;|&nbsp;
-  <a href="#deployment">Deployment</a>
+  <a href="#architecture--架构">Architecture</a> &nbsp;|&nbsp;
+  <a href="#api-reference">API Reference</a>
 </p>
 
 <p align="center">
@@ -30,6 +27,9 @@
 
 ---
 
+<details open>
+<summary><b>English</b></summary>
+
 ## What is WealthPilot?
 
 WealthPilot is a **full-stack AI investment advisory agent** that combines real-time market data, portfolio analysis, and Claude AI-powered conversational insights. Users can manage their fund portfolio, get automated risk analysis, and have intelligent multi-turn conversations about their investments.
@@ -43,8 +43,6 @@ WealthPilot is a **full-stack AI investment advisory agent** that combines real-
 - **Multiple Import Methods** — Manual input, CSV/Excel bulk import, screenshot OCR (via Claude Vision)
 - **One-click Deploy** — Docker Compose for self-hosting, Railway-ready
 
----
-
 ## Features
 
 | Module | Description | Data Source |
@@ -55,33 +53,183 @@ WealthPilot is a **full-stack AI investment advisory agent** that combines real-
 | **AI Conversational Q&A** | Multi-turn dialogue with SSE streaming, Claude tool_use for real-time data retrieval | Claude API + real-time market data |
 | **Automated Suggestions** | Rule-engine + data-driven: concentration risk, loss alerts, correlation warnings | Analysis engine output |
 | **Weekly Report** | LLM-generated structured review (summary, key points, focus, AI insight) | Claude API + analysis data |
-| **Market Tracking** | Real-time index quotes (上证/深证/创业板), financial news feed | 东方财富 + 新浪财经 |
+| **Market Tracking** | Real-time index quotes, financial news feed | 东方财富 + 新浪财经 |
 | **User Auth** | JWT-based registration/login, multi-tenant data isolation | SQLite + bcrypt |
 
 ### Screens
 
 ```
 Home ─────→ Portfolio (manage holdings)
-  │              │
   │              ├── Import CSV/Excel
   │              └── Import via Screenshot OCR
   │
   ├──→ Overview ──→ Attribution (by fund / industry / asset)
-  │         │
   │         ├──→ Drawdown (max drawdown + recovery analysis)
-  │         │
   │         ├──→ Health (5-dimension radar + scores)
-  │         │
   │         ├──→ Suggestions (AI recommendations)
-  │         │
   │         └──→ Weekly Report (LLM-generated)
   │
   └──→ Chat (Claude AI agent with tool_use + SSE streaming)
 ```
 
+## Getting Started
+
+### Quick Start (3 commands)
+
+```bash
+git clone https://github.com/Jackychen-12/wealthpilot.git
+cd wealthpilot
+
+# Backend
+cd backend
+cp .env.example .env
+uv sync && uv run uvicorn wealthpilot.main:app --reload --port 8000
+
+# Frontend (new terminal)
+cd .. && npm install && npm run dev
+# Visit http://localhost:5173/wealthpilot/
+```
+
+### With Docker
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up --build
+# Frontend: http://localhost:5173  |  Backend: http://localhost:8000/docs
+```
+
+### What works without API keys?
+
+| Feature | Without key | With ANTHROPIC_API_KEY |
+|---------|:-----------:|:---------------------:|
+| Portfolio CRUD | ✅ | ✅ |
+| Market data (indices, news, NAV) | ✅ | ✅ |
+| Analysis (Sharpe, drawdown, health) | ✅ | ✅ |
+| AI Chat | Mock responses | Real Claude Agent with tools |
+| OCR Import | ❌ | ✅ |
+| Weekly Report (LLM) | Fallback template | Full AI-generated |
+
+## Deployment
+
+### Docker Compose (self-host)
+
+```bash
+git clone https://github.com/Jackychen-12/wealthpilot.git && cd wealthpilot
+cp backend/.env.example backend/.env
+docker compose up --build -d
+```
+
+### Railway (backend) + GitHub Pages (frontend)
+
+1. Fork → Railway → connect repo, root = `backend`, add `ANTHROPIC_API_KEY` + `JWT_SECRET`
+2. Frontend: `VITE_API_URL=https://your-backend.railway.app npm run build`
+
+</details>
+
 ---
 
-## Architecture
+<details>
+<summary><b>中文</b></summary>
+
+## 这是什么？
+
+WealthPilot 是一个**全栈 AI 智能投顾 Agent**，结合实时行情数据、持仓分析和 Claude AI 对话式洞察。用户可以管理基金持仓、获取自动化风险分析，并与 AI 进行多轮投资对话。
+
+### 核心亮点
+
+- **真实 AI Agent** — Claude 配备 5 个 tool_use 工具（基金查询、净值历史、收益计算、基金对比、新闻搜索）
+- **真实行情数据** — AKShare + 东方财富 + 天天基金 + 新浪财经，市场数据无需付费 API Key
+- **完整后端** — FastAPI 24 个 REST 端点，SQLite 存储，JWT 认证
+- **多租户** — 注册/登录，每个用户数据隔离
+- **多种导入方式** — 手动录入、CSV/Excel 批量导入、截图 OCR（Claude Vision）
+- **一键部署** — Docker Compose 自托管，Railway 就绪
+
+## 功能一览
+
+| 模块 | 说明 | 数据来源 |
+|------|------|----------|
+| **持仓管理** | 添加/编辑/删除基金持仓；CSV/Excel 批量导入；截图 OCR 识别 | 用户输入 + Claude Vision |
+| **智能持仓分析** | 周收益、超额收益、Sharpe 比率、收益归因（按基金/行业/资产类型） | AKShare + 天天基金实时净值 |
+| **风险洞察引擎** | 最大回撤 + 恢复天数、组合健康度雷达（5 维）、相关性矩阵 | 基于 60 日净值历史计算 |
+| **AI 对话问答** | 多轮对话 + SSE 流式输出，Claude tool_use 实时检索数据 | Claude API + 实时行情 |
+| **自动化建议** | 规则引擎 + 数据驱动：集中度风险、亏损预警、相关性警告 | 分析引擎输出 |
+| **周报** | LLM 生成结构化复盘（摘要、要点、关注、AI 洞察） | Claude API + 分析数据 |
+| **市场追踪** | 实时指数行情（上证/深证/创业板）、财经新闻 | 东方财富 + 新浪财经 |
+| **用户认证** | JWT 注册/登录，多租户数据隔离 | SQLite + bcrypt |
+
+### 页面流
+
+```
+首页 ─────→ 持仓管理
+  │              ├── CSV/Excel 导入
+  │              └── 截图 OCR 导入
+  │
+  ├──→ 总览 ──→ 收益归因（按基金/行业/资产）
+  │        ├──→ 回撤分析（最大回撤 + 恢复天数）
+  │        ├──→ 健康度（5 维雷达 + 评分）
+  │        ├──→ 建议（AI 个性化推荐）
+  │        └──→ 周报（LLM 生成）
+  │
+  └──→ 对话（Claude AI Agent + tool_use + SSE 流式）
+```
+
+## 快速开始
+
+### 3 条命令启动
+
+```bash
+git clone https://github.com/Jackychen-12/wealthpilot.git
+cd wealthpilot
+
+# 后端
+cd backend
+cp .env.example .env
+uv sync && uv run uvicorn wealthpilot.main:app --reload --port 8000
+
+# 前端（新终端）
+cd .. && npm install && npm run dev
+# 访问 http://localhost:5173/wealthpilot/
+```
+
+### Docker 启动
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up --build
+# 前端: http://localhost:5173  |  后端: http://localhost:8000/docs
+```
+
+### 没有 API Key 也能用什么？
+
+| 功能 | 无 Key | 有 ANTHROPIC_API_KEY |
+|------|:------:|:--------------------:|
+| 持仓增删改 | ✅ | ✅ |
+| 行情数据（指数、新闻、净值） | ✅ | ✅ |
+| 分析（Sharpe、回撤、健康度） | ✅ | ✅ |
+| AI 对话 | Mock 回复 | 真实 Claude Agent + 工具 |
+| OCR 导入 | ❌ | ✅ |
+| 周报（LLM） | 模板兜底 | AI 生成完整报告 |
+
+## 部署
+
+### Docker Compose（自托管）
+
+```bash
+git clone https://github.com/Jackychen-12/wealthpilot.git && cd wealthpilot
+cp backend/.env.example backend/.env
+docker compose up --build -d
+```
+
+### Railway（后端）+ GitHub Pages（前端）
+
+1. Fork → Railway → 连接仓库，根目录 = `backend`，添加 `ANTHROPIC_API_KEY` + `JWT_SECRET`
+2. 前端：`VITE_API_URL=https://your-backend.railway.app npm run build`
+
+</details>
+
+---
+
+## Architecture / 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -117,76 +265,20 @@ Home ─────→ Portfolio (manage holdings)
      Report)          Macro data)
 ```
 
-### Tech Stack
-
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Vite 6, React 18, TypeScript 5.6 |
 | Backend | Python 3.11+, FastAPI, SQLModel, Uvicorn |
-| AI | Claude API (Anthropic SDK) — chat, tool_use, vision, report generation |
+| AI | Claude API (Anthropic SDK) — chat, tool_use, vision, report |
 | Data | AKShare (free), 东方财富 API, 天天基金 API, 新浪财经 API |
-| Auth | JWT (PyJWT) + bcrypt password hashing |
-| Storage | SQLite (dev) — easy to swap for PostgreSQL |
-| Deploy | Docker Compose, Railway, GitHub Pages (frontend) |
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+ (frontend)
-- Python 3.11+ (backend)
-- [uv](https://docs.astral.sh/uv/) (Python package manager, optional but recommended)
-
-### Quick Start (3 commands)
-
-```bash
-# 1. Clone
-git clone https://github.com/Jackychen-12/wealthpilot.git
-cd wealthpilot
-
-# 2. Start backend
-cd backend
-cp .env.example .env    # Edit .env to add ANTHROPIC_API_KEY (optional for basic features)
-uv sync                 # or: pip install -e .
-uv run uvicorn wealthpilot.main:app --reload --port 8000
-
-# 3. Start frontend (new terminal)
-cd ..  # back to root
-npm install
-npm run dev
-# Visit http://localhost:5173/wealthpilot/
-```
-
-### With Docker (easiest)
-
-```bash
-cd wealthpilot
-cp backend/.env.example backend/.env
-# Edit backend/.env — add ANTHROPIC_API_KEY for AI features
-
-docker compose up --build
-# Frontend: http://localhost:5173
-# Backend:  http://localhost:8000/docs
-```
-
-### What works without API keys?
-
-| Feature | Without key | With ANTHROPIC_API_KEY |
-|---------|-------------|----------------------|
-| Portfolio CRUD | ✅ | ✅ |
-| Market data (indices, news, NAV) | ✅ | ✅ |
-| Analysis (Sharpe, drawdown, health) | ✅ | ✅ |
-| AI Chat | Mock responses | Real Claude Agent with tools |
-| OCR Import | ❌ | ✅ |
-| Weekly Report (LLM) | Fallback template | Full AI-generated |
-
----
+| Auth | JWT (PyJWT) + bcrypt |
+| Storage | SQLite (dev) — swappable for PostgreSQL |
+| Deploy | Docker Compose, Railway, GitHub Pages |
 
 ## API Reference
 
-Full interactive docs at `http://localhost:8000/docs` after starting the backend.
+<details>
+<summary>Full API table (click to expand)</summary>
 
 ### Auth
 
@@ -229,83 +321,32 @@ Full interactive docs at `http://localhost:8000/docs` after starting the backend
 | GET | `/api/analysis/correlation` | Cross-holding correlation matrix |
 | GET | `/api/analysis/suggestions` | Data-driven recommendations |
 
-### AI Chat
+### AI Chat & Reports
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/chat` | AI conversation (SSE streaming) |
-
-### Reports
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
 | GET | `/api/report/weekly` | Get/generate weekly report |
 | POST | `/api/report/generate` | Force regenerate report |
 
----
-
-## Deployment
-
-### Self-host with Docker Compose
-
-```bash
-git clone https://github.com/Jackychen-12/wealthpilot.git
-cd wealthpilot
-cp backend/.env.example backend/.env
-# Edit .env with your API keys
-docker compose up --build -d
-```
-
-### Deploy to Railway (backend)
-
-1. Fork this repo
-2. Create new project on [Railway](https://railway.app)
-3. Connect GitHub → select `wealthpilot`, root = `backend`
-4. Add env vars: `ANTHROPIC_API_KEY`, `JWT_SECRET`
-5. Deploy — get your backend URL
-
-### Deploy frontend to Vercel / GitHub Pages
-
-Frontend is a static Vite build. Set `VITE_API_URL` to your backend URL:
-
-```bash
-VITE_API_URL=https://your-backend.railway.app npm run build
-```
-
----
+</details>
 
 ## Project Structure
 
 ```
 wealthpilot/
-├── README.md
-├── docker-compose.yml          # One-click start
-├── nginx.conf                  # Frontend proxy config
-├── Dockerfile.frontend         # Frontend container
-├── package.json                # Frontend deps
-├── vite.config.ts              # Vite + API proxy
-├── src/                        # Frontend source
+├── src/                        # Frontend
 │   ├── api/                    # API layer (client, portfolio, market, analysis, chat)
 │   ├── pages/                  # 9 screen components
 │   ├── components/             # 12 shared UI components
-│   ├── hooks/                  # Custom hooks (useTypingEffect)
-│   ├── data/mock.ts            # Mock fallback data
-│   ├── types.ts                # Shared types
-│   └── utils/theme.ts          # Design tokens
+│   └── data/mock.ts            # Mock fallback data
 └── backend/                    # Python backend
-    ├── pyproject.toml
-    ├── Dockerfile
-    ├── .env.example
     └── src/wealthpilot/
         ├── main.py             # FastAPI entry
-        ├── settings.py         # Config from env
-        ├── models/             # SQLModel tables + Pydantic schemas
         ├── routes/             # 7 route modules, 24 endpoints
         ├── services/           # Market data, analysis engine, AI agent, auth
         └── storage/            # SQLite database
 ```
-
----
 
 ## Roadmap
 
@@ -319,24 +360,8 @@ wealthpilot/
 - [x] Weekly report (LLM-generated)
 - [ ] Push notifications (drawdown alerts)
 - [ ] Backtesting and scenario analysis
-- [ ] Risk tolerance profiling questionnaire
 - [ ] Multi-asset class (stocks, bonds, ETFs, crypto)
-- [ ] WeChat Mini Program version
-- [ ] Dark mode
-- [ ] i18n (English/Chinese toggle)
 - [ ] Export reports as PDF
-
----
-
-## Contributing
-
-1. Fork the repo
-2. Create feature branch: `git checkout -b feat/my-feature`
-3. Commit: `git commit -m "feat: add my feature"`
-4. Push: `git push origin feat/my-feature`
-5. Open a Pull Request
-
----
 
 ## License
 
