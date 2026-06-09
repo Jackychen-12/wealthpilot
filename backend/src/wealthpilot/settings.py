@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
-    anthropic_model: str = Field(default="claude-sonnet-4-5-20250929")
+    anthropic_model: str = Field(default="claude-sonnet-4-6")
     alpha_vantage_key: str = Field(default="")
 
     db_path: Path = Field(default=Path("./data/wealthpilot.db"))
