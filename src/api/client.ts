@@ -58,6 +58,9 @@ export interface SSEEvent {
   follow_ups?: string[]
   tool?: string
   input?: unknown
+  agent?: string
+  label?: string
+  reason?: string
 }
 
 export async function* fetchSSE(path: string, body: unknown): AsyncGenerator<SSEEvent> {

@@ -102,3 +102,4 @@ class SuggestionItem(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., description="用户消息")
     history: list[dict[str, str]] = Field(default_factory=list, description="对话历史")
+    conversation_id: str | None = Field(default=None, description="会话 ID")

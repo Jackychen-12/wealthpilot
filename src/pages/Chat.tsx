@@ -47,8 +47,10 @@ export function Chat({ go }: PageProps) {
   ])
   const [streaming, setStreaming] = useState(false)
   const [streamingText, setStreamingText] = useState('')
+  const [activeAgent, setActiveAgent] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const [useRealApi, setUseRealApi] = useState(true)
+  const [conversationId] = useState(() => crypto.randomUUID())
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -69,14 +71,17 @@ export function Chat({ go }: PageProps) {
     setFollowUps([])
     setStreaming(true)
     setStreamingText('')
+    setActiveAgent('')
 
     if (useRealApi) {
       try {
         const history: ChatMsg[] = messages.map(m => ({ role: m.role, content: m.content }))
         let fullContent = ''
 
-        for await (const event of streamChat(text, history)) {
-          if (event.type === 'delta') {
+        for await (const event of streamChat(text, history, conversationId)) {
+          if (event.type === 'agent_route') {
+            setActiveAgent(event.label || event.agent || '')
+          } else if (event.type === 'delta') {
             fullContent += event.content
             setStreamingText(fullContent)
           } else if (event.type === 'done') {
@@ -87,8 +92,7 @@ export function Chat({ go }: PageProps) {
               setFollowUps(event.follow_ups)
             }
           } else if (event.type === 'tool_call') {
-            // 显示工具调用状态
-            setStreamingText(prev => prev + `\n🔧 正在查询 ${event.content}...\n`)
+            setStreamingText(prev => prev + `\n🔧 正在查询 ${event.tool}...\n`)
           } else if (event.type === 'error') {
             // fallback 到 mock
             setUseRealApi(false)
@@ -120,7 +124,7 @@ export function Chat({ go }: PageProps) {
     }
 
     setStreaming(false)
-  }, [streaming, messages, useRealApi])
+  }, [streaming, messages, useRealApi, conversationId])
 
   return (
     <div className="screen">
@@ -128,7 +132,7 @@ export function Chat({ go }: PageProps) {
       <NavBar title="Pilot AI · 智能对话" onBack={() => go('overview')} />
       <div className="content" ref={scrollRef}>
         <div style={{ textAlign: 'center', fontSize: 12, color: colors.textMuted, margin: '8px 0 18px' }}>
-          {useRealApi ? '🟢 已连接 AI Agent（实时数据）' : '🟡 演示模式（预设回答）'}
+          {useRealApi ? '🟢 已连接 AI Agent（多智能体模式）' : '🟡 演示模式（预设回答）'}
         </div>
 
         {messages.map((msg) => {
@@ -149,6 +153,7 @@ export function Chat({ go }: PageProps) {
           <div className="chat-ai">
             <div className="chat-avatar">AI</div>
             <div className="chat-bubble-ai" style={{ whiteSpace: 'pre-wrap' }}>
+              {activeAgent && <div style={{ fontSize: 12, color: colors.accent, marginBottom: 4 }}>{activeAgent}</div>}
               {streamingText}
               <span className="typing-cursor" />
             </div>
@@ -159,6 +164,7 @@ export function Chat({ go }: PageProps) {
           <div className="chat-ai">
             <div className="chat-avatar">AI</div>
             <div className="chat-bubble-ai">
+              {activeAgent && <div style={{ fontSize: 12, color: colors.accent, marginBottom: 4 }}>{activeAgent}</div>}
               <span className="typing-dots"><span /><span /><span /></span>
             </div>
           </div>
