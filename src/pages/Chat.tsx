@@ -36,14 +36,14 @@ export function Chat({ go }: PageProps) {
       id: i,
       role: msg.role,
       content: msg.role === 'ai'
-        ? '你好！我是 WealthPilot AI，可以基于你的持仓数据进行实时分析。试着问我任何关于你持仓的问题吧。'
+        ? '你好！我是 WealthPilot 多智能体 AI。我由 Router 智能分流到 3 个专业 Agent（市场/持仓/风险），配备 12 个实时工具，为你提供深度投资分析。试着问我任何问题吧！'
         : msg.content,
     }))
   )
   const [followUps, setFollowUps] = useState<string[]>([
-    '分析我的持仓结构',
-    '本周市场有什么风险？',
-    '帮我看看医疗基金表现',
+    '📊 查看最新市场动态',
+    '💼 分析我的持仓收益',
+    '🛡️ 评估持仓风险',
   ])
   const [streaming, setStreaming] = useState(false)
   const [streamingText, setStreamingText] = useState('')
@@ -129,7 +129,7 @@ export function Chat({ go }: PageProps) {
   return (
     <div className="screen">
       <Notch />
-      <NavBar title="Pilot AI · 智能对话" onBack={() => go('overview')} />
+      <NavBar title="Pilot AI · 多智能体对话" onBack={() => go('overview')} />
       <div className="content" ref={scrollRef}>
         <div style={{ textAlign: 'center', fontSize: 12, color: colors.textMuted, margin: '8px 0 18px' }}>
           {useRealApi ? '🟢 已连接 AI Agent（多智能体模式）' : '🟡 演示模式（预设回答）'}
@@ -158,7 +158,20 @@ export function Chat({ go }: PageProps) {
           <div className="chat-ai">
             <div className="chat-avatar">AI</div>
             <div className="chat-bubble-ai" style={{ whiteSpace: 'pre-wrap' }}>
-              {activeAgent && <div style={{ fontSize: 12, color: colors.accent, marginBottom: 4 }}>{activeAgent}</div>}
+              {activeAgent && (
+                <div style={{
+                  display: 'inline-block',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#fff',
+                  background: 'linear-gradient(135deg, #7C3AED, #6366F1)',
+                  borderRadius: 12,
+                  padding: '2px 10px',
+                  marginBottom: 6,
+                }}>
+                  {activeAgent}
+                </div>
+              )}
               {streamingText}
               <span className="typing-cursor" />
             </div>
@@ -169,7 +182,20 @@ export function Chat({ go }: PageProps) {
           <div className="chat-ai">
             <div className="chat-avatar">AI</div>
             <div className="chat-bubble-ai">
-              {activeAgent && <div style={{ fontSize: 12, color: colors.accent, marginBottom: 4 }}>{activeAgent}</div>}
+              {activeAgent && (
+                <div style={{
+                  display: 'inline-block',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#fff',
+                  background: 'linear-gradient(135deg, #7C3AED, #6366F1)',
+                  borderRadius: 12,
+                  padding: '2px 10px',
+                  marginBottom: 6,
+                }}>
+                  {activeAgent}
+                </div>
+              )}
               <span className="typing-dots"><span /><span /><span /></span>
             </div>
           </div>

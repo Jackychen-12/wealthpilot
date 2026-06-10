@@ -141,7 +141,7 @@ export function Home({ go }: PageProps) {
         </div>
       </div>
       <div className="bottom-bar">
-        <div className="bottom-input" onClick={() => go('chat')}>问 Pilot AI 任何投资问题</div>
+        <div className="bottom-input" onClick={() => go('chat')}>问 Pilot AI 多智能体任何投资问题</div>
         <div className="bottom-pills">
           <div className="bottom-pill"><span className="dot" style={{ background: Bb }} /> 深度思考</div>
           <div className="bottom-pill"><span className="dot" style={{ background: '#F0EDFF' }} /> 金融技能</div>

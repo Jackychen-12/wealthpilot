@@ -179,9 +179,9 @@ export const chatMessages = [
 ]
 
 export const chatQuickReplies = [
-  '这只基金同类排名如何？',
-  '和其他医疗基金对比',
-  '半导体基金还能追吗？',
+  '📊 最新市场动态',
+  '💼 分析持仓收益归因',
+  '🛡️ 评估回撤风险',
 ]
 
 export const aiResponses: Record<string, { text: string; followUps: string[] }> = {
@@ -220,6 +220,6 @@ export const aiResponses: Record<string, { text: string; followUps: string[] }> 
 }
 
 export const defaultResponse: { text: string; followUps: string[] } = {
-  text: '感谢您的提问。基于当前持仓数据分析，我需要更多信息来给出精准回答。您可以尝试以下方式获取帮助：\n\n1. 针对具体基金提问（如"XX基金近期表现如何"）\n2. 询问持仓调整建议（如"我的医疗仓位是否过高"）\n3. 了解市场趋势（如"半导体板块还能持有吗"）\n\n我会基于您的持仓结构和市场数据，提供个性化的分析视角。',
-  followUps: ['分析我的持仓结构', '本周市场有什么风险？', '推荐关注哪些板块？'],
+  text: '感谢您的提问。WealthPilot 多智能体系统已为您分析。目前我配备了 12 个实时工具，覆盖市场查询、持仓分析和风险评估三大领域。您可以尝试：\n\n1. 查看市场动态（如"最新财经新闻"）\n2. 分析持仓表现（如"我的收益归因"）\n3. 评估风险状况（如"分析回撤风险"）\n\n我会智能路由到最合适的专业 Agent 为您服务。',
+  followUps: ['📊 查看市场动态', '💼 分析持仓结构', '🛡️ 评估持仓风险'],
 }
