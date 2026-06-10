@@ -3,7 +3,6 @@
 import json
 from collections.abc import Generator
 
-from anthropic import Anthropic
 from sqlmodel import Session, select
 
 from wealthpilot.models.chat import ChatMessage
@@ -12,6 +11,7 @@ from wealthpilot.services.agents.market_agent import MarketAgent
 from wealthpilot.services.agents.portfolio_agent import PortfolioAgent
 from wealthpilot.services.agents.risk_agent import RiskAgent
 from wealthpilot.services.agents.router_agent import RouterAgent
+from wealthpilot.services.ai_client import create_ai_client
 from wealthpilot.settings import get_settings
 
 
@@ -33,12 +33,13 @@ def chat_stream(
 ) -> Generator[str, None, None]:
     """多 Agent 协调入口。Router 分流 → 专业 Agent 执行 → SSE 输出。"""
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        yield _sse({"type": "error", "content": "未配置 ANTHROPIC_API_KEY，请在 backend/.env 中设置"})
+    try:
+        client = create_ai_client(settings)
+    except ValueError as e:
+        yield _sse({"type": "error", "content": str(e)})
         return
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    model = settings.anthropic_model
+    model = settings.active_model
 
     # 0. 如果前端没传 history 但有 conversation_id，从 DB 加载
     if not history and conversation_id and db_session:

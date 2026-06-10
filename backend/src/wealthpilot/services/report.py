@@ -1,11 +1,10 @@
-"""周报生成服务 — 用 Claude 生成结构化周复盘报告。"""
+"""周报生成服务 — 用 LLM 生成结构化周复盘报告。"""
 
 import json
 from datetime import date, timedelta
 
-from anthropic import Anthropic
-
 from wealthpilot.models.portfolio import PortfolioHolding
+from wealthpilot.services.ai_client import create_ai_client
 from wealthpilot.services.analysis import calculate_attribution_by_fund, calculate_overview
 from wealthpilot.settings import get_settings
 
@@ -25,10 +24,10 @@ def generate_weekly_report(
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=4)
 
-    if not settings.anthropic_api_key:
+    try:
+        client = create_ai_client(settings)
+    except ValueError:
         return _fallback_report(overview, attribution, week_start, week_end)
-
-    client = Anthropic(api_key=settings.anthropic_api_key)
 
     portfolio_summary = ""
     for h in holdings:
@@ -64,12 +63,13 @@ def generate_weekly_report(
 """
 
     try:
-        response = client.messages.create(
-            model=settings.anthropic_model,
+        result = client.create(
+            model=settings.active_model,
             max_tokens=1000,
+            system="",
             messages=[{"role": "user", "content": prompt}],
         )
-        text = response.content[0].text.strip()
+        text = result.text.strip()
         # 提取 JSON
         if text.startswith("{"):
             report_data = json.loads(text)

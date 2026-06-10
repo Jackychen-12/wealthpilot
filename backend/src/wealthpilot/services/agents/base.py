@@ -1,25 +1,29 @@
 """BaseAgent — 共享的 tool-use 循环逻辑（真实流式 + 工具调用混合）。"""
 
+from __future__ import annotations
+
 import asyncio
 import json
 from collections.abc import Generator
-
-from anthropic import Anthropic
+from typing import TYPE_CHECKING
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.agents.tools import execute_tool
 from wealthpilot.settings import get_settings
 
+if TYPE_CHECKING:
+    from wealthpilot.services.ai_client import AIClient
+
 
 class BaseAgent:
-    """所有专业 Agent 的基类。封装 Claude API 流式 tool-use 循环。"""
+    """所有专业 Agent 的基类。封装流式 tool-use 循环。"""
 
     def __init__(
         self,
         name: str,
         tools: list[dict],
         system_prompt: str,
-        client: Anthropic,
+        client: AIClient,
         model: str,
         holdings: list[PortfolioHolding] | None = None,
         nav_data: dict[str, float] | None = None,
@@ -46,7 +50,7 @@ class BaseAgent:
             while True:
                 round_text = ""
 
-                with self.client.messages.stream(
+                with self.client.stream(
                     model=self.model,
                     max_tokens=max_tokens,
                     system=[{
@@ -61,45 +65,27 @@ class BaseAgent:
                         round_text += text
                         yield self._sse({"type": "delta", "content": text})
 
-                    response = stream.get_final_message()
+                    response = stream.get_final_result()
 
                 if response.stop_reason == "tool_use" and tool_rounds < max_rounds:
                     tool_rounds += 1
 
                     tool_results = []
-                    for block in response.content:
-                        if block.type == "tool_use":
-                            yield self._sse({
-                                "type": "tool_call",
-                                "agent": self.name,
-                                "tool": block.name,
-                                "input": block.input,
-                            })
-                            result = self._run_tool(
-                                block.name, block.input,
-                            )
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result,
-                            })
+                    for tc in response.tool_calls:
+                        yield self._sse({
+                            "type": "tool_call",
+                            "agent": self.name,
+                            "tool": tc.name,
+                            "input": tc.input,
+                        })
+                        result = self._run_tool(tc.name, tc.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": result,
+                        })
 
-                    assistant_content = []
-                    for block in response.content:
-                        if block.type == "text":
-                            assistant_content.append({
-                                "type": "text",
-                                "text": block.text,
-                            })
-                        elif block.type == "tool_use":
-                            assistant_content.append({
-                                "type": "tool_use",
-                                "id": block.id,
-                                "name": block.name,
-                                "input": block.input,
-                            })
-
-                    messages.append({"role": "assistant", "content": assistant_content})
+                    messages.append({"role": "assistant", "content": response.raw_content})
                     messages.append({"role": "user", "content": tool_results})
                     final_text += round_text
                 else:

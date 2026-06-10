@@ -33,9 +33,22 @@ def cmd_init(_args: argparse.Namespace) -> None:
             "change-this-to-a-random-string-in-production",
             secrets.token_urlsafe(32),
         )
-        api_key = input("请输入 Anthropic API Key（留空跳过）: ").strip()
-        if api_key:
-            content = content.replace("sk-ant-xxx", api_key)
+
+        print("选择 AI 提供商:")
+        print("  1. Anthropic (Claude)")
+        print("  2. DeepSeek")
+        choice = input("请输入 1 或 2（默认 1）: ").strip()
+
+        if choice == "2":
+            content = content.replace("AI_PROVIDER=anthropic", "AI_PROVIDER=deepseek")
+            api_key = input("请输入 DeepSeek API Key（留空跳过）: ").strip()
+            if api_key:
+                content = content.replace("DEEPSEEK_API_KEY=", f"DEEPSEEK_API_KEY={api_key}")
+        else:
+            api_key = input("请输入 Anthropic API Key（留空跳过）: ").strip()
+            if api_key:
+                content = content.replace("sk-ant-xxx", api_key)
+
         env_path.write_text(content)
         print(f"✅ 已创建 {env_path}")
     else:
@@ -47,14 +60,29 @@ def cmd_init(_args: argparse.Namespace) -> None:
     print("✅ 数据库已初始化")
 
 
+def _mask_key(key: str) -> str:
+    if len(key) > 14:
+        return key[:10] + "..." + key[-4:]
+    if not key:
+        return "(未设置)"
+    return "***"
+
+
 def cmd_config(_args: argparse.Namespace) -> None:
     from wealthpilot.settings import get_settings
 
     s = get_settings()
-    key_display = (s.anthropic_api_key[:10] + "..." + s.anthropic_api_key[-4:]) if len(s.anthropic_api_key) > 14 else ("(未设置)" if not s.anthropic_api_key else "***")
+    provider = s.ai_provider.upper()
+    if s.ai_provider == "deepseek":
+        key_display = _mask_key(s.deepseek_api_key)
+        model = s.deepseek_model
+    else:
+        key_display = _mask_key(s.anthropic_api_key)
+        model = s.anthropic_model
 
     print("┌─ WealthPilot 配置 ─────────────────────┐")
-    print(f"│ AI 模型:        {s.anthropic_model:<24}│")
+    print(f"│ AI 提供商:      {provider:<24}│")
+    print(f"│ AI 模型:        {model:<24}│")
     print(f"│ API Key:        {key_display:<24}│")
     print(f"│ 工具调用轮次:   {s.agent_max_tool_rounds:<24}│")
     print(f"│ 最大 Token:     {s.agent_max_tokens:<24}│")
@@ -67,20 +95,22 @@ def cmd_config(_args: argparse.Namespace) -> None:
 
 def cmd_chat(_args: argparse.Namespace) -> None:
     from wealthpilot.settings import get_settings
+    from wealthpilot.services.ai_client import create_ai_client
 
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        print("❌ 未配置 ANTHROPIC_API_KEY。请运行 python -m wealthpilot init 或编辑 .env")
+    try:
+        client = create_ai_client(settings)
+    except ValueError as e:
+        print(f"❌ {e}")
         sys.exit(1)
 
-    from anthropic import Anthropic
+    model = settings.active_model
+
     from wealthpilot.services.agents.router_agent import RouterAgent
     from wealthpilot.services.agents.market_agent import MarketAgent
     from wealthpilot.services.agents.portfolio_agent import PortfolioAgent
     from wealthpilot.services.agents.risk_agent import RiskAgent
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    model = settings.anthropic_model
     history: list[dict] = []
 
     agent_labels = {
@@ -89,8 +119,9 @@ def cmd_chat(_args: argparse.Namespace) -> None:
         "risk": "🛡️ 风险评估",
     }
 
+    provider = settings.ai_provider.upper()
     print("╔═══════════════════════════════════════╗")
-    print("║  WealthPilot AI 终端对话               ║")
+    print(f"║  WealthPilot AI 终端对话 ({provider})     ║")
     print("║  输入 quit 退出 · 输入 clear 清空历史  ║")
     print("╚═══════════════════════════════════════╝")
     print()

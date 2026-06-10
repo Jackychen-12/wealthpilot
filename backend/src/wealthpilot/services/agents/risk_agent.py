@@ -1,17 +1,22 @@
 """RiskAgent — 风险管理专家。"""
 
-from anthropic import Anthropic
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.agents.base import BaseAgent
 from wealthpilot.services.agents.prompts import build_risk_prompt
 from wealthpilot.services.agents.tools import RISK_TOOLS
 
+if TYPE_CHECKING:
+    from wealthpilot.services.ai_client import AIClient
+
 
 class RiskAgent(BaseAgent):
     def __init__(
         self,
-        client: Anthropic,
+        client: AIClient,
         model: str,
         holdings: list[PortfolioHolding],
         nav_data: dict[str, float],

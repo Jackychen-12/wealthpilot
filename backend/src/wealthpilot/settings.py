@@ -13,8 +13,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # AI provider
+    ai_provider: str = Field(default="anthropic", description="anthropic or deepseek")
+
+    # Anthropic
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
     anthropic_model: str = Field(default="claude-sonnet-4-6")
+
+    # DeepSeek (OpenAI-compatible)
+    deepseek_api_key: str = Field(default="", description="DeepSeek API key")
+    deepseek_model: str = Field(default="deepseek-chat")
+    deepseek_base_url: str = Field(default="https://api.deepseek.com")
+
     alpha_vantage_key: str = Field(default="")
 
     jwt_secret: str = Field(default="wealthpilot-dev-secret-change-me")
@@ -28,6 +38,12 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
     frontend_url: str = "http://localhost:5173"
+
+    @property
+    def active_model(self) -> str:
+        if self.ai_provider == "deepseek":
+            return self.deepseek_model
+        return self.anthropic_model
 
     def ensure_dirs(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

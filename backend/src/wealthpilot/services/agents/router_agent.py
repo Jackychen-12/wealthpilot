@@ -1,11 +1,15 @@
 """RouterAgent — 意图分类，将用户消息路由到对应专业 Agent。"""
 
+from __future__ import annotations
+
 import json
 import re
-
-from anthropic import Anthropic
+from typing import TYPE_CHECKING
 
 from wealthpilot.services.agents.prompts import build_router_prompt
+
+if TYPE_CHECKING:
+    from wealthpilot.services.ai_client import AIClient
 
 
 KEYWORD_RULES: list[tuple[list[str], str]] = [
@@ -16,20 +20,20 @@ KEYWORD_RULES: list[tuple[list[str], str]] = [
 
 
 class RouterAgent:
-    def __init__(self, client: Anthropic, model: str):
+    def __init__(self, client: AIClient, model: str):
         self.client = client
         self.model = model
 
     def route(self, message: str) -> tuple[str, str]:
         """返回 (agent_name, reason)。"""
         try:
-            response = self.client.messages.create(
+            result = self.client.create(
                 model=self.model,
                 max_tokens=200,
                 system=build_router_prompt(),
                 messages=[{"role": "user", "content": message}],
             )
-            text = response.content[0].text.strip()
+            text = result.text.strip()
             match = re.search(r'\{[^}]+\}', text)
             if match:
                 data = json.loads(match.group())
