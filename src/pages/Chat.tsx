@@ -133,6 +133,11 @@ export function Chat({ go }: PageProps) {
       <div className="content" ref={scrollRef}>
         <div style={{ textAlign: 'center', fontSize: 12, color: colors.textMuted, margin: '8px 0 18px' }}>
           {useRealApi ? '🟢 已连接 AI Agent（多智能体模式）' : '🟡 演示模式（预设回答）'}
+          {useRealApi && (
+            <div style={{ fontSize: 10, color: colors.textMuted, opacity: 0.6, marginTop: 2 }}>
+              会话 {conversationId.slice(0, 8)}
+            </div>
+          )}
         </div>
 
         {messages.map((msg) => {

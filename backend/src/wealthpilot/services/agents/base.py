@@ -1,4 +1,4 @@
-"""BaseAgent — 共享的 tool-use 循环逻辑。"""
+"""BaseAgent — 共享的 tool-use 循环逻辑（真实流式 + 工具调用混合）。"""
 
 import asyncio
 import json
@@ -8,10 +8,11 @@ from anthropic import Anthropic
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.agents.tools import execute_tool
+from wealthpilot.settings import get_settings
 
 
 class BaseAgent:
-    """所有专业 Agent 的基类。封装 Claude API tool-use 循环。"""
+    """所有专业 Agent 的基类。封装 Claude API 流式 tool-use 循环。"""
 
     def __init__(
         self,
@@ -34,62 +35,91 @@ class BaseAgent:
         self.nav_history = nav_history
 
     def run(self, messages: list[dict]) -> Generator[str, None, None]:
-        """执行 agent，返回 SSE 格式字符串的生成器。"""
+        """执行 agent，真实流式输出 + tool-use 循环。"""
+        settings = get_settings()
+        max_rounds = settings.agent_max_tool_rounds
+        max_tokens = settings.agent_max_tokens
+        tool_rounds = 0
+        final_text = ""
+
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4000,
-                system=[{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}],
-                tools=self.tools,
-                messages=messages,
-            )
+            while True:
+                round_text = ""
 
-            loop = asyncio.new_event_loop()
-            tool_rounds = 0
-            while response.stop_reason == "tool_use" and tool_rounds < 3:
-                tool_rounds += 1
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        yield self._sse({"type": "tool_call", "agent": self.name, "tool": block.name, "input": block.input})
-                        result = loop.run_until_complete(
-                            execute_tool(block.name, block.input, self.holdings, self.nav_data, self.nav_history)
-                        )
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
-
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
-
-                response = self.client.messages.create(
+                with self.client.messages.stream(
                     model=self.model,
-                    max_tokens=4000,
-                    system=[{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}],
+                    max_tokens=max_tokens,
+                    system=[{
+                        "type": "text",
+                        "text": self.system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
                     tools=self.tools,
                     messages=messages,
-                )
+                ) as stream:
+                    for text in stream.text_stream:
+                        round_text += text
+                        yield self._sse({"type": "delta", "content": text})
 
-            loop.close()
+                    response = stream.get_final_message()
 
-            final_text = ""
-            for block in response.content:
-                if block.type == "text":
-                    final_text += block.text
+                if response.stop_reason == "tool_use" and tool_rounds < max_rounds:
+                    tool_rounds += 1
 
-            chunk_size = 20
-            for i in range(0, len(final_text), chunk_size):
-                chunk = final_text[i:i + chunk_size]
-                yield self._sse({"type": "delta", "content": chunk})
+                    tool_results = []
+                    for block in response.content:
+                        if block.type == "tool_use":
+                            yield self._sse({
+                                "type": "tool_call",
+                                "agent": self.name,
+                                "tool": block.name,
+                                "input": block.input,
+                            })
+                            result = self._run_tool(
+                                block.name, block.input,
+                            )
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": result,
+                            })
 
-            yield from ()  # done event emitted by orchestrator
+                    assistant_content = []
+                    for block in response.content:
+                        if block.type == "text":
+                            assistant_content.append({
+                                "type": "text",
+                                "text": block.text,
+                            })
+                        elif block.type == "tool_use":
+                            assistant_content.append({
+                                "type": "tool_use",
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            })
+
+                    messages.append({"role": "assistant", "content": assistant_content})
+                    messages.append({"role": "user", "content": tool_results})
+                    final_text += round_text
+                else:
+                    final_text += round_text
+                    break
+
             self._final_text = final_text
 
         except Exception as e:
             yield self._sse({"type": "error", "content": f"{self.name} 异常: {e}"})
             self._final_text = ""
+
+    def _run_tool(self, name: str, input_data: dict) -> str:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                execute_tool(name, input_data, self.holdings, self.nav_data, self.nav_history)
+            )
+        finally:
+            loop.close()
 
     @property
     def final_text(self) -> str:

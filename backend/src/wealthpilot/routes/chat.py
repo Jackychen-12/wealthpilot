@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
+from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import ChatRequest
 from wealthpilot.services.agents import chat_stream
@@ -31,7 +32,15 @@ async def chat(req: ChatRequest, db: Session = Depends(get_session)):
             nav_history[h.fund_code] = hist
 
     return StreamingResponse(
-        chat_stream(req.message, req.history, holdings, nav_data, nav_history),
+        chat_stream(
+            req.message,
+            req.history,
+            holdings,
+            nav_data,
+            nav_history,
+            conversation_id=req.conversation_id,
+            db_session=db,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -39,3 +48,23 @@ async def chat(req: ChatRequest, db: Session = Depends(get_session)):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/history/{conversation_id}")
+def get_history(conversation_id: str, db: Session = Depends(get_session)):
+    """获取指定会话的历史消息。"""
+    stmt = (
+        select(ChatMessage)
+        .where(ChatMessage.conversation_id == conversation_id)
+        .order_by(ChatMessage.created_at)
+    )
+    rows = db.exec(stmt).all()
+    return [
+        {
+            "role": r.role,
+            "content": r.content,
+            "metadata": r.metadata_json,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]

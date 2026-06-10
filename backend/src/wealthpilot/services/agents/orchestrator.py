@@ -4,7 +4,9 @@ import json
 from collections.abc import Generator
 
 from anthropic import Anthropic
+from sqlmodel import Session, select
 
+from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.agents.market_agent import MarketAgent
 from wealthpilot.services.agents.portfolio_agent import PortfolioAgent
@@ -26,6 +28,8 @@ def chat_stream(
     holdings: list[PortfolioHolding],
     nav_data: dict[str, float],
     nav_history: dict[str, list[dict]] | None = None,
+    conversation_id: str | None = None,
+    db_session: Session | None = None,
 ) -> Generator[str, None, None]:
     """多 Agent 协调入口。Router 分流 → 专业 Agent 执行 → SSE 输出。"""
     settings = get_settings()
@@ -35,6 +39,10 @@ def chat_stream(
 
     client = Anthropic(api_key=settings.anthropic_api_key)
     model = settings.anthropic_model
+
+    # 0. 如果前端没传 history 但有 conversation_id，从 DB 加载
+    if not history and conversation_id and db_session:
+        history = _load_history(db_session, conversation_id)
 
     # 1. Router 分类
     router = RouterAgent(client, model)
@@ -64,9 +72,44 @@ def chat_stream(
         yield _sse({"type": "error", "content": f"Agent 执行异常: {e}"})
         return
 
-    # 5. 生成 follow-ups
+    # 5. 持久化对话记录
+    if conversation_id and db_session:
+        _save_message(db_session, conversation_id, "user", message)
+        _save_message(
+            db_session, conversation_id, "assistant", final_text,
+            metadata={"agent": agent_name, "reason": reason},
+        )
+
+    # 6. 生成 follow-ups
     follow_ups = _generate_follow_ups(final_text, message, agent_name, holdings)
     yield _sse({"type": "done", "content": final_text, "follow_ups": follow_ups})
+
+
+def _load_history(db_session: Session, conversation_id: str) -> list[dict[str, str]]:
+    stmt = (
+        select(ChatMessage)
+        .where(ChatMessage.conversation_id == conversation_id)
+        .order_by(ChatMessage.created_at)
+    )
+    rows = db_session.exec(stmt).all()
+    return [{"role": r.role, "content": r.content} for r in rows]
+
+
+def _save_message(
+    db_session: Session,
+    conversation_id: str,
+    role: str,
+    content: str,
+    metadata: dict | None = None,
+) -> None:
+    msg = ChatMessage(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        metadata_json=json.dumps(metadata, ensure_ascii=False) if metadata else "",
+    )
+    db_session.add(msg)
+    db_session.commit()
 
 
 def _generate_follow_ups(

@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     anthropic_model: str = Field(default="claude-sonnet-4-6")
     alpha_vantage_key: str = Field(default="")
 
+    jwt_secret: str = Field(default="wealthpilot-dev-secret-change-me")
+
+    # Agent configuration
+    agent_max_tool_rounds: int = Field(default=3)
+    agent_max_tokens: int = Field(default=4000)
+
     db_path: Path = Field(default=Path("./data/wealthpilot.db"))
     host: str = "0.0.0.0"
     port: int = 8000
