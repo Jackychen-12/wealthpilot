@@ -37,7 +37,7 @@ WealthPilot is a **full-stack AI investment advisory agent** that combines real-
 
 ### Key Highlights
 
-- **Real AI Agent** — Claude with 5 tool-use capabilities (fund lookup, NAV history, return calculation, fund comparison, news search)
+- **Real AI Agent** — Multi-agent architecture: Router Agent + 3 specialist agents (Market, Portfolio, Risk) with 12 tool-use capabilities, powered by Claude
 - **Real Market Data** — Free data from AKShare + 东方财富 + 天天基金 + 新浪财经 (no paid API keys needed for market data)
 - **Full Backend** — FastAPI with 24 REST endpoints, SQLite storage, JWT auth
 - **Multi-tenant** — User registration/login, each user has isolated portfolio and chat history
@@ -51,7 +51,7 @@ WealthPilot is a **full-stack AI investment advisory agent** that combines real-
 | **Portfolio Management** | Add/edit/delete fund holdings; CSV/Excel bulk import; screenshot OCR import | User input + Claude Vision |
 | **Smart Portfolio Analysis** | Weekly return, excess return, Sharpe ratio, return attribution (by fund/industry/asset type) | AKShare + 天天基金 real-time NAV |
 | **Risk Insight Engine** | Max drawdown + recovery days, portfolio health radar (5 dimensions), correlation matrix | Calculated from 60-day NAV history |
-| **AI Conversational Q&A** | Multi-turn dialogue with SSE streaming, Claude tool_use for real-time data retrieval | Claude API + real-time market data |
+| **AI Conversational Q&A** | Multi-agent routing + multi-turn dialogue with SSE streaming; Router auto-dispatches to Market / Portfolio / Risk agents | Claude API + real-time market data |
 | **Automated Suggestions** | Rule-engine + data-driven: concentration risk, loss alerts, correlation warnings | Analysis engine output |
 | **Weekly Report** | LLM-generated structured review (summary, key points, focus, AI insight) | Claude API + analysis data |
 | **Market Tracking** | Real-time index quotes, financial news feed | 东方财富 + 新浪财经 |
@@ -70,7 +70,7 @@ Home ─────→ Portfolio (manage holdings)
   │         ├──→ Suggestions (AI recommendations)
   │         └──→ Weekly Report (LLM-generated)
   │
-  └──→ Chat (Claude AI agent with tool_use + SSE streaming)
+  └──→ Chat (Multi-Agent: Router → Market / Portfolio / Risk agents + SSE streaming)
 ```
 
 ## Getting Started
@@ -138,7 +138,7 @@ WealthPilot 是一个**全栈 AI 智能投顾 Agent**，结合实时行情数据
 
 ### 核心亮点
 
-- **真实 AI Agent** — Claude 配备 5 个 tool_use 工具（基金查询、净值历史、收益计算、基金对比、新闻搜索）
+- **真实 AI Agent** — 多智能体架构：路由 Agent + 3 个专业 Agent（市场、持仓、风险），12 个 tool_use 工具，基于 Claude 驱动
 - **真实行情数据** — AKShare + 东方财富 + 天天基金 + 新浪财经，市场数据无需付费 API Key
 - **完整后端** — FastAPI 24 个 REST 端点，SQLite 存储，JWT 认证
 - **多租户** — 注册/登录，每个用户数据隔离
@@ -152,7 +152,7 @@ WealthPilot 是一个**全栈 AI 智能投顾 Agent**，结合实时行情数据
 | **持仓管理** | 添加/编辑/删除基金持仓；CSV/Excel 批量导入；截图 OCR 识别 | 用户输入 + Claude Vision |
 | **智能持仓分析** | 周收益、超额收益、Sharpe 比率、收益归因（按基金/行业/资产类型） | AKShare + 天天基金实时净值 |
 | **风险洞察引擎** | 最大回撤 + 恢复天数、组合健康度雷达（5 维）、相关性矩阵 | 基于 60 日净值历史计算 |
-| **AI 对话问答** | 多轮对话 + SSE 流式输出，Claude tool_use 实时检索数据 | Claude API + 实时行情 |
+| **AI 对话问答** | 多智能体路由 + 多轮对话 + SSE 流式输出，Router 自动分发至市场 / 持仓 / 风险专业 Agent | Claude API + 实时行情 |
 | **自动化建议** | 规则引擎 + 数据驱动：集中度风险、亏损预警、相关性警告 | 分析引擎输出 |
 | **周报** | LLM 生成结构化复盘（摘要、要点、关注、AI 洞察） | Claude API + 分析数据 |
 | **市场追踪** | 实时指数行情（上证/深证/创业板）、财经新闻 | 东方财富 + 新浪财经 |
@@ -171,7 +171,7 @@ WealthPilot 是一个**全栈 AI 智能投顾 Agent**，结合实时行情数据
   │        ├──→ 建议（AI 个性化推荐）
   │        └──→ 周报（LLM 生成）
   │
-  └──→ 对话（Claude AI Agent + tool_use + SSE 流式）
+  └──→ 对话（多智能体：Router → 市场 / 持仓 / 风险 Agent + SSE 流式）
 ```
 
 ## 快速开始
@@ -241,12 +241,19 @@ docker compose up --build -d
 ┌───────────────────────────┴─────────────────────────────────┐
 │              Backend (FastAPI · 24 endpoints)                 │
 │                                                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────┐  │
-│  │ Portfolio │ │  Market  │ │  Agent   │ │   Analysis    │  │
-│  │ CRUD+    │ │  Data    │ │  (Chat)  │ │   Engine      │  │
-│  │ Import   │ │  Service │ │ +Tools   │ │ Sharpe/DD/    │  │
-│  │ CSV/OCR  │ │          │ │ +Stream  │ │ Health/Corr   │  │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────────┘  │
+│  ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌───────────┐  │
+│  │ Portfolio │ │  Market  │ │ Multi-Agent  │ │  Analysis  │  │
+│  │ CRUD+    │ │  Data    │ │   System     │ │  Engine    │  │
+│  │ Import   │ │  Service │ │              │ │ Sharpe/DD/ │  │
+│  │ CSV/OCR  │ │          │ │  ┌────────┐  │ │ Health/    │  │
+│  └──────────┘ └──────────┘ │  │ Router │  │ │ Corr/Sugg  │  │
+│                            │  └──┬─┬─┬─┘  │ └───────────┘  │
+│                            │     │ │ │     │       │         │
+│                            │  ┌──┘ │ └──┐  │       │         │
+│                            │  ▼    ▼    ▼  │       │         │
+│                            │ Mkt Port Risk │       │         │
+│                            │ 3T   4T   5T  │───────┘         │
+│                            └──────────────┘                  │
 │       │             │             │              │           │
 │       └─────────────┼─────────────┼──────────────┘           │
 │                     │             │                          │
@@ -261,7 +268,7 @@ docker compose up --build -d
          ┌──────────────────┼──────────────────┐
          │                  │                  │
     Claude API         AKShare            东方财富/新浪
-    (Chat Agent      (Fund NAV +         (Index quotes
+    (Multi-Agent     (Fund NAV +         (Index quotes
      + OCR +          Rankings +          + News)
      Report)          Macro data)
 ```
@@ -270,7 +277,7 @@ docker compose up --build -d
 |-------|-----------|
 | Frontend | Vite 6, React 18, TypeScript 5.6 |
 | Backend | Python 3.11+, FastAPI, SQLModel, Uvicorn |
-| AI | Claude API (Anthropic SDK) — chat, tool_use, vision, report |
+| AI | Claude API (Anthropic SDK) — multi-agent (Router + Market/Portfolio/Risk), vision, report |
 | Data | AKShare (free), 东方财富 API, 天天基金 API, 新浪财经 API |
 | Auth | JWT (PyJWT) + bcrypt |
 | Storage | SQLite (dev) — swappable for PostgreSQL |
@@ -345,7 +352,19 @@ wealthpilot/
     └── src/wealthpilot/
         ├── main.py             # FastAPI entry
         ├── routes/             # 7 route modules, 24 endpoints
-        ├── services/           # Market data, analysis engine, AI agent, auth
+        ├── services/
+        │   ├── agents/         # Multi-Agent system
+        │   │   ├── base.py         # BaseAgent (shared tool-use loop)
+        │   │   ├── router_agent.py # Intent classification + keyword fallback
+        │   │   ├── market_agent.py # Fund info, NAV history, news (3 tools)
+        │   │   ├── portfolio_agent.py # Overview, attribution, health, suggestions (4 tools)
+        │   │   ├── risk_agent.py   # Drawdown, correlation, return calc (5 tools)
+        │   │   ├── orchestrator.py # Router → specialist coordination
+        │   │   ├── tools.py        # 12 tool schemas + unified dispatcher
+        │   │   └── prompts.py      # Agent-specific system prompts
+        │   ├── analysis.py     # Analysis engine (Sharpe, drawdown, health, correlation)
+        │   ├── market_data.py  # Multi-source market data service
+        │   └── agent.py        # Legacy single-agent (kept for rollback)
         └── storage/            # SQLite database
 ```
 
@@ -353,7 +372,7 @@ wealthpilot/
 
 - [x] Full-stack Agent architecture (FastAPI + React)
 - [x] Real market data (AKShare + 东方财富 + 天天基金)
-- [x] Claude AI chat with tool_use (5 real-time tools)
+- [x] Multi-agent system (Router + Market/Portfolio/Risk agents, 12 tools)
 - [x] Portfolio management (CRUD + CSV import + OCR)
 - [x] Advanced analytics (Sharpe, max drawdown, correlation)
 - [x] User auth (JWT + multi-tenant)
