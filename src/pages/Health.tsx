@@ -48,7 +48,7 @@ export function Health({ go }: PageProps) {
               {loading ? '...' : `${overall}分 · ${overallStatus}`}
             </span>
           </div>
-          <RadarChart />
+          <RadarChart scores={dimensions.map((d: any) => d.score ?? 60)} />
           {dimensions.map((d: any, i: number) => (
             <div key={i} className="risk-row">
               <div className="risk-dot" style={{ background: severityColor[d.severity as keyof typeof severityColor] || colors.success }} />

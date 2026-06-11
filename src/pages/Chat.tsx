@@ -125,6 +125,8 @@ export function Chat({ go }: PageProps) {
             setApiStatus('disconnected')
             setErrorMsg(`AI 服务返回错误: ${event.content}`)
             const response = findMockResponse(text)
+            if (response.agent) setActiveAgent(response.agent)
+            if (response.tools) setToolCalls(response.tools)
             setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: response.text }])
             setStreamingText('')
             setFollowUps(response.followUps)
@@ -134,20 +136,41 @@ export function Chat({ go }: PageProps) {
         setApiStatus('disconnected')
         setErrorMsg(`连接失败: ${e instanceof Error ? e.message : '网络错误'}，已切换到演示模式`)
         const response = findMockResponse(text)
+        if (response.agent) setActiveAgent(response.agent)
+        if (response.tools) setToolCalls(response.tools)
         setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: response.text }])
         setStreamingText('')
         setFollowUps(response.followUps)
       }
     } else {
       const response = findMockResponse(text)
+      if (response.agent) setActiveAgent(response.agent)
       setTimeout(() => {
-        const aiMsg: Message = { id: nextId++, role: 'ai', content: response.text, streaming: true }
-        setMessages(prev => [...prev, aiMsg])
+        if (response.tools) {
+          response.tools.forEach((tool, i) => {
+            setTimeout(() => setToolCalls(prev => [...prev, tool]), i * 400)
+          })
+        }
+        const toolDelay = (response.tools?.length ?? 0) * 400 + 600
         setTimeout(() => {
-          setFollowUps(response.followUps)
-          setMessages(prev => prev.map(m => m.streaming ? { ...m, streaming: false } : m))
-        }, response.text.length * 20 + 200)
-      }, 600)
+          let charIndex = 0
+          const interval = setInterval(() => {
+            charIndex += Math.floor(Math.random() * 3) + 2
+            if (charIndex >= response.text.length) {
+              clearInterval(interval)
+              setStreamingText('')
+              setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: response.text }])
+              setFollowUps(response.followUps)
+              setStreaming(false)
+              setActiveAgent('')
+              setToolCalls([])
+            } else {
+              setStreamingText(response.text.slice(0, charIndex))
+            }
+          }, 25)
+        }, toolDelay)
+      }, 500)
+      return
     }
 
     setStreaming(false)
@@ -225,7 +248,13 @@ export function Chat({ go }: PageProps) {
 
         {streaming && streamingText && (
           <div className="chat-ai">
-            <div className="chat-avatar">AI</div>
+            <div className="chat-avatar">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" fill="#fff" opacity="0.9"/>
+                <path d="M2 17l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.6"/>
+                <path d="M2 12l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.8"/>
+              </svg>
+            </div>
             <div className="chat-bubble-ai" style={{ whiteSpace: 'pre-wrap' }}>
               {activeAgent && (
                 <div className="agent-badge">{activeAgent}</div>
@@ -245,7 +274,13 @@ export function Chat({ go }: PageProps) {
 
         {streaming && !streamingText && (
           <div className="chat-ai">
-            <div className="chat-avatar">AI</div>
+            <div className="chat-avatar">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" fill="#fff" opacity="0.9"/>
+                <path d="M2 17l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.6"/>
+                <path d="M2 12l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.8"/>
+              </svg>
+            </div>
             <div className="chat-bubble-ai">
               {activeAgent && (
                 <div className="agent-badge">{activeAgent}</div>

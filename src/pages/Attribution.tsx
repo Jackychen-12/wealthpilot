@@ -84,7 +84,7 @@ export function Attribution({ go }: PageProps) {
             </div>
           </div>
         </div>
-        <FollowUpBar placeholder="针对归因结果继续追问..." />
+        <FollowUpBar placeholder="针对归因结果继续追问..." onClick={() => go('chat')} />
         <Disclaimer />
       </div>
     </div>

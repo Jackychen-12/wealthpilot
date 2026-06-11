@@ -197,11 +197,12 @@ body {
 }
 
 .nav-back {
-  font-size: 28px;
   color: #1D2129;
   cursor: pointer;
   width: 32px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   user-select: none;
   transition: opacity 0.15s;
 }
@@ -237,7 +238,8 @@ body {
   border-radius: 14px;
   padding: 16px;
   margin-bottom: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
@@ -412,28 +414,24 @@ body {
 .follow-bar {
   display: flex;
   align-items: center;
-  background: #F0F1F3;
+  background: linear-gradient(135deg, #EFF6FF, #F8FAFF);
   border-radius: 22px;
   padding: 11px 16px;
   margin: 14px 0;
   gap: 8px;
+  border: 1px solid #DBEAFE;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.follow-bar:active {
+  background: #DBEAFE;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.15);
 }
 
 .follow-bar span {
   font-size: 13px;
-  color: #C1C5CD;
+  color: #6B7280;
   flex: 1;
-}
-
-.follow-bar .send {
-  color: #2563EB;
-  font-size: 18px;
-  cursor: pointer;
-  transition: transform 0.15s;
-}
-
-.follow-bar .send:active {
-  transform: scale(0.85);
 }
 
 /* ─── Disclaimer ─── */
@@ -1378,6 +1376,24 @@ body {
 .bottom-input {
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.bottom-input::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 22px;
+  background: linear-gradient(90deg, transparent 0%, rgba(37, 99, 235, 0.12) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: inputGlow 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes inputGlow {
+  0%, 100% { background-position: 200% 0; }
+  50% { background-position: -200% 0; }
 }
 
 .bottom-input:hover {

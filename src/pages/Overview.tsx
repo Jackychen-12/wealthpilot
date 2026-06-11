@@ -103,12 +103,15 @@ export function Overview({ go }: PageProps) {
 
         <div className="module-grid">
           {([
-            ['收益归因分析', '查看收益来源拆解', 'attribution', B],
-            ['回撤分析', '了解下跌原因和影响', 'drawdown', colors.danger],
-            ['组合健康度', '5维度持仓体检', 'health', colors.success],
-            ['后续关注建议', '下一步该关注什么', 'suggest', colors.warning],
-          ] as const).map(([title, desc, key, color], i) => (
+            ['收益归因分析', '查看收益来源拆解', 'attribution', B, 'M3 3h18v18H3V3zm4 4v10h3V7H7zm5 3v7h3v-7h-3zm5-1v8h3V9h-3z'],
+            ['回撤分析', '了解下跌原因和影响', 'drawdown', colors.danger, 'M22 12l-4 4-4-4M18 16V4M2 20h20M6 16l4-4 4 4'],
+            ['组合健康度', '5维度持仓体检', 'health', colors.success, 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 4v6l4 2'],
+            ['后续关注建议', '下一步该关注什么', 'suggest', colors.warning, 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'],
+          ] as const).map(([title, desc, key, color, iconPath], i) => (
             <div key={i} className="module-card" onClick={() => go(key)}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 6, opacity: 0.7 }}>
+                <path d={iconPath} />
+              </svg>
               <div className="module-title">{title}</div>
               <div className="module-desc">{desc}</div>
               <div className="module-link" style={{ color }}>查看详情 &rsaquo;</div>
@@ -117,20 +120,24 @@ export function Overview({ go }: PageProps) {
         </div>
 
         {([
-          ['weekly', 'AI 周复盘报告', '每周五收盘后自动生成', B],
-          ['chat', '对话式追问', '针对复盘结果继续深入提问', colors.primaryLight],
-          ['portfolio', '持仓管理', '添加、编辑你的基金持仓', colors.successLight],
-        ] as const).map(([key, title, desc, bg], i) => (
+          ['weekly', 'AI 周复盘报告', '每周五收盘后自动生成', B, 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'],
+          ['chat', '对话式追问', '针对复盘结果继续深入提问', B, 'M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z'],
+          ['portfolio', '持仓管理', '添加、编辑你的基金持仓', colors.success, 'M2 7h20v14H2V7zM16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16'],
+        ] as const).map(([key, title, desc, color, iconPath], i) => (
           <div key={i} className="card card-click" onClick={() => go(key)}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 40, height: 40, background: bg, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: i === 0 ? '#fff' : B, fontSize: 18, fontWeight: 700 }}>
-                {i === 0 ? 'W' : i === 1 ? 'Q' : '💼'}
+              <div style={{ width: 40, height: 40, background: i === 0 ? B : `${color}15`, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={i === 0 ? '#fff' : color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d={iconPath} />
+                </svg>
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>{title}</div>
                 <div style={{ fontSize: 12, color: colors.textMuted }}>{desc}</div>
               </div>
-              <span style={{ color: '#C9CDD4', fontSize: 20 }}>&rsaquo;</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C9CDD4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
             </div>
           </div>
         ))}

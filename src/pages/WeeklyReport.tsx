@@ -85,7 +85,7 @@ export function WeeklyReport({ go }: PageProps) {
           <div className="action-btn" onClick={() => go('health')}>组合健康度</div>
         </div>
 
-        <FollowUpBar placeholder="针对本周复盘继续追问..." />
+        <FollowUpBar placeholder="针对本周复盘继续追问..." onClick={() => go('chat')} />
         <Disclaimer />
       </div>
     </div>

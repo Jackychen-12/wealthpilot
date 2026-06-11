@@ -12,6 +12,16 @@ import type { PageProps } from '../types'
 const B = colors.primary
 const Bb = colors.primaryLight
 
+function ArrowIcon({ up }: { up: boolean }) {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginRight: 2 }}>
+      {up
+        ? <path d="M5 1L9 6H1L5 1Z" fill="currentColor" />
+        : <path d="M5 9L1 4H9L5 9Z" fill="currentColor" />}
+    </svg>
+  )
+}
+
 export function Home({ go }: PageProps) {
   const [indices, setIndices] = useState(mockIndices)
   const [news, setNews] = useState(mockNews)
@@ -43,7 +53,7 @@ export function Home({ go }: PageProps) {
     <div className="screen">
       <Notch />
       <div className="nav" style={{ justifyContent: 'space-between' }}>
-        <span className="nav-back">&lsaquo;</span>
+        <span style={{ width: 32 }} />
         <div
           style={{
             background: Bb,
@@ -63,24 +73,37 @@ export function Home({ go }: PageProps) {
             <rect x="13" y="6" width="3" height="12" rx="1.5" fill={B} opacity=".8" />
             <rect x="18" y="3" width="3" height="15" rx="1.5" fill={B} opacity=".4" />
           </svg>
-          Market Briefing &#9654;
+          WealthPilot
         </div>
-        <span style={{ fontSize: 22, color: colors.text }}>&equiv;</span>
+        <span style={{ width: 32 }} />
       </div>
       <div className="content">
         <div className="card">
           <div className="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={B} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
             行情追踪
-            <span style={{ marginLeft: 'auto', color: B, fontSize: 20, cursor: 'pointer' }}>&#8635;</span>
+            <svg onClick={() => {}} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={B} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 'auto', cursor: 'pointer' }}>
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+            </svg>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             {indices.map((idx, i) => (
-              <div key={i} style={{ flex: 1, background: '#F7F8FA', borderRadius: 10, padding: '10px 8px' }}>
-                <div style={{ fontSize: 12, color: colors.textMuted }}>{idx.name}</div>
+              <div key={i} style={{
+                flex: 1,
+                background: idx.up ? 'rgba(16,185,129,0.06)' : 'rgba(239,68,68,0.06)',
+                borderRadius: 10,
+                padding: '10px 8px',
+                border: `1px solid ${idx.up ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'}`,
+              }}>
+                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>{idx.name}</div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: idx.up ? colors.success : colors.danger, fontFamily: 'DM Sans', letterSpacing: '-0.5px' }}>
                   {idx.value}
                 </div>
-                <div style={{ fontSize: 12, color: idx.up ? colors.success : colors.danger, fontWeight: 500 }}>
+                <div style={{ fontSize: 12, color: idx.up ? colors.success : colors.danger, fontWeight: 500, display: 'flex', alignItems: 'center' }}>
+                  <ArrowIcon up={idx.up} />
                   {idx.change}
                 </div>
               </div>
@@ -97,17 +120,21 @@ export function Home({ go }: PageProps) {
           </div>
         </div>
 
-        <div className="card" onClick={() => go('portfolio')} style={{ cursor: 'pointer' }}>
-          <div className="card-title">我的持仓</div>
+        <div className="card card-click" onClick={() => go('portfolio')}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 42, height: 42, background: colors.primaryLight, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
-              💼
+            <div style={{ width: 42, height: 42, background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={B} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+                <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
+              </svg>
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 15, fontWeight: 500, color: colors.text }}>持仓管理</div>
               <div style={{ fontSize: 13, color: colors.textMuted }}>添加、编辑你的基金持仓</div>
             </div>
-            <span style={{ color: '#C9CDD4', fontSize: 20 }}>&rsaquo;</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C9CDD4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
           </div>
         </div>
 

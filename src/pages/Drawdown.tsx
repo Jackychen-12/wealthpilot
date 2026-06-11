@@ -102,7 +102,7 @@ export function Drawdown({ go }: PageProps) {
           <div className="action-btn" onClick={() => go('chat')}>Ask Pilot AI</div>
         </div>
 
-        <FollowUpBar placeholder="这次回撤正常吗？继续追问..." />
+        <FollowUpBar placeholder="这次回撤正常吗？继续追问..." onClick={() => go('chat')} />
         <Disclaimer />
       </div>
     </div>
