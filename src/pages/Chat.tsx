@@ -130,7 +130,7 @@ export function Chat({ go }: PageProps) {
     <div className="screen">
       <Notch />
       <NavBar title="Pilot AI · 多智能体对话" onBack={() => go('overview')} />
-      <div className="content" ref={scrollRef}>
+      <div className="content" ref={scrollRef} style={{ paddingBottom: 8 }}>
         <div style={{ textAlign: 'center', fontSize: 12, color: colors.textMuted, margin: '8px 0 18px' }}>
           {useRealApi ? '🟢 已连接 AI Agent（多智能体模式）' : '🟡 演示模式（预设回答）'}
           {useRealApi && (
@@ -208,8 +208,6 @@ export function Chat({ go }: PageProps) {
             ))}
           </div>
         )}
-
-        <Disclaimer />
       </div>
 
       <div className="chat-bottom">
@@ -218,6 +216,7 @@ export function Chat({ go }: PageProps) {
           disabled={streaming}
           placeholder={streaming ? 'Pilot AI 正在分析...' : '输入您的问题...'}
         />
+        <Disclaimer />
       </div>
     </div>
   )
