@@ -200,10 +200,10 @@ export function Chat({ go }: PageProps) {
       : '🟡 演示模式（预设回答）'
 
   return (
-    <div className="screen">
+    <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Notch />
       <NavBar title="Pilot AI · 多智能体对话" onBack={() => go('overview')} />
-      <div className="content" ref={scrollRef} style={{ paddingBottom: 8, display: 'flex', flexDirection: 'column' }}>
+      <div className="content" ref={scrollRef} style={{ flex: 1, paddingBottom: 8, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ textAlign: 'center', fontSize: 12, color: colors.textMuted, margin: '8px 0 18px' }}>
           {statusText}
           {apiStatus === 'connected' && (
