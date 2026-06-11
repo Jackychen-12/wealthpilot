@@ -24,6 +24,7 @@
   <img src="https://img.shields.io/badge/Claude_AI-Multi--Agent-7C3AED?logo=anthropic&logoColor=white" alt="Claude AI" />
   <img src="https://img.shields.io/badge/DeepSeek-Supported-4F46E5" alt="DeepSeek" />
   <img src="https://img.shields.io/badge/AKShare-Free_Data-FF6B35" alt="AKShare" />
+  <img src="https://img.shields.io/badge/MCP-Server-10B981" alt="MCP Server" />
   <img src="https://github.com/Jackychen-12/wealthpilot/actions/workflows/deploy.yml/badge.svg" alt="Deploy" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
 </p>
@@ -43,6 +44,8 @@
 | 🌐 | **双模型支持** | Claude & DeepSeek 一行配置切换，Provider 抽象层自动适配 Anthropic SDK / OpenAI SDK |
 | 📊 | **免费实时数据** | AKShare + 东方财富 + 天天基金 + 新浪财经，无需付费数据源 |
 | ⚡ | **真流式输出** | SSE token-by-token 流式传输，工具调用过程实时可见 |
+| 🔌 | **MCP Server** | 12 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
+| 💻 | **多入口调用** | Web UI / 终端交互 / CLI 管道 / MCP，任选其一接入分析能力 |
 | 🔐 | **多租户隔离** | JWT 认证 + 用户级数据隔离，对话历史持久化 |
 | 🚀 | **一键部署** | `make setup` → 编辑 API Key → `make dev`，3 步启动完整系统 |
 
@@ -231,7 +234,8 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 | 认证 | JWT (PyJWT) + bcrypt，多租户隔离 |
 | 存储 | SQLite（开发），可替换 PostgreSQL |
 | 部署 | Docker Compose, Makefile, Railway, GitHub Pages |
-| CLI | `python -m wealthpilot run/init/config/chat` |
+| 集成 | MCP Server (stdio), CLI 非交互模式 |
+| CLI | `python -m wealthpilot run/init/config/chat/mcp/ask` |
 
 ---
 
@@ -279,6 +283,8 @@ uv run python -m wealthpilot init     # 交互式初始化：选择 AI 提供商
 uv run python -m wealthpilot config   # 查看当前配置（Key 脱敏显示）
 uv run python -m wealthpilot run      # 启动 API 服务（等同 uvicorn）
 uv run python -m wealthpilot chat     # 终端交互式 AI 对话（直接体验多 Agent）
+uv run python -m wealthpilot ask "查询" # 非交互式查询（支持管道，stdout 可 pipe）
+uv run python -m wealthpilot mcp      # 启动 MCP Server（stdio, for Claude Code）
 ```
 
 `chat` 命令可以直接在终端体验完整的多智能体系统——Router 自动分流、工具调用过程实时显示：
@@ -299,6 +305,73 @@ uv run python -m wealthpilot chat     # 终端交互式 AI 对话（直接体验
 近5日走势：1.5821 → 1.5903 → 1.5847 → 1.5962 → 1.5983...
 ```
 
+### 非交互模式 (ask)
+
+`ask` 子命令支持单次查询和管道输入，完整多 Agent 流程一行获取结果：
+
+```bash
+# 直接查询
+python -m wealthpilot ask "半导体ETF最新净值"
+
+# 从 stdin 读取（支持管道）
+echo "我的持仓风险分析" | python -m wealthpilot ask -
+
+# stdout 干净输出，适合重定向（Agent 路由信息走 stderr）
+python -m wealthpilot ask "投资建议" > advice.txt
+
+# 静默模式（抑制 stderr）
+python -m wealthpilot ask "市场分析" 2>/dev/null
+```
+
+---
+
+## MCP Server — Claude Code / Cursor 集成
+
+WealthPilot 提供标准 **MCP (Model Context Protocol) Server**，将 12 个投资分析工具直接暴露给 Claude Code、Cursor 等 MCP 客户端。Claude 可以自主调用这些工具获取实时行情和持仓分析——**无需自建 Agent，无需 API Key**（MCP Server 本身不调用 LLM）。
+
+### 配置方法
+
+在项目根目录创建 `.mcp.json`（或在 Claude Code 设置中添加）：
+
+```json
+{
+  "mcpServers": {
+    "wealthpilot": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/wealthpilot/backend", "python", "-m", "wealthpilot", "mcp"]
+    }
+  }
+}
+```
+
+配置后重启 Claude Code，即可在对话中使用 WealthPilot 的全部工具：
+
+```
+> 查一下 007340 的最新净值和近 30 天走势
+
+Claude 会自动调用:
+  → get_fund_info("007340")
+  → get_nav_history("007340", 30)
+然后基于返回数据生成分析回答
+```
+
+### 可用工具一览
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `get_fund_info` | fund_code | 基金基本信息（名称、净值、类型） |
+| `get_nav_history` | fund_code, days? | 净值走势（默认 30 天） |
+| `search_market_news` | keyword? | 最新财经要闻 |
+| `get_portfolio_overview` | — | 持仓总览：市值、收益、Sharpe |
+| `get_attribution` | — | 按基金收益归因 |
+| `get_health_score` | — | 5 维健康度评分 |
+| `get_investment_suggestions` | — | 规则引擎调仓建议 |
+| `calculate_return` | fund_code, days | 区间累计收益率 |
+| `compare_funds` | fund_codes[] | 多基金横向对比 |
+| `get_drawdown_analysis` | — | 全持仓回撤分析 |
+| `get_max_drawdown` | fund_code | 单基金最大回撤 |
+| `get_correlation_matrix` | — | 持仓相关性矩阵 |
+
 ---
 
 ## Makefile 速查
@@ -311,6 +384,8 @@ make frontend  # 仅启动前端
 make test      # 运行测试
 make config    # 查看当前配置
 make chat      # 终端 AI 对话
+make mcp       # 启动 MCP Server (stdio)
+make ask Q="查净值"  # 非交互式 AI 查询
 make docker    # Docker Compose 启动
 make clean     # 清理生成文件
 ```
@@ -392,7 +467,8 @@ wealthpilot/
 └── backend/                     # Backend (Python)
     ├── .env.example             #   环境配置模板
     └── src/wealthpilot/
-        ├── __main__.py          #   CLI 入口 (run/init/config/chat)
+        ├── __main__.py          #   CLI 入口 (run/init/config/chat/mcp/ask)
+        ├── mcp_server.py        #   ⭐ MCP Server（12 工具，for Claude Code）
         ├── main.py              #   FastAPI 应用
         ├── settings.py          #   配置管理（支持双 Provider）
         ├── routes/              #   7 个路由模块，24 个端点
@@ -450,6 +526,8 @@ docker compose up --build -d
 - [x] 用户认证（JWT + 多租户隔离）
 - [x] 对话历史持久化
 - [x] CLI 工具（init/config/chat/run）
+- [x] MCP Server（12 工具，Claude Code / Cursor 直接调用）
+- [x] CLI 非交互模式（ask 子命令，支持管道）
 - [x] Docker Compose 部署
 - [x] AI 周报生成
 - [ ] 推送通知（回撤预警）

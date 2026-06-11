@@ -176,6 +176,73 @@ def cmd_chat(_args: argparse.Namespace) -> None:
         history.append({"role": "assistant", "content": full_text})
 
 
+def cmd_mcp(_args: argparse.Namespace) -> None:
+    from wealthpilot.mcp_server import main as mcp_main
+    mcp_main()
+
+
+def cmd_ask(args: argparse.Namespace) -> None:
+    import asyncio
+    import json
+
+    query = args.query
+    if query == "-":
+        query = sys.stdin.read().strip()
+    if not query:
+        print("❌ 查询内容不能为空", file=sys.stderr)
+        sys.exit(1)
+
+    from wealthpilot.settings import get_settings
+    from wealthpilot.services.ai_client import create_ai_client
+
+    settings = get_settings()
+    try:
+        create_ai_client(settings)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
+
+    from sqlmodel import Session, select
+    from wealthpilot.models.portfolio import PortfolioHolding
+    from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
+    from wealthpilot.storage.db import get_engine
+
+    engine = get_engine()
+    with Session(engine) as session:
+        holdings = list(session.exec(select(PortfolioHolding)).all())
+
+    async def load_nav():
+        nav_data: dict[str, float] = {}
+        nav_history: dict[str, list[dict]] = {}
+        for h in holdings:
+            info = await fetch_fund_info(h.fund_code)
+            nav_data[h.fund_code] = info["nav"] if info else h.cost_price
+            hist = await fetch_fund_nav(h.fund_code, 60)
+            if hist:
+                nav_history[h.fund_code] = hist
+        return nav_data, nav_history
+
+    nav_data, nav_history = asyncio.run(load_nav())
+
+    from wealthpilot.services.agents.orchestrator import chat_stream
+
+    for sse_line in chat_stream(query, [], holdings, nav_data, nav_history):
+        if not sse_line.startswith("data: "):
+            continue
+        data = json.loads(sse_line[6:].strip())
+        if data["type"] == "agent_route":
+            label = data.get("label", data.get("agent", ""))
+            print(f"[{label}] {data.get('reason', '')}", file=sys.stderr)
+        elif data["type"] == "delta":
+            print(data["content"], end="", flush=True)
+        elif data["type"] == "tool_call":
+            print(f"  → {data['tool']}...", file=sys.stderr)
+        elif data["type"] == "error":
+            print(f"❌ {data['content']}", file=sys.stderr)
+
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="wealthpilot",
@@ -189,6 +256,10 @@ def main() -> None:
     sub.add_parser("init", help="初始化 .env 和数据库")
     sub.add_parser("config", help="查看当前配置")
     sub.add_parser("chat", help="终端交互式 AI 对话")
+    sub.add_parser("mcp", help="启动 MCP Server (stdio, for Claude Code)")
+
+    ask_p = sub.add_parser("ask", help="非交互式 AI 查询（支持管道输入）")
+    ask_p.add_argument("query", help="查询内容，传 '-' 从 stdin 读取")
 
     args = parser.parse_args()
 
@@ -197,6 +268,8 @@ def main() -> None:
         "init": cmd_init,
         "config": cmd_config,
         "chat": cmd_chat,
+        "mcp": cmd_mcp,
+        "ask": cmd_ask,
     }
 
     if args.command in commands:

@@ -35,5 +35,11 @@ config:          ## 查看当前配置
 chat:            ## 终端交互式 AI 对话
 	cd backend && uv run python -m wealthpilot chat
 
+mcp:             ## 启动 MCP Server (stdio, for Claude Code)
+	cd backend && uv run python -m wealthpilot mcp
+
+ask:             ## 非交互式 AI 查询（例: make ask Q="查净值"）
+	cd backend && uv run python -m wealthpilot ask "$(Q)"
+
 help:            ## 显示帮助
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
