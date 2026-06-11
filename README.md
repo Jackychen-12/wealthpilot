@@ -46,6 +46,7 @@
 | ⚡ | **真流式输出** | SSE token-by-token 流式传输，工具调用过程实时可见 |
 | 🔌 | **MCP Server** | 12 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
 | 💻 | **多入口调用** | Web UI / 终端交互 / CLI 管道 / MCP，任选其一接入分析能力 |
+| 🎨 | **精致 Demo 体验** | 离线演示模式完整模拟多 Agent 流程（路由 → 工具调用 → 流式输出），SVG 图标系统，页面转场动画 |
 | 🔐 | **多租户隔离** | JWT 认证 + 用户级数据隔离，对话历史持久化 |
 | 🚀 | **一键部署** | `make setup` → 编辑 API Key → `make dev`，3 步启动完整系统 |
 
@@ -120,7 +121,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 | 持仓管理（增删改查 + CSV 导入） | ✅ | ✅ |
 | 实时行情（指数、新闻、净值） | ✅ | ✅ |
 | 量化分析（Sharpe、回撤、健康度） | ✅ | ✅ |
-| AI 多智能体对话 | 演示模式 | **多 Agent 实时分析** |
+| AI 多智能体对话 | 演示模式（模拟 Agent 路由 + 工具调用 + 流式输出） | **多 Agent 实时分析** |
 | 截图 OCR 导入 | ❌ | ✅ (Claude Vision) |
 | AI 周报 | 模板回退 | **LLM 智能生成** |
 
@@ -191,6 +192,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 ┌──────────────────────────────────────────────────────────────┐
 │                Frontend (Vite + React 18 + TypeScript)        │
 │     11 pages · API layer with mock fallback · SSE streaming   │
+│     SVG icon system · Animated transitions · Smart demo mode  │
 └────────────────────────────┬─────────────────────────────────┘
                              │ HTTP / SSE
 ┌────────────────────────────┴─────────────────────────────────┐
@@ -227,7 +229,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 
 | 层 | 技术 |
 |----|------|
-| Frontend | Vite 6, React 18, TypeScript 5.6, SSE Streaming |
+| Frontend | Vite 6, React 18, TypeScript 5.6, SSE Streaming, SVG Icon System |
 | Backend | Python 3.11+, FastAPI, SQLModel, Uvicorn |
 | AI | Claude API (Anthropic SDK) + DeepSeek (OpenAI SDK)，多 Agent 协作 |
 | 数据源 | AKShare（免费）、东方财富 API、天天基金 API、新浪财经 API |
@@ -264,7 +266,7 @@ Home ─────→ Portfolio（持仓管理：手动添加 / CSV导入 / �
 | **持仓管理** | 增删改查、CSV/Excel 批量导入、截图 OCR 识别导入 | 用户输入 + Claude Vision |
 | **持仓分析** | 周收益、超额收益、Sharpe 比率、三维度收益归因 | AKShare + 天天基金实时净值 |
 | **风险洞察** | 最大回撤 + 恢复天数、5 维健康度雷达、持仓相关性矩阵 | 60 日净值历史计算 |
-| **AI 对话** | 多 Agent 路由 + 多轮对话 + SSE 流式 + 工具调用可视化 | Claude/DeepSeek + 实时市场数据 |
+| **AI 对话** | 多 Agent 路由 + 多轮对话 + SSE 流式 + 工具调用可视化；演示模式完整模拟 Agent 流程 | Claude/DeepSeek + 实时市场数据 |
 | **自动化建议** | 集中度预警、亏损提醒、高相关性分散建议、仓位优化 | 分析引擎输出 |
 | **AI 周报** | LLM 生成结构化复盘（要点、下周关注、风险提示、AI 洞察） | AI + 分析数据 |
 | **行情追踪** | 实时指数行情、财经新闻流 | 东方财富 + 新浪财经 |
@@ -461,8 +463,8 @@ wealthpilot/
 ├── src/                         # Frontend (React)
 │   ├── api/                     #   API 层（client, portfolio, market, analysis, chat）
 │   ├── pages/                   #   11 个页面组件
-│   ├── components/              #   12 个共享 UI 组件
-│   └── data/mock.ts             #   Mock 降级数据
+│   ├── components/              #   18 个共享 UI 组件（SVG 图标系统）
+│   └── data/mock.ts             #   Mock 降级数据（含 Agent/工具元数据）
 │
 └── backend/                     # Backend (Python)
     ├── .env.example             #   环境配置模板
@@ -530,6 +532,7 @@ docker compose up --build -d
 - [x] CLI 非交互模式（ask 子命令，支持管道）
 - [x] Docker Compose 部署
 - [x] AI 周报生成
+- [x] Demo 体验优化（SVG 图标系统、演示模式模拟多 Agent 流程、页面转场动画、动态雷达图）
 - [ ] 推送通知（回撤预警）
 - [ ] 回测与情景分析
 - [ ] 多资产类别（股票、债券、ETF、加密货币）
