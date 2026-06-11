@@ -4,9 +4,14 @@
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem('wp_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 export async function apiFetch<T>(path: string, fallback: T): Promise<T> {
   try {
-    const resp = await fetch(`${API_BASE}${path}`)
+    const resp = await fetch(`${API_BASE}${path}`, { headers: { ...authHeaders() } })
     if (!resp.ok) throw new Error(`${resp.status}`)
     return await resp.json()
   } catch {
@@ -18,7 +23,7 @@ export async function apiPost<TReq, TRes>(path: string, body: TReq, fallback: TR
   try {
     const resp = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     })
     if (!resp.ok) throw new Error(`${resp.status}`)
@@ -32,7 +37,7 @@ export async function apiPut<TReq, TRes>(path: string, body: TReq): Promise<TRes
   try {
     const resp = await fetch(`${API_BASE}${path}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     })
     if (!resp.ok) throw new Error(`${resp.status}`)
@@ -44,7 +49,10 @@ export async function apiPut<TReq, TRes>(path: string, body: TReq): Promise<TRes
 
 export async function apiDelete(path: string): Promise<boolean> {
   try {
-    const resp = await fetch(`${API_BASE}${path}`, { method: 'DELETE' })
+    const resp = await fetch(`${API_BASE}${path}`, {
+      method: 'DELETE',
+      headers: { ...authHeaders() },
+    })
     return resp.ok
   } catch {
     return false
@@ -66,7 +74,7 @@ export interface SSEEvent {
 export async function* fetchSSE(path: string, body: unknown): AsyncGenerator<SSEEvent> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   })
 

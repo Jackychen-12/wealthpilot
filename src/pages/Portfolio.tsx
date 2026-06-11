@@ -60,8 +60,10 @@ export function Portfolio({ go }: PageProps) {
     const formData = new FormData()
     formData.append('file', file)
     try {
+      const token = localStorage.getItem('wp_token')
       const resp = await fetch(`${API_BASE}/api/portfolio/import/csv`, {
         method: 'POST', body: formData,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       const data = await resp.json()
       if (resp.ok) {
@@ -83,8 +85,10 @@ export function Portfolio({ go }: PageProps) {
     const formData = new FormData()
     formData.append('file', file)
     try {
+      const token = localStorage.getItem('wp_token')
       const resp = await fetch(`${API_BASE}/api/portfolio/import/ocr`, {
         method: 'POST', body: formData,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       const data = await resp.json()
       if (resp.ok) {

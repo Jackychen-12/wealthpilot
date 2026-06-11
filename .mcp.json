@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wealthpilot": {
+      "command": "uv",
+      "args": ["run", "--directory", "./backend", "python", "-m", "wealthpilot", "mcp"]
+    }
+  }
+}

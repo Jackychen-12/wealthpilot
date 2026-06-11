@@ -58,7 +58,11 @@ export function Chat({ go }: PageProps) {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch(`${API_BASE}/health`, { signal: controller.signal })
+    const token = localStorage.getItem('wp_token')
+    fetch(`${API_BASE}/health`, {
+      signal: controller.signal,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
       .then(r => {
         if (r.ok) {
           setApiStatus('connected')
@@ -152,7 +156,10 @@ export function Chat({ go }: PageProps) {
   const handleRetryConnect = useCallback(() => {
     setApiStatus('checking')
     setErrorMsg('')
-    fetch(`${API_BASE}/health`)
+    const t = localStorage.getItem('wp_token')
+    fetch(`${API_BASE}/health`, {
+      headers: t ? { Authorization: `Bearer ${t}` } : {},
+    })
       .then(r => {
         setApiStatus(r.ok ? 'connected' : 'disconnected')
         if (!r.ok) setErrorMsg(`后端返回 ${r.status}`)

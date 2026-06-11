@@ -1,9 +1,9 @@
-"""认证服务 — JWT + 密码哈希。"""
+"""认证服务 — JWT + bcrypt 密码哈希。"""
 
 import hashlib
-import secrets
 from datetime import datetime, timedelta
 
+import bcrypt
 import jwt
 
 from wealthpilot.settings import get_settings
@@ -17,12 +17,13 @@ def _get_secret() -> str:
 
 
 def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    hashed = hashlib.sha256((salt + password).encode()).hexdigest()
-    return f"{salt}${hashed}"
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    if hashed.startswith(("$2b$", "$2a$")):
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    # Legacy SHA-256 fallback: format is "salt$hash"
     if "$" not in hashed:
         return False
     salt, stored_hash = hashed.split("$", 1)
