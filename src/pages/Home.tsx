@@ -122,8 +122,8 @@ export function Home({ go }: PageProps) {
 
         <div className="card card-click" onClick={() => go('portfolio')}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 42, height: 42, background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={B} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div style={{ width: 42, height: 42, background: 'linear-gradient(135deg, #ECFDF5, #D1FAE5)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.portfolioAccent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
                 <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
               </svg>
@@ -140,7 +140,7 @@ export function Home({ go }: PageProps) {
 
         <div className="entry-card" onClick={() => go('overview')}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, background: B, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 36, height: 36, background: 'linear-gradient(135deg, #7C3AED, #6366F1)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>

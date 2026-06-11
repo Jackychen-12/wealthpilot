@@ -6,11 +6,11 @@
 }
 
 body {
-  background: #0F172A;
+  background: linear-gradient(160deg, #FDF8F4 0%, #F0EFFF 50%, #F5F9FF 100%);
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', 'DM Sans', 'Inter', sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
-  color: #E2E8F0;
+  color: #4A4A5A;
 }
 
 #root {
@@ -53,7 +53,7 @@ body {
   font-family: 'Inter', 'DM Sans', sans-serif;
   font-size: 26px;
   font-weight: 800;
-  background: linear-gradient(135deg, #fff, #94A3B8);
+  background: linear-gradient(135deg, #2563EB, #7C3AED);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -62,7 +62,7 @@ body {
 
 .landing-tagline {
   font-size: 14px;
-  color: #64748B;
+  color: #6B7280;
   margin-bottom: 28px;
   line-height: 1.7;
   white-space: pre-line;
@@ -77,15 +77,16 @@ body {
 
 .landing-feature {
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(0, 0, 0, 0.02);
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  color: #4A4A5A;
   transition: background 0.2s, border-color 0.2s;
 }
 
 .landing-feature:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .landing-badges {
@@ -98,9 +99,9 @@ body {
   font-size: 11px;
   padding: 4px 10px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #94A3B8;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(37, 99, 235, 0.06);
+  color: #6366F1;
+  border: 1px solid rgba(99, 102, 241, 0.12);
   font-weight: 500;
 }
 
@@ -129,13 +130,13 @@ body {
   height: 852px;
   background: #F5F6FA;
   border-radius: 48px;
-  border: 10px solid #111;
+  border: 6px solid rgba(255, 255, 255, 0.7);
   overflow: hidden;
   position: relative;
   box-shadow:
-    0 40px 80px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.1) inset,
-    0 0 120px rgba(37, 99, 235, 0.08);
+    0 25px 60px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(0, 0, 0, 0.03);
   flex-shrink: 0;
 }
 
@@ -291,17 +292,27 @@ body {
 }
 
 .metric-val {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.5px;
   font-family: 'DM Sans', -apple-system, sans-serif;
+}
+
+.metric-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: middle;
 }
 
 .metric-label {
   font-size: 11px;
   color: #86909C;
   margin-top: 2px;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
 }
 
 /* ─── Bar Charts ─── */
@@ -533,7 +544,7 @@ body {
   width: 30px;
   height: 30px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #2563EB, #0EA5E9);
+  background: linear-gradient(135deg, #7C3AED, #EC4899);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -652,13 +663,14 @@ body {
   transform: translateX(-50%);
   display: flex;
   gap: 4px;
-  background: rgba(10, 10, 10, 0.82);
+  background: rgba(255, 255, 255, 0.85);
   border-radius: 28px;
   padding: 8px 10px;
   z-index: 100;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .floating-nav-indicator {
@@ -682,7 +694,7 @@ body {
   border-radius: 16px;
   font-size: 12px;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.45);
+  color: #6B7280;
   font-weight: 500;
   transition: all 0.2s;
   user-select: none;
@@ -690,7 +702,7 @@ body {
 }
 
 .floating-nav div:hover {
-  color: rgba(255, 255, 255, 0.7);
+  color: #374151;
 }
 
 .floating-nav div.active {
@@ -700,13 +712,14 @@ body {
 /* ─── Entry Card ─── */
 
 .entry-card {
-  background: linear-gradient(160deg, #F5F9FF 0%, #FFFFFF 50%, #EFF6FF 100%);
-  border: 1.5px solid #BFDBFE;
+  background: linear-gradient(160deg, #F5F3FF 0%, #FFFFFF 50%, #F5F3FF 100%);
+  border: 1.5px solid #DDD6FE;
   border-radius: 14px;
   padding: 16px;
   margin-bottom: 14px;
   cursor: pointer;
   transition: transform 0.12s;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.06);
 }
 
 .entry-card:active {
@@ -714,7 +727,7 @@ body {
 }
 
 .entry-badge {
-  background: #2563EB;
+  background: #7C3AED;
   color: #fff;
   font-size: 10px;
   padding: 2px 8px;
@@ -738,16 +751,16 @@ body {
   justify-content: center;
   gap: 4px;
   padding: 11px;
-  color: #2563EB;
+  color: #7C3AED;
   font-size: 14px;
-  background: #EFF6FF;
+  background: #F5F3FF;
   border-radius: 10px;
   font-weight: 600;
   transition: background 0.15s;
 }
 
 .entry-cta:active {
-  background: #BFDBFE;
+  background: #DDD6FE;
 }
 
 /* ─── Module Grid ─── */
@@ -1401,6 +1414,20 @@ body {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) inset;
 }
 
+/* ─── Page Accent Bands ─── */
+
+.page-accent-blue .content { border-top: 4px solid #3B82F6; }
+.page-accent-orange .content { border-top: 4px solid #F59E0B; }
+.page-accent-green .content { border-top: 4px solid #10B981; }
+.page-accent-purple .content { border-top: 4px solid #7C3AED; }
+
+/* ─── Module Card Color Accents ─── */
+
+.module-card-blue { border-top: 3px solid #3B82F6; }
+.module-card-orange { border-top: 3px solid #F59E0B; }
+.module-card-green { border-top: 3px solid #10B981; }
+.module-card-purple { border-top: 3px solid #7C3AED; }
+
 /* ─── Responsive ─── */
 
 @media (max-width: 960px) {
@@ -1426,7 +1453,7 @@ body {
 
 @media (max-width: 420px) {
   body {
-    background: #F5F6FA;
+    background: #FAFAF8;
   }
 
   .landing-layout {
@@ -1574,8 +1601,8 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1586,5 +1613,5 @@ body {
 }
 
 .dark-toggle:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.08);
 }

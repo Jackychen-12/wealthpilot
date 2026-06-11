@@ -24,7 +24,7 @@ export function Suggestions({ go }: PageProps) {
   }, [])
 
   return (
-    <div className="screen">
+    <div className="screen page-accent-purple">
       <Notch />
       <NavBar title="后续关注建议" onBack={() => go('overview')} />
       <div className="content">

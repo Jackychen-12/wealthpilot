@@ -27,7 +27,7 @@ export function Drawdown({ go }: PageProps) {
   const summary = data?.summary || { avg_drawdown_pct: -3.2, avg_recovery_days: 18, high_risk_count: 1 }
 
   return (
-    <div className="screen">
+    <div className="screen page-accent-orange">
       <Notch />
       <NavBar title="回撤分析" onBack={() => go('overview')} />
       <div className="content">

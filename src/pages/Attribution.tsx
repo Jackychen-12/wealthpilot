@@ -35,7 +35,7 @@ export function Attribution({ go }: PageProps) {
   const topNegative = current.find(d => !d.positive)
 
   return (
-    <div className="screen">
+    <div className="screen page-accent-blue">
       <Notch />
       <NavBar title="收益归因分析" onBack={() => go('overview')} />
       <div className="content">

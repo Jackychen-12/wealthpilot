@@ -20,4 +20,13 @@ export const colors = {
   bgSurface: '#F7F8FA',
   border: '#E5E6EB',
   borderLight: '#F5F6F7',
+  marketTint: '#EFF6FF',
+  marketAccent: '#3B82F6',
+  portfolioTint: '#ECFDF5',
+  portfolioAccent: '#10B981',
+  aiTint: '#F5F3FF',
+  aiAccent: '#7C3AED',
+  riskTint: '#FFF7ED',
+  riskAccent: '#F59E0B',
+  chatAccent: '#EC4899',
 } as const

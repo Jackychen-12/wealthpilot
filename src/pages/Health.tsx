@@ -33,7 +33,7 @@ export function Health({ go }: PageProps) {
   const weakPoints = dimensions.filter((d: any) => d.severity !== 'low')
 
   return (
-    <div className="screen">
+    <div className="screen page-accent-green">
       <Notch />
       <NavBar title="组合健康度" onBack={() => go('overview')} />
       <div className="content">
