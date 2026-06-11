@@ -10,6 +10,8 @@ import { streamChat, type ChatMsg } from '../api/chat'
 import { chatMessages, aiResponses, defaultResponse } from '../data/mock'
 import type { PageProps } from '../types'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 interface Message {
   id: number
   role: 'user' | 'ai'
@@ -50,8 +52,27 @@ export function Chat({ go }: PageProps) {
   const [activeAgent, setActiveAgent] = useState('')
   const [toolCalls, setToolCalls] = useState<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [useRealApi, setUseRealApi] = useState(true)
+  const [apiStatus, setApiStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
+  const [errorMsg, setErrorMsg] = useState('')
   const [conversationId] = useState(() => crypto.randomUUID())
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`${API_BASE}/health`, { signal: controller.signal })
+      .then(r => {
+        if (r.ok) {
+          setApiStatus('connected')
+        } else {
+          setApiStatus('disconnected')
+          setErrorMsg(`后端返回 ${r.status}，请检查服务是否正常运行`)
+        }
+      })
+      .catch(() => {
+        setApiStatus('disconnected')
+        setErrorMsg(`无法连接到 ${API_BASE}，请确认后端已启动（make backend）`)
+      })
+    return () => controller.abort()
+  }, [])
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -74,8 +95,9 @@ export function Chat({ go }: PageProps) {
     setStreamingText('')
     setActiveAgent('')
     setToolCalls([])
+    setErrorMsg('')
 
-    if (useRealApi) {
+    if (apiStatus === 'connected') {
       try {
         const history: ChatMsg[] = messages.map(m => ({ role: m.role, content: m.content }))
         let fullContent = ''
@@ -96,24 +118,23 @@ export function Chat({ go }: PageProps) {
           } else if (event.type === 'tool_call') {
             setToolCalls(prev => [...prev, event.tool || ''])
           } else if (event.type === 'error') {
-            // fallback 到 mock
-            setUseRealApi(false)
+            setApiStatus('disconnected')
+            setErrorMsg(`AI 服务返回错误: ${event.content}`)
             const response = findMockResponse(text)
             setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: response.text }])
             setStreamingText('')
             setFollowUps(response.followUps)
           }
         }
-      } catch {
-        // API 不可用时 fallback
-        setUseRealApi(false)
+      } catch (e) {
+        setApiStatus('disconnected')
+        setErrorMsg(`连接失败: ${e instanceof Error ? e.message : '网络错误'}，已切换到演示模式`)
         const response = findMockResponse(text)
         setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: response.text }])
         setStreamingText('')
         setFollowUps(response.followUps)
       }
     } else {
-      // Mock 模式
       const response = findMockResponse(text)
       setTimeout(() => {
         const aiMsg: Message = { id: nextId++, role: 'ai', content: response.text, streaming: true }
@@ -126,21 +147,60 @@ export function Chat({ go }: PageProps) {
     }
 
     setStreaming(false)
-  }, [streaming, messages, useRealApi, conversationId])
+  }, [streaming, messages, apiStatus, conversationId])
+
+  const handleRetryConnect = useCallback(() => {
+    setApiStatus('checking')
+    setErrorMsg('')
+    fetch(`${API_BASE}/health`)
+      .then(r => {
+        setApiStatus(r.ok ? 'connected' : 'disconnected')
+        if (!r.ok) setErrorMsg(`后端返回 ${r.status}`)
+      })
+      .catch(() => {
+        setApiStatus('disconnected')
+        setErrorMsg(`无法连接到 ${API_BASE}`)
+      })
+  }, [])
+
+  const statusText = apiStatus === 'checking'
+    ? '🔄 正在连接后端...'
+    : apiStatus === 'connected'
+      ? '🟢 已连接 AI Agent（多智能体模式）'
+      : '🟡 演示模式（预设回答）'
 
   return (
     <div className="screen">
       <Notch />
       <NavBar title="Pilot AI · 多智能体对话" onBack={() => go('overview')} />
-      <div className="content" ref={scrollRef} style={{ paddingBottom: 8 }}>
+      <div className="content" ref={scrollRef} style={{ paddingBottom: 8, display: 'flex', flexDirection: 'column' }}>
         <div style={{ textAlign: 'center', fontSize: 12, color: colors.textMuted, margin: '8px 0 18px' }}>
-          {useRealApi ? '🟢 已连接 AI Agent（多智能体模式）' : '🟡 演示模式（预设回答）'}
-          {useRealApi && (
+          {statusText}
+          {apiStatus === 'connected' && (
             <div style={{ fontSize: 10, color: colors.textMuted, opacity: 0.6, marginTop: 2 }}>
               会话 {conversationId.slice(0, 8)}
             </div>
           )}
+          {apiStatus === 'disconnected' && (
+            <div style={{ marginTop: 4 }}>
+              <span
+                onClick={handleRetryConnect}
+                style={{ fontSize: 11, color: colors.primary, cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                点击重试连接
+              </span>
+            </div>
+          )}
         </div>
+
+        {errorMsg && (
+          <div style={{
+            background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 8,
+            padding: '8px 12px', margin: '0 0 12px', fontSize: 12, color: '#C2410C', lineHeight: 1.5,
+          }}>
+            {errorMsg}
+          </div>
+        )}
 
         {messages.map((msg) => {
           if (msg.role === 'user') {
@@ -194,6 +254,8 @@ export function Chat({ go }: PageProps) {
             </div>
           </div>
         )}
+
+        <div style={{ flex: 1 }} />
 
         {followUps.length > 0 && !streaming && (
           <div className="quick-pills fade-in-up">
