@@ -225,7 +225,7 @@ export function App() {
           <div className="landing-features">
             {info.points.map((p, i) => (
               <div key={i} className="landing-feature">
-                <div style={{ fontSize: 14, color: '#E2E8F0', lineHeight: 1.6 }}>{p}</div>
+                <div style={{ fontSize: 14, lineHeight: 1.6 }}>{p}</div>
               </div>
             ))}
           </div>
