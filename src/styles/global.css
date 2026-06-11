@@ -1420,6 +1420,8 @@ body {
 .page-accent-orange .content { border-top: 4px solid #F59E0B; }
 .page-accent-green .content { border-top: 4px solid #10B981; }
 .page-accent-purple .content { border-top: 4px solid #7C3AED; }
+.page-accent-warm .content { border-top: 4px solid #F97316; }
+.page-accent-amber .content { border-top: 4px solid #F59E0B; }
 
 /* ─── Module Card Color Accents ─── */
 
@@ -1427,6 +1429,174 @@ body {
 .module-card-orange { border-top: 3px solid #F59E0B; }
 .module-card-green { border-top: 3px solid #10B981; }
 .module-card-purple { border-top: 3px solid #7C3AED; }
+
+/* ─── Profile Card ─── */
+
+.profile-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 auto 12px;
+}
+
+.profile-stats {
+  display: flex;
+  gap: 1px;
+  background: #F0F1F3;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 16px 0;
+}
+
+.profile-stat {
+  flex: 1;
+  text-align: center;
+  padding: 12px 4px;
+  background: #fff;
+}
+
+.profile-stat-val {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: 'DM Sans', sans-serif;
+  letter-spacing: -0.3px;
+}
+
+.profile-stat-label {
+  font-size: 11px;
+  color: #86909C;
+  margin-top: 2px;
+}
+
+.profile-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid #F5F6F7;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.profile-menu-item:last-child {
+  border-bottom: none;
+}
+
+.profile-menu-item:active {
+  opacity: 0.6;
+}
+
+.profile-menu-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* ─── Form Styles ─── */
+
+.form-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #E5E6EB;
+  font-size: 14px;
+  outline: none;
+  background: #F7F8FA;
+  font-family: inherit;
+  color: #1D2129;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.form-input:focus {
+  border-color: #2563EB;
+  background: #fff;
+}
+
+.form-input::placeholder {
+  color: #C1C5CD;
+}
+
+.form-btn {
+  padding: 12px 0;
+  text-align: center;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.12s;
+  user-select: none;
+}
+
+.form-btn:active {
+  transform: scale(0.98);
+}
+
+.form-btn-primary {
+  background: linear-gradient(135deg, #2563EB, #1D4ED8);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+}
+
+.form-btn-outline {
+  background: #fff;
+  color: #1D2129;
+  border: 1.5px solid #E5E6EB;
+}
+
+.form-btn-danger {
+  background: #FEF2F2;
+  color: #EF4444;
+  border: 1px solid #FECACA;
+}
+
+/* ─── Progress Bar ─── */
+
+.progress-bar {
+  height: 4px;
+  background: #F0F1F3;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Score Ring ─── */
+
+.score-ring {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  margin: 0 auto 16px;
+}
+
+.score-ring svg {
+  transform: rotate(-90deg);
+}
+
+.score-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
 
 /* ─── Responsive ─── */
 
