@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Notch } from '../components/Notch'
 import { Tag } from '../components/Tag'
 import { MetricBox } from '../components/MetricBox'
+import { Skeleton } from '../components/Skeleton'
 import { colors } from '../utils/theme'
 import { marketIndices as mockIndices, marketNews as mockNews, portfolioSummary } from '../data/mock'
 import { marketApi } from '../api/market'
@@ -92,7 +93,7 @@ export function Home({ go }: PageProps) {
             </div>
           ))}
           <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 10 }}>
-            WealthPilot AI Engine · {loading ? '加载中...' : '实时数据'}
+            WealthPilot AI Engine · {loading ? <Skeleton width={48} height={12} style={{ display: 'inline-block', verticalAlign: 'middle' }} /> : '实时数据'}
           </div>
         </div>
 
@@ -136,7 +137,7 @@ export function Home({ go }: PageProps) {
           </div>
           <div className="entry-cta">查看完整复盘报告 &rsaquo;</div>
           <div style={{ fontSize: 11, color: '#C9CDD4', marginTop: 10, textAlign: 'center' }}>
-            WealthPilot AI Engine · {loading ? '加载中' : '已更新'}
+            WealthPilot AI Engine · {loading ? <Skeleton width={36} height={12} style={{ display: 'inline-block', verticalAlign: 'middle' }} /> : '已更新'}
           </div>
         </div>
       </div>

@@ -48,6 +48,7 @@ export function Chat({ go }: PageProps) {
   const [streaming, setStreaming] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [activeAgent, setActiveAgent] = useState('')
+  const [toolCalls, setToolCalls] = useState<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [useRealApi, setUseRealApi] = useState(true)
   const [conversationId] = useState(() => crypto.randomUUID())
@@ -72,6 +73,7 @@ export function Chat({ go }: PageProps) {
     setStreaming(true)
     setStreamingText('')
     setActiveAgent('')
+    setToolCalls([])
 
     if (useRealApi) {
       try {
@@ -92,7 +94,7 @@ export function Chat({ go }: PageProps) {
               setFollowUps(event.follow_ups)
             }
           } else if (event.type === 'tool_call') {
-            setStreamingText(prev => prev + `\n🔧 正在查询 ${event.tool}...\n`)
+            setToolCalls(prev => [...prev, event.tool || ''])
           } else if (event.type === 'error') {
             // fallback 到 mock
             setUseRealApi(false)
@@ -159,17 +161,13 @@ export function Chat({ go }: PageProps) {
             <div className="chat-avatar">AI</div>
             <div className="chat-bubble-ai" style={{ whiteSpace: 'pre-wrap' }}>
               {activeAgent && (
-                <div style={{
-                  display: 'inline-block',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: '#fff',
-                  background: 'linear-gradient(135deg, #7C3AED, #6366F1)',
-                  borderRadius: 12,
-                  padding: '2px 10px',
-                  marginBottom: 6,
-                }}>
-                  {activeAgent}
+                <div className="agent-badge">{activeAgent}</div>
+              )}
+              {toolCalls.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                  {toolCalls.map((tool, i) => (
+                    <span key={i} className="tool-chip">🔧 {tool}</span>
+                  ))}
                 </div>
               )}
               {streamingText}
@@ -183,17 +181,13 @@ export function Chat({ go }: PageProps) {
             <div className="chat-avatar">AI</div>
             <div className="chat-bubble-ai">
               {activeAgent && (
-                <div style={{
-                  display: 'inline-block',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: '#fff',
-                  background: 'linear-gradient(135deg, #7C3AED, #6366F1)',
-                  borderRadius: 12,
-                  padding: '2px 10px',
-                  marginBottom: 6,
-                }}>
-                  {activeAgent}
+                <div className="agent-badge">{activeAgent}</div>
+              )}
+              {toolCalls.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                  {toolCalls.map((tool, i) => (
+                    <span key={i} className="tool-chip">🔧 {tool}</span>
+                  ))}
                 </div>
               )}
               <span className="typing-dots"><span /><span /><span /></span>

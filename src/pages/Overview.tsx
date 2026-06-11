@@ -4,6 +4,7 @@ import { NavBar } from '../components/NavBar'
 import { MetricBox } from '../components/MetricBox'
 import { Tag } from '../components/Tag'
 import { Disclaimer } from '../components/Disclaimer'
+import { Skeleton, SkeletonText } from '../components/Skeleton'
 import { colors } from '../utils/theme'
 import { analysisApi } from '../api/analysis'
 import { portfolioSummary, topContributors, topDetractors } from '../data/mock'
@@ -50,7 +51,7 @@ export function Overview({ go }: PageProps) {
       <div className="content">
         <div className="card">
           <div className="card-title">
-            {loading ? '加载中...' : '本周持仓总览'}
+            {loading ? <Skeleton width={120} height={16} /> : '本周持仓总览'}
             {sharpe != null && (
               <span style={{ marginLeft: 'auto', fontSize: 12, color: colors.textMuted }}>
                 Sharpe {sharpe.toFixed(2)}

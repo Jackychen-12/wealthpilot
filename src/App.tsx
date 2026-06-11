@@ -180,12 +180,21 @@ const screenInfoMap: Record<ScreenKey, ScreenInfo> = {
   },
 }
 
+const screenOrder: ScreenKey[] = [
+  'home', 'portfolio', 'overview', 'attribution', 'drawdown',
+  'health', 'suggest', 'weekly', 'chat', 'login', 'risk-profile',
+]
+
 export function App() {
   const [screen, setScreen] = useState<ScreenKey>('home')
   const [transitioning, setTransitioning] = useState(false)
+  const [navDir, setNavDir] = useState<'forward' | 'back'>('forward')
 
   const navigate = useCallback((target: ScreenKey) => {
     if (target === screen) return
+    const fromIdx = screenOrder.indexOf(screen)
+    const toIdx = screenOrder.indexOf(target)
+    setNavDir(toIdx >= fromIdx ? 'forward' : 'back')
     setTransitioning(true)
     setTimeout(() => {
       setScreen(target)
@@ -195,6 +204,10 @@ export function App() {
 
   const Comp = screens[screen]
   const info = screenInfoMap[screen]
+
+  const transClass = transitioning
+    ? 'screen-transition exit'
+    : `screen-transition ${navDir === 'back' ? 'slide-back' : 'slide-forward'}`
 
   return (
     <>
@@ -227,7 +240,7 @@ export function App() {
         </div>
 
         <PhoneFrame resetScroll={screen}>
-          <div className={`screen-transition ${transitioning ? 'exit' : 'enter'}`}>
+          <div className={transClass}>
             <Comp go={navigate} />
           </div>
         </PhoneFrame>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Notch } from '../components/Notch'
 import { NavBar } from '../components/NavBar'
+import { Skeleton } from '../components/Skeleton'
 import { colors } from '../utils/theme'
 import { portfolioApi, type Holding, type HoldingCreate } from '../api/portfolio'
 import type { PageProps } from '../types'
@@ -161,7 +162,12 @@ export function Portfolio({ go }: PageProps) {
           )}
 
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 20, color: colors.textMuted }}>加载中...</div>
+            <div style={{ padding: 20 }}>
+              <Skeleton width="60%" height={14} style={{ marginBottom: 12 }} />
+              <Skeleton width="100%" height={48} style={{ marginBottom: 8 }} />
+              <Skeleton width="100%" height={48} style={{ marginBottom: 8 }} />
+              <Skeleton width="100%" height={48} />
+            </div>
           ) : holdings.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 20, color: colors.textMuted }}>
               暂无持仓，使用上方导入或手动添加
