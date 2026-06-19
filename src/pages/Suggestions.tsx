@@ -5,12 +5,13 @@ import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { analysisApi } from '../api/analysis'
 import { suggestions as mockSuggestions, watchSignals } from '../data/mock'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const priorityColor = { high: colors.danger, medium: colors.warning, low: colors.primary }
 const priorityBg = { high: colors.dangerLight, medium: colors.warningLight, low: colors.primaryLight }
 
-export function Suggestions({ go }: PageProps) {
+export function Suggestions() {
+  const go = useAppNavigate()
   const [suggestions, setSuggestions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 

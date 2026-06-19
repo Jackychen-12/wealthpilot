@@ -4,11 +4,12 @@ import { NavBar } from '../components/NavBar'
 import { Skeleton } from '../components/Skeleton'
 import { colors } from '../utils/theme'
 import { portfolioApi, type Holding, type HoldingCreate } from '../api/portfolio'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-export function Portfolio({ go }: PageProps) {
+export function Portfolio() {
+  const go = useAppNavigate()
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)

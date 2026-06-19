@@ -8,13 +8,14 @@ import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { analysisApi } from '../api/analysis'
 import { attributionByFund, attributionByIndustry, attributionByAsset } from '../data/mock'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const tabs = ['按基金', '按行业', '按资产类型']
 const apiParams: ('fund' | 'industry' | 'category')[] = ['fund', 'industry', 'category']
 const mockFallbacks = [attributionByFund, attributionByIndustry, attributionByAsset]
 
-export function Attribution({ go }: PageProps) {
+export function Attribution() {
+  const go = useAppNavigate()
   const [tab, setTab] = useState(0)
   const [data, setData] = useState<Record<number, any[]>>({})
   const [loading, setLoading] = useState(false)

@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { Notch } from '../components/Notch'
 import { NavBar } from '../components/NavBar'
 import { colors } from '../utils/theme'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-export function Login({ go }: PageProps) {
+export function Login() {
+  const go = useAppNavigate()
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')

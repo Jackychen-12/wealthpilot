@@ -1,3 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #EFF6FF;
+  --color-brand-100: #DBEAFE;
+  --color-brand-200: #BFDBFE;
+  --color-brand-300: #93C5FD;
+  --color-brand-400: #60A5FA;
+  --color-brand-500: #2563EB;
+  --color-brand-600: #1D4ED8;
+  --color-brand-700: #1E40AF;
+
+  --color-surface: rgba(255, 255, 255, 0.85);
+  --color-surface-solid: #FFFFFF;
+
+  --radius-card: 14px;
+  --radius-sm: 10px;
+}
+
 * {
   margin: 0;
   padding: 0;

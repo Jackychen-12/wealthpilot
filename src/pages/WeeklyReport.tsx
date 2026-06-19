@@ -8,9 +8,10 @@ import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { apiFetch } from '../api/client'
 import { portfolioSummary, weeklyKeyPoints as mockKeyPoints, weeklyFocus as mockFocus } from '../data/mock'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
-export function WeeklyReport({ go }: PageProps) {
+export function WeeklyReport() {
+  const go = useAppNavigate()
   const [report, setReport] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 

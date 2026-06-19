@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Notch } from '../components/Notch'
 import { NavBar } from '../components/NavBar'
 import { colors } from '../utils/theme'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const questions = [
   {
@@ -60,7 +60,8 @@ function ScoreRing({ score, max, color }: { score: number; max: number; color: s
   )
 }
 
-export function RiskProfile({ go }: PageProps) {
+export function RiskProfile() {
+  const go = useAppNavigate()
   const [answers, setAnswers] = useState<number[]>(Array(questions.length).fill(-1))
   const [submitted, setSubmitted] = useState(false)
 

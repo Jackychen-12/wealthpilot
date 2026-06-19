@@ -11,6 +11,7 @@ export type ScreenKey =
   | 'login'
   | 'risk-profile'
 
+/** @deprecated Use useAppNavigate() hook instead */
 export interface PageProps {
   go: (screen: ScreenKey) => void
 }

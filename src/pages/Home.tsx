@@ -7,7 +7,7 @@ import { colors } from '../utils/theme'
 import { marketIndices as mockIndices, marketNews as mockNews, portfolioSummary } from '../data/mock'
 import { marketApi } from '../api/market'
 import { analysisApi } from '../api/analysis'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const B = colors.primary
 const Bb = colors.primaryLight
@@ -22,7 +22,8 @@ function ArrowIcon({ up }: { up: boolean }) {
   )
 }
 
-export function Home({ go }: PageProps) {
+export function Home() {
+  const go = useAppNavigate()
   const [indices, setIndices] = useState(mockIndices)
   const [news, setNews] = useState(mockNews)
   const [overview, setOverview] = useState<any>(null)

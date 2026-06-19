@@ -8,7 +8,7 @@ import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { streamChat, type ChatMsg } from '../api/chat'
 import { chatMessages, aiResponses, defaultResponse } from '../data/mock'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -32,7 +32,8 @@ function findMockResponse(query: string) {
   return defaultResponse
 }
 
-export function Chat({ go }: PageProps) {
+export function Chat() {
+  const go = useAppNavigate()
   const [messages, setMessages] = useState<Message[]>(() =>
     chatMessages.slice(0, 2).map((msg, i) => ({
       id: i,

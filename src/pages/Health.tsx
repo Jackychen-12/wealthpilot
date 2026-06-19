@@ -8,12 +8,13 @@ import { Disclaimer } from '../components/Disclaimer'
 import { colors } from '../utils/theme'
 import { analysisApi } from '../api/analysis'
 import { healthDimensions as mockHealth } from '../data/mock'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const severityColor = { high: colors.danger, medium: colors.warning, low: colors.success }
 const severityBg = { high: colors.dangerLight, medium: colors.warningLight, low: colors.successLight }
 
-export function Health({ go }: PageProps) {
+export function Health() {
+  const go = useAppNavigate()
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 

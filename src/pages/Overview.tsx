@@ -8,11 +8,12 @@ import { Skeleton, SkeletonText } from '../components/Skeleton'
 import { colors } from '../utils/theme'
 import { analysisApi } from '../api/analysis'
 import { portfolioSummary, topContributors, topDetractors } from '../data/mock'
-import type { PageProps } from '../types'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 const B = colors.primary
 
-export function Overview({ go }: PageProps) {
+export function Overview() {
+  const go = useAppNavigate()
   const [overview, setOverview] = useState<any>(null)
   const [attribution, setAttribution] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
