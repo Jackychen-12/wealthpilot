@@ -9,6 +9,8 @@ import { marketApi } from '../api/market'
 import { analysisApi } from '../api/analysis'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 
+import type { OverviewData } from '../types'
+
 const B = colors.primary
 const Bb = colors.primaryLight
 
@@ -26,7 +28,7 @@ export function Home() {
   const go = useAppNavigate()
   const [indices, setIndices] = useState(mockIndices)
   const [news, setNews] = useState(mockNews)
-  const [overview, setOverview] = useState<any>(null)
+  const [overview, setOverview] = useState<OverviewData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {

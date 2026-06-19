@@ -10,9 +10,11 @@ import { apiFetch } from '../api/client'
 import { portfolioSummary, weeklyKeyPoints as mockKeyPoints, weeklyFocus as mockFocus } from '../data/mock'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 
+import type { WeeklyReportData } from '../types'
+
 export function WeeklyReport() {
   const go = useAppNavigate()
-  const [report, setReport] = useState<any>(null)
+  const [report, setReport] = useState<WeeklyReportData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -63,10 +65,10 @@ export function WeeklyReport() {
 
         <div className="card">
           <div className="card-title">关键归因点</div>
-          {keyPoints.map((point: any, i: number) => (
+          {keyPoints.map((point, i: number) => (
             <div key={i} style={{ padding: '10px 0', borderBottom: i < keyPoints.length - 1 ? '1px solid #F5F6F7' : 'none' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{point.title}</div>
-              <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{point.desc}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{typeof point === 'string' ? point : point.title}</div>
+              <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{typeof point === 'string' ? '' : point.desc}</div>
             </div>
           ))}
         </div>

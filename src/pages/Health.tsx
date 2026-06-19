@@ -10,11 +10,14 @@ import { analysisApi } from '../api/analysis'
 import { healthDimensions as mockHealth } from '../data/mock'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 
+import type { HealthDimension } from '../types'
+
 const severityColor = { high: colors.danger, medium: colors.warning, low: colors.success }
 const severityBg = { high: colors.dangerLight, medium: colors.warningLight, low: colors.successLight }
 
 export function Health() {
   const go = useAppNavigate()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
@@ -28,10 +31,10 @@ export function Health() {
   const dimensions = data?.dimensions || mockHealth.map(d => ({
     ...d, score: d.severity === 'low' ? 80 : d.severity === 'medium' ? 55 : 30,
   }))
-  const overall = data?.overall_score ?? Math.round(dimensions.reduce((s: number, d: any) => s + (d.score || 60), 0) / dimensions.length)
+  const overall = data?.overall_score ?? Math.round(dimensions.reduce((s: number, d: HealthDimension) => s + (d.score || 60), 0) / dimensions.length)
   const overallStatus = data?.overall_status ?? (overall >= 75 ? '优秀' : overall >= 60 ? '良好' : '需改善')
 
-  const weakPoints = dimensions.filter((d: any) => d.severity !== 'low')
+  const weakPoints = dimensions.filter((d: HealthDimension) => d.severity !== 'low')
 
   return (
     <div className="screen page-accent-green">
@@ -49,7 +52,7 @@ export function Health() {
               {loading ? '...' : `${overall}分 · ${overallStatus}`}
             </span>
           </div>
-          <RadarChart scores={dimensions.map((d: any) => d.score ?? 60)} />
+          <RadarChart scores={dimensions.map((d: HealthDimension) => d.score ?? 60)} />
           {dimensions.map((d: any, i: number) => (
             <div key={i} className="risk-row">
               <div className="risk-dot" style={{ background: severityColor[d.severity as keyof typeof severityColor] || colors.success }} />
@@ -67,7 +70,7 @@ export function Health() {
           ))}
           <AiInsight>
             {weakPoints.length > 0
-              ? `组合主要短板：${weakPoints.map((d: any) => d.name).join('、')}。建议重点关注${weakPoints[0]?.name}维度，可通过调整持仓结构改善。`
+              ? `组合主要短板：${weakPoints.map((d: HealthDimension) => d.name).join('、')}。建议重点关注${weakPoints[0]?.name}维度，可通过调整持仓结构改善。`
               : '组合各维度表现均衡，整体状态健康。建议继续保持当前配置。'
             }
           </AiInsight>

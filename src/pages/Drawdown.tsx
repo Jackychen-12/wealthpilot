@@ -9,11 +9,14 @@ import { analysisApi } from '../api/analysis'
 import { drawdownFunds } from '../data/mock'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 
+import type { DrawdownFund } from '../types'
+
 const severityColor = { high: colors.danger, medium: colors.warning, low: colors.success }
 const severityBg = { high: colors.dangerLight, medium: colors.warningLight, low: colors.successLight }
 
 export function Drawdown() {
   const go = useAppNavigate()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
@@ -57,17 +60,17 @@ export function Drawdown() {
             <div className="layer-num" style={{ color: colors.warning }}>Layer 2 · 持仓影响</div>
             <div className="layer-title">各基金回撤情况</div>
             <div className="layer-text">
-              持有的基金中 {funds.filter((f: any) => f.severity === 'high').length} 只处于较大回撤：
+              持有的基金中 {funds.filter((f: DrawdownFund) => f.severity === 'high').length} 只处于较大回撤：
             </div>
             <div style={{ marginTop: 10 }}>
-              {funds.map((f: any, i: number) => (
+              {funds.map((f: DrawdownFund, i: number) => (
                 <div key={i} className="risk-row">
                   <div className="risk-dot" style={{ background: severityColor[f.severity as keyof typeof severityColor] }} />
                   <span className="risk-name">{f.name}</span>
                   <span style={{ fontWeight: 600, color: severityColor[f.severity as keyof typeof severityColor], fontFamily: 'DM Sans' }}>
                     {f.value}
                   </span>
-                  {f.recovery_days > 0 && (
+                  {(f.recovery_days ?? 0) > 0 && (
                     <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 4 }}>
                       ({f.recovered ? `${f.recovery_days}日恢复` : `已${f.recovery_days}日未恢复`})
                     </span>
@@ -90,7 +93,7 @@ export function Drawdown() {
                 <div className="hist-label">平均最大跌幅</div>
               </div>
               <div className="hist-item">
-                <div className="hist-num">{funds.filter((f: any) => f.recovered).length}/{funds.length}</div>
+                <div className="hist-num">{funds.filter((f: DrawdownFund) => f.recovered).length}/{funds.length}</div>
                 <div className="hist-label">已恢复比例</div>
               </div>
             </div>

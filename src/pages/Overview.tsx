@@ -10,12 +10,14 @@ import { analysisApi } from '../api/analysis'
 import { portfolioSummary, topContributors, topDetractors } from '../data/mock'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 
+import type { OverviewData } from '../types'
+
 const B = colors.primary
 
 export function Overview() {
   const go = useAppNavigate()
-  const [overview, setOverview] = useState<any>(null)
-  const [attribution, setAttribution] = useState<any[]>([])
+  const [overview, setOverview] = useState<OverviewData | null>(null)
+  const [attribution, setAttribution] = useState<{ name: string; value: string; pct: number; positive: boolean }[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
