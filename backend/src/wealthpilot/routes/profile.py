@@ -7,15 +7,13 @@ from sqlmodel import Session, select
 
 from wealthpilot.models.profile import RISK_LABELS, InvestorProfile
 from wealthpilot.models.schemas import ProfileResponse, ProfileUpsert
+from wealthpilot.services.deps import ANONYMOUS_USER_ID, current_user_id
 from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
-DEFAULT_USER_ID = 1
-
-
-def load_profile(db: Session, user_id: int = DEFAULT_USER_ID) -> InvestorProfile | None:
-    """供 chat 路由复用：取当前用户画像，没有就返回 None。"""
+def load_profile(db: Session, user_id: int = ANONYMOUS_USER_ID) -> InvestorProfile | None:
+    """供 chat 路由复用：取指定用户的画像，没有就返回 None。"""
     return db.exec(
         select(InvestorProfile).where(InvestorProfile.user_id == user_id)
     ).first()
@@ -37,18 +35,25 @@ def _to_response(p: InvestorProfile) -> ProfileResponse:
 
 
 @router.get("", response_model=ProfileResponse | None)
-def get_profile(db: Session = Depends(get_session)):
+def get_profile(
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
     """获取当前风险画像。未测评返回 null。"""
-    p = load_profile(db)
+    p = load_profile(db, user_id)
     return _to_response(p) if p else None
 
 
 @router.put("", response_model=ProfileResponse)
-def upsert_profile(req: ProfileUpsert, db: Session = Depends(get_session)):
+def upsert_profile(
+    req: ProfileUpsert,
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
     """提交/更新风险测评结果。"""
-    p = load_profile(db)
+    p = load_profile(db, user_id)
     if p is None:
-        p = InvestorProfile(user_id=DEFAULT_USER_ID)
+        p = InvestorProfile(user_id=user_id)
         db.add(p)
 
     p.risk_level = req.risk_level

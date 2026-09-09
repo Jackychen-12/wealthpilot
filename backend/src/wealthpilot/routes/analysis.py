@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
+from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.analysis import (
     calculate_attribution_by_category,
@@ -37,9 +38,9 @@ async def _load_data(holdings: list[PortfolioHolding]):
 
 
 @router.get("/overview")
-async def get_overview(db: Session = Depends(get_session)):
+async def get_overview(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """持仓总览（含 Sharpe 比率、真实周收益）。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return {"error": "暂无持仓数据，请先添加持仓"}
     nav_data, nav_history = await _load_data(holdings)
@@ -59,9 +60,9 @@ async def get_overview(db: Session = Depends(get_session)):
 
 
 @router.get("/attribution")
-async def get_attribution(by: str = "fund", db: Session = Depends(get_session)):
+async def get_attribution(by: str = "fund", db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """收益归因。by=fund|category|industry"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return []
     nav_data, _ = await _load_data(holdings)
@@ -73,9 +74,9 @@ async def get_attribution(by: str = "fund", db: Session = Depends(get_session)):
 
 
 @router.get("/drawdown")
-async def get_drawdown(db: Session = Depends(get_session)):
+async def get_drawdown(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """回撤分析（含最大回撤 + 恢复天数）。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return {"funds": [], "summary": {}}
     nav_data, nav_history = await _load_data(holdings)
@@ -94,9 +95,9 @@ async def get_drawdown(db: Session = Depends(get_session)):
 
 
 @router.get("/health")
-async def get_health(db: Session = Depends(get_session)):
+async def get_health(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """组合健康度（5 维雷达 + 综合评分）。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return {"dimensions": [], "overall_score": 0}
     nav_data, nav_history = await _load_data(holdings)
@@ -110,9 +111,9 @@ async def get_health(db: Session = Depends(get_session)):
 
 
 @router.get("/correlation")
-async def get_correlation(db: Session = Depends(get_session)):
+async def get_correlation(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """持仓间相关性矩阵。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if len(holdings) < 2:
         return {"message": "至少需要2只基金才能计算相关性", "matrix": {}}
     _, nav_history = await _load_data(holdings)
@@ -123,9 +124,9 @@ async def get_correlation(db: Session = Depends(get_session)):
 
 
 @router.get("/suggestions")
-async def get_suggestions(db: Session = Depends(get_session)):
+async def get_suggestions(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """AI 建议（规则引擎 + 数据驱动）。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return [{"title": "添加持仓", "desc": "请先在持仓管理中添加您的基金持仓", "priority": "high"}]
 

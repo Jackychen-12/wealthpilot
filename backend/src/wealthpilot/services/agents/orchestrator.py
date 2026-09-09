@@ -53,6 +53,7 @@ async def chat_stream(
     conversation_id: str | None = None,
     db_session: Session | None = None,
     profile: InvestorProfile | None = None,
+    user_id: int = 0,
 ) -> AsyncGenerator[str, None]:
     """多 Agent 协调入口，产出 SSE 文本流。"""
     queue: asyncio.Queue = asyncio.Queue()
@@ -64,7 +65,7 @@ async def chat_stream(
         try:
             await _run_pipeline(
                 message, history, holdings, nav_data, nav_history,
-                conversation_id, db_session, profile, emit,
+                conversation_id, db_session, profile, user_id, emit,
             )
         except Exception as e:  # noqa: BLE001
             await emit({"type": "error", "content": f"Agent 执行异常: {e}"})
@@ -87,7 +88,7 @@ async def chat_stream(
 
 async def _run_pipeline(
     message, history, holdings, nav_data, nav_history,
-    conversation_id, db_session, profile, emit,
+    conversation_id, db_session, profile, user_id, emit,
 ) -> None:
     settings = get_settings()
     try:
@@ -99,7 +100,7 @@ async def _run_pipeline(
     model = settings.active_model
 
     if not history and conversation_id and db_session:
-        history = _load_history(db_session, conversation_id)
+        history = _load_history(db_session, conversation_id, user_id)
 
     base_messages = [{"role": m["role"], "content": m["content"]} for m in history[-10:]]
 
@@ -143,7 +144,7 @@ async def _run_pipeline(
         final_text = result.text
         grounding = check_numeric_grounding(final_text, [result])
         await _finish(emit, final_text, grounding, plan, message, holdings,
-                      conversation_id, db_session, [first.agent])
+                      conversation_id, db_session, user_id, [first.agent])
         return
 
     # ── 3. 多任务：按波并发执行 ───────────────────────────────
@@ -184,12 +185,12 @@ async def _run_pipeline(
 
     grounding = check_numeric_grounding(final_text, results)
     await _finish(emit, final_text, grounding, plan, message, holdings,
-                  conversation_id, db_session, [r.agent for r in results])
+                  conversation_id, db_session, user_id, [r.agent for r in results])
 
 
 async def _finish(
     emit, final_text, grounding, plan, message, holdings,
-    conversation_id, db_session, agents,
+    conversation_id, db_session, user_id, agents,
 ) -> None:
     if grounding["ungrounded"]:
         # 不拦截输出，但把问题暴露出来 —— 这是可以进 CI 的可观测指标
@@ -200,9 +201,9 @@ async def _finish(
         })
 
     if conversation_id and db_session:
-        _save_message(db_session, conversation_id, "user", message)
+        _save_message(db_session, conversation_id, user_id, "user", message)
         _save_message(
-            db_session, conversation_id, "assistant", final_text,
+            db_session, conversation_id, user_id, "assistant", final_text,
             metadata={
                 "intent": plan.intent,
                 "plan_source": plan.source,
@@ -234,10 +235,13 @@ def _prior_context(results: list[AgentResult]) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def _load_history(db_session: Session, conversation_id: str) -> list[dict[str, str]]:
+def _load_history(
+    db_session: Session, conversation_id: str, user_id: int = 0
+) -> list[dict[str, str]]:
     stmt = (
         select(ChatMessage)
         .where(ChatMessage.conversation_id == conversation_id)
+        .where(ChatMessage.user_id == user_id)
         .order_by(ChatMessage.created_at)
     )
     rows = db_session.exec(stmt).all()
@@ -247,11 +251,13 @@ def _load_history(db_session: Session, conversation_id: str) -> list[dict[str, s
 def _save_message(
     db_session: Session,
     conversation_id: str,
+    user_id: int,
     role: str,
     content: str,
     metadata: dict | None = None,
 ) -> None:
     msg = ChatMessage(
+        user_id=user_id,
         conversation_id=conversation_id,
         role=role,
         content=content,

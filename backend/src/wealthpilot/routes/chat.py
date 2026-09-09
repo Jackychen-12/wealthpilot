@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
+from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import ChatRequest
@@ -16,9 +17,13 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("")
-async def chat(req: ChatRequest, db: Session = Depends(get_session)):
+async def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
     """AI 对话（SSE streaming + Multi-Agent）。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
 
     nav_data: dict[str, float] = {}
     nav_history: dict[str, list[dict]] = {}
@@ -41,7 +46,8 @@ async def chat(req: ChatRequest, db: Session = Depends(get_session)):
             nav_history,
             conversation_id=req.conversation_id,
             db_session=db,
-            profile=load_profile(db),
+            profile=load_profile(db, user_id),
+            user_id=user_id,
         ),
         media_type="text/event-stream",
         headers={
@@ -53,11 +59,16 @@ async def chat(req: ChatRequest, db: Session = Depends(get_session)):
 
 
 @router.get("/history/{conversation_id}")
-def get_history(conversation_id: str, db: Session = Depends(get_session)):
-    """获取指定会话的历史消息。"""
+def get_history(
+    conversation_id: str,
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    """获取指定会话的历史消息（仅限本人的会话）。"""
     stmt = (
         select(ChatMessage)
         .where(ChatMessage.conversation_id == conversation_id)
+        .where(ChatMessage.user_id == user_id)
         .order_by(ChatMessage.created_at)
     )
     rows = db.exec(stmt).all()

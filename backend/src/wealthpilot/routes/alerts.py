@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
+from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.market_data import fetch_fund_info
 from wealthpilot.storage.db import get_session
@@ -19,7 +20,7 @@ async def check_alerts(
 
     threshold: 触发预警的收益率阈值（默认 -3%）
     """
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return {"alerts": [], "message": "暂无持仓"}
 
@@ -52,9 +53,9 @@ async def check_alerts(
 
 
 @router.get("/summary")
-async def alert_summary(db: Session = Depends(get_session)):
+async def alert_summary(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """预警摘要（首页使用）。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     critical = 0
     warning = 0
 
