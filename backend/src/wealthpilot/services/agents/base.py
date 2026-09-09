@@ -168,5 +168,5 @@ class BaseAgent:
 
     async def _run_tool(self, name: str, input_data: dict) -> str:
         return await execute_tool(
-            name, input_data, self.holdings, self.nav_data, self.nav_history
+            name, input_data, self.holdings, self.nav_data, self.nav_history, self.profile
         )
