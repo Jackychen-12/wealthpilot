@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
 
 from wealthpilot.models.chat import ChatMessage  # noqa: F401 — register table
+from wealthpilot.models.profile import InvestorProfile  # noqa: F401 — register table
 from wealthpilot.settings import get_settings
 
 _engine = None

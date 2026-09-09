@@ -8,6 +8,7 @@ from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import ChatRequest
 from wealthpilot.services.agents import chat_stream
+from wealthpilot.routes.profile import load_profile
 from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
 from wealthpilot.storage.db import get_session
 
@@ -40,6 +41,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_session)):
             nav_history,
             conversation_id=req.conversation_id,
             db_session=db,
+            profile=load_profile(db),
         ),
         media_type="text/event-stream",
         headers={

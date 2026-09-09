@@ -93,37 +93,107 @@ def cmd_config(_args: argparse.Namespace) -> None:
     print("└─────────────────────────────────────────┘")
 
 
+def _load_context():
+    """加载持仓、净值与风险画像 —— CLI 与 Web 走同一套上下文。"""
+    import asyncio
+
+    from sqlmodel import Session, select
+
+    from wealthpilot.models.portfolio import PortfolioHolding
+    from wealthpilot.routes.profile import load_profile
+    from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
+    from wealthpilot.storage.db import get_engine
+
+    engine = get_engine()
+    with Session(engine) as session:
+        holdings = list(session.exec(select(PortfolioHolding)).all())
+        profile = load_profile(session)
+
+    async def load_nav():
+        nav_data: dict[str, float] = {}
+        nav_history: dict[str, list[dict]] = {}
+        for h in holdings:
+            info = await fetch_fund_info(h.fund_code)
+            nav_data[h.fund_code] = info["nav"] if info else h.cost_price
+            hist = await fetch_fund_nav(h.fund_code, 60)
+            if hist:
+                nav_history[h.fund_code] = hist
+        return nav_data, nav_history
+
+    nav_data, nav_history = asyncio.run(load_nav())
+    return holdings, nav_data, nav_history, profile
+
+
+async def _consume_stream(stream, *, verbose_to_stderr: bool = False) -> str:
+    """消费 chat_stream 的 SSE 事件并打印。返回最终文本。"""
+    import json
+
+    info = sys.stderr if verbose_to_stderr else sys.stdout
+    full_text = ""
+
+    async for sse_line in stream:
+        if not sse_line.startswith("data: "):
+            continue
+        data = json.loads(sse_line[6:].strip())
+        kind = data.get("type")
+
+        if kind == "plan":
+            tasks = data.get("tasks", [])
+            if len(tasks) > 1:
+                print(f"\n🧭 规划 {len(tasks)} 个并行任务（{data.get('intent', '')}）：", file=info)
+                for t in tasks:
+                    print(f"   • {t.get('label', t['agent'])} — {t.get('goal', '')}", file=info)
+        elif kind == "task_start":
+            print(f"\n{data.get('label', data['agent'])} 开始：{data.get('goal', '')}", file=info)
+        elif kind == "task_done":
+            tools = "、".join(data.get("tools", [])) or "无"
+            print(f"   ✓ 完成（工具：{tools}）", file=info)
+        elif kind == "synthesizing":
+            print("\n🧩 整合各方证据…\n", file=info)
+        elif kind == "delta":
+            print(data["content"], end="", flush=True)
+            full_text += data["content"]
+        elif kind == "tool_call":
+            print(f"\n  🔧 {data['tool']}...", file=info, flush=True)
+        elif kind == "grounding_warning":
+            nums = "、".join(data.get("ungrounded", []))
+            print(
+                f"\n⚠️  数值溯源率 {data.get('rate')}，以下数字未在工具返回中找到：{nums}",
+                file=sys.stderr,
+            )
+        elif kind == "error":
+            print(f"\n  ❌ {data['content']}", file=sys.stderr)
+
+    return full_text
+
+
 def cmd_chat(_args: argparse.Namespace) -> None:
-    from wealthpilot.settings import get_settings
+    import asyncio
+
+    from wealthpilot.services.agents.orchestrator import chat_stream
     from wealthpilot.services.ai_client import create_ai_client
+    from wealthpilot.settings import get_settings
 
     settings = get_settings()
     try:
-        client = create_ai_client(settings)
+        create_ai_client(settings)
     except ValueError as e:
         print(f"❌ {e}")
         sys.exit(1)
 
-    model = settings.active_model
-
-    from wealthpilot.services.agents.router_agent import RouterAgent
-    from wealthpilot.services.agents.market_agent import MarketAgent
-    from wealthpilot.services.agents.portfolio_agent import PortfolioAgent
-    from wealthpilot.services.agents.risk_agent import RiskAgent
+    holdings, nav_data, nav_history, profile = _load_context()
 
     history: list[dict] = []
-
-    agent_labels = {
-        "market": "📊 市场分析",
-        "portfolio": "💼 持仓分析",
-        "risk": "🛡️ 风险评估",
-    }
-
     provider = settings.ai_provider.upper()
+
     print("╔═══════════════════════════════════════╗")
     print(f"║  WealthPilot AI 终端对话 ({provider})     ║")
     print("║  输入 quit 退出 · 输入 clear 清空历史  ║")
     print("╚═══════════════════════════════════════╝")
+    if profile is None:
+        print("提示：尚未完成风险测评，涉及仓位的建议会被限制。")
+    else:
+        print(f"风险画像：{profile.risk_label} · 最大回撤容忍 {profile.max_drawdown_tolerance:.0%}")
     print()
 
     while True:
@@ -143,33 +213,10 @@ def cmd_chat(_args: argparse.Namespace) -> None:
             print("历史已清空\n")
             continue
 
-        router = RouterAgent(client, model)
-        agent_name, reason = router.route(user_input)
-        print(f"\n{agent_labels.get(agent_name, agent_name)} — {reason}")
-
-        if agent_name == "market":
-            agent = MarketAgent(client, model)
-        elif agent_name == "risk":
-            agent = RiskAgent(client, model, [], {}, None)
-        else:
-            agent = PortfolioAgent(client, model, [], {}, None)
-
-        messages = [{"role": m["role"], "content": m["content"]} for m in history[-10:]]
-        messages.append({"role": "user", "content": user_input})
-
-        import json
-        full_text = ""
-        for sse_line in agent.run(messages):
-            if not sse_line.startswith("data: "):
-                continue
-            data = json.loads(sse_line[6:].strip())
-            if data["type"] == "delta":
-                print(data["content"], end="", flush=True)
-                full_text += data["content"]
-            elif data["type"] == "tool_call":
-                print(f"\n  🔧 {data['tool']}...", flush=True)
-            elif data["type"] == "error":
-                print(f"\n  ❌ {data['content']}")
+        stream = chat_stream(
+            user_input, list(history), holdings, nav_data, nav_history, profile=profile
+        )
+        full_text = asyncio.run(_consume_stream(stream))
 
         print("\n")
         history.append({"role": "user", "content": user_input})
@@ -183,7 +230,6 @@ def cmd_mcp(_args: argparse.Namespace) -> None:
 
 def cmd_ask(args: argparse.Namespace) -> None:
     import asyncio
-    import json
 
     query = args.query
     if query == "-":
@@ -192,8 +238,9 @@ def cmd_ask(args: argparse.Namespace) -> None:
         print("❌ 查询内容不能为空", file=sys.stderr)
         sys.exit(1)
 
-    from wealthpilot.settings import get_settings
+    from wealthpilot.services.agents.orchestrator import chat_stream
     from wealthpilot.services.ai_client import create_ai_client
+    from wealthpilot.settings import get_settings
 
     settings = get_settings()
     try:
@@ -202,43 +249,10 @@ def cmd_ask(args: argparse.Namespace) -> None:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
 
-    from sqlmodel import Session, select
-    from wealthpilot.models.portfolio import PortfolioHolding
-    from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
-    from wealthpilot.storage.db import get_engine
+    holdings, nav_data, nav_history, profile = _load_context()
 
-    engine = get_engine()
-    with Session(engine) as session:
-        holdings = list(session.exec(select(PortfolioHolding)).all())
-
-    async def load_nav():
-        nav_data: dict[str, float] = {}
-        nav_history: dict[str, list[dict]] = {}
-        for h in holdings:
-            info = await fetch_fund_info(h.fund_code)
-            nav_data[h.fund_code] = info["nav"] if info else h.cost_price
-            hist = await fetch_fund_nav(h.fund_code, 60)
-            if hist:
-                nav_history[h.fund_code] = hist
-        return nav_data, nav_history
-
-    nav_data, nav_history = asyncio.run(load_nav())
-
-    from wealthpilot.services.agents.orchestrator import chat_stream
-
-    for sse_line in chat_stream(query, [], holdings, nav_data, nav_history):
-        if not sse_line.startswith("data: "):
-            continue
-        data = json.loads(sse_line[6:].strip())
-        if data["type"] == "agent_route":
-            label = data.get("label", data.get("agent", ""))
-            print(f"[{label}] {data.get('reason', '')}", file=sys.stderr)
-        elif data["type"] == "delta":
-            print(data["content"], end="", flush=True)
-        elif data["type"] == "tool_call":
-            print(f"  → {data['tool']}...", file=sys.stderr)
-        elif data["type"] == "error":
-            print(f"❌ {data['content']}", file=sys.stderr)
+    stream = chat_stream(query, [], holdings, nav_data, nav_history, profile=profile)
+    asyncio.run(_consume_stream(stream, verbose_to_stderr=True))
 
     print()
 
