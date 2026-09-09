@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
-    anthropic_model: str = Field(default="claude-sonnet-4-6")
+    anthropic_model: str = Field(default="claude-sonnet-5")
 
     # DeepSeek (OpenAI-compatible)
     deepseek_api_key: str = Field(default="", description="DeepSeek API key")
@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # Agent configuration
     agent_max_tool_rounds: int = Field(default=3)
     agent_max_tokens: int = Field(default=4000)
+    agent_max_parallel: int = Field(default=3, description="同一波内并发执行的 Agent 上限")
+    planner_max_tasks: int = Field(default=4, description="Planner 单次拆解的任务数上限")
 
     db_path: Path = Field(default=Path("./data/wealthpilot.db"))
     host: str = "0.0.0.0"

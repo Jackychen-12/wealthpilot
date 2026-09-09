@@ -3,6 +3,7 @@ import { Notch } from '../components/Notch'
 import { NavBar } from '../components/NavBar'
 import { colors } from '../utils/theme'
 import { useAppNavigate } from '../hooks/useAppNavigate'
+import { answersToProfile, saveProfile } from '../api/profile'
 
 const questions = [
   {
@@ -64,6 +65,8 @@ export function RiskProfile() {
   const go = useAppNavigate()
   const [answers, setAnswers] = useState<number[]>(Array(questions.length).fill(-1))
   const [submitted, setSubmitted] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveState, setSaveState] = useState<'idle' | 'saved' | 'failed'>('idle')
 
   const totalScore = answers.reduce((s, a, i) => s + (a >= 0 ? questions[i].scores[a] : 0), 0)
   const answeredCount = answers.filter(a => a >= 0).length
@@ -137,7 +140,14 @@ export function RiskProfile() {
             ))}
             <div
               className={`form-btn ${allAnswered ? 'form-btn-primary' : ''}`}
-              onClick={() => allAnswered && setSubmitted(true)}
+              onClick={async () => {
+                if (!allAnswered || saving) return
+                setSaving(true)
+                const saved = await saveProfile(answersToProfile(answers, totalScore))
+                setSaveState(saved ? 'saved' : 'failed')
+                setSaving(false)
+                setSubmitted(true)
+              }}
               style={{
                 background: allAnswered ? undefined : colors.border,
                 color: allAnswered ? undefined : '#fff',
@@ -146,7 +156,7 @@ export function RiskProfile() {
                 boxShadow: allAnswered ? undefined : 'none',
               }}
             >
-              提交评估（{answeredCount}/{questions.length}）
+              {saving ? '保存中…' : `提交评估（${answeredCount}/${questions.length}）`}
             </div>
           </>
         ) : (
@@ -164,8 +174,20 @@ export function RiskProfile() {
             }}>
               {profile.desc}
             </div>
+
+            <div style={{
+              marginTop: 12, padding: '10px 12px', borderRadius: 8, textAlign: 'left',
+              fontSize: 12, lineHeight: 1.6,
+              background: saveState === 'saved' ? '#ECFDF5' : '#FFF7ED',
+              color: saveState === 'saved' ? colors.success : colors.warning,
+              border: `1px solid ${saveState === 'saved' ? colors.success : colors.warning}30`,
+            }}>
+              {saveState === 'saved'
+                ? '✓ 画像已保存。AI 对话在给出仓位或操作建议时，会按你的最大回撤容忍度与投资期限做约束核对。'
+                : '⚠️ 画像未能保存到服务端（当前为演示模式）。AI 对话将不会带上你的风险约束。'}
+            </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
-              <div className="form-btn form-btn-outline" style={{ flex: 1 }} onClick={() => { setSubmitted(false); setAnswers(Array(questions.length).fill(-1)) }}>
+              <div className="form-btn form-btn-outline" style={{ flex: 1 }} onClick={() => { setSubmitted(false); setSaveState('idle'); setAnswers(Array(questions.length).fill(-1)) }}>
                 重新评估
               </div>
               <div className="form-btn form-btn-primary" style={{ flex: 1 }} onClick={() => go('suggest')}>

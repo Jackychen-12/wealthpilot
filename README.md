@@ -39,7 +39,9 @@
 
 | | 优势 | 说明 |
 |--|------|------|
-| 🤖 | **多智能体架构** | Router Agent 意图分类 → 市场/持仓/风险 3 个专业 Agent，各自配备专属工具集，非简单 prompt 拼接 |
+| 🤖 | **Planner 多智能体架构** | Planner 拆解任务 DAG → 3 个专业 Agent 并发执行 → Synthesizer 整合并消解冲突，非简单 prompt 拼接 |
+| 🎯 | **风险画像硬约束** | 风险测评结果注入 Planner/Agent/Synthesizer 三处；未测评时不得给出具体仓位比例 |
+| 🔍 | **数值溯源检查** | 答案里的每个数字都回查工具返回，抓出模型编造的数据，纯代码实现可进 CI |
 | 🔧 | **12 个实时工具** | Agent 自主决策调用：基金查询、净值走势、财经新闻、收益归因、回撤分析、相关性矩阵... |
 | 🌐 | **双模型支持** | Claude & DeepSeek 一行配置切换，Provider 抽象层自动适配 Anthropic SDK / OpenAI SDK |
 | 📊 | **免费实时数据** | AKShare + 东方财富 + 天天基金 + 新浪财经，无需付费数据源 |
@@ -107,7 +109,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 ```
 ┌─ WealthPilot 配置 ─────────────────────┐
 │ AI 提供商:      ANTHROPIC              │
-│ AI 模型:        claude-sonnet-4-6      │
+│ AI 模型:        claude-sonnet-5      │
 │ API Key:        sk-ant-api...xxxx      │
 │ 工具调用轮次:   3                       │
 │ 数据库:         ./data/wealthpilot.db  │
@@ -138,31 +140,40 @@ WealthPilot 的 AI 核心是一个 **4 Agent 协作系统**，不是简单的单
    │
    ▼
 ┌──────────────────┐
-│   Router Agent   │  意图分类（LLM + 关键词兜底）
-│   "这是什么类型   │  → 输出：agent_name + reason
-│    的问题？"      │
+│  Planner Agent   │  任务拆解（LLM + 关键词兜底）
+│  "回答这个问题    │  → 输出 TaskGraph(DAG) + success_criteria
+│   需要哪些证据？" │
 └──────┬───────────┘
-       │
-       ├─── market ──→ 📊 MarketAgent（3 工具）
-       │                  get_fund_info     — 基金基本信息
-       │                  get_nav_history   — 净值走势
-       │                  search_news       — 财经新闻
-       │
-       ├─── portfolio → 💼 PortfolioAgent（4 工具）
-       │                  get_overview       — 持仓总览
-       │                  get_attribution    — 收益归因
-       │                  get_health         — 健康度评分
-       │                  get_suggestions    — 调仓建议
-       │
-       └─── risk ────→ 🛡️ RiskAgent（5 工具）
-                          get_drawdown       — 回撤分析
-                          get_correlation    — 相关性矩阵
-                          calculate_return   — 区间收益率
-                          compare_funds      — 基金对比
-                          get_max_drawdown   — 最大回撤
+       │  无依赖的任务同波并发（asyncio.gather）
+       ├──────────────┬──────────────┐
+       ▼              ▼              ▼
+  📊 MarketAgent  💼 PortfolioAgent  🛡️ RiskAgent
+     3 工具           4 工具            5 工具
+   get_fund_info   get_overview     get_drawdown
+   get_nav_history get_attribution  get_correlation
+   search_news     get_health       calculate_return
+                   get_suggestions  compare_funds
+                                    get_max_drawdown
+       │              │              │
+       └──────────────┼──────────────┘
+                      ▼
+            ┌───────────────────┐
+            │ Synthesizer Agent │  跨 Agent 整合 + 冲突消解 + 画像约束核对
+            └─────────┬─────────┘
+                      ▼
+              数值溯源检查（纯代码，不耗 token）
+                      ▼
+                   最终回答
 ```
 
-**关键设计**：每个专业 Agent 继承自 `BaseAgent`，共享 tool-use 循环——Agent 自主决定调用哪些工具、调用几次，直到它认为信息充分后才生成最终回答。这是真正的 Agent 行为，不是预编排的 pipeline。
+单任务的简单查询走**快路径**：直接由该 Agent 流式输出，不经 Synthesizer，避免多一跳延迟。
+
+**关键设计**
+
+1. **Planner 取代 Router**：Router 只能三选一，"我半导体仓位重不重、要不要调"这类需要持仓 + 风险 + 市场三方面证据的问题必然答不全 —— 那是架构上限，不是 prompt 能补的。Planner 产出一张任务 DAG，无依赖任务并发执行。
+2. **真并发**：`BaseAgent.run` 是 async 的；同一轮内的多个工具调用用 `asyncio.gather` 并发，3 次网络往返压缩成 1 次的耗时。同步 SDK 通过 `streaming.py` 搬到工作线程，不阻塞事件循环。
+3. **风险画像是硬约束**：`InvestorProfile` 注入 Planner / 各专业 Agent / Synthesizer 三处。未完成测评时，系统不得给出具体仓位比例或止损价位。
+4. **数值溯源检查**：答案里出现的每个数字都会在工具返回中回查，查不到就发 `grounding_warning`。纯正则实现，不消耗 token，可直接作为 CI 指标。
 
 ### Provider 抽象层
 
@@ -196,7 +207,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 └────────────────────────────┬─────────────────────────────────┘
                              │ HTTP / SSE
 ┌────────────────────────────┴─────────────────────────────────┐
-│                Backend (FastAPI · 24 endpoints)                │
+│                Backend (FastAPI · 27 endpoints)                │
 │                                                               │
 │  ┌───────────┐  ┌───────────┐  ┌───────────────┐  ┌────────┐│
 │  │ Portfolio  │  │  Market   │  │  Multi-Agent  │  │Analysis││
@@ -397,7 +408,7 @@ make clean     # 清理生成文件
 ## API Reference
 
 <details>
-<summary>完整 API 列表（24 个端点，点击展开）</summary>
+<summary>完整 API 列表（27 个端点，点击展开）</summary>
 
 ### Auth（3）
 
@@ -440,6 +451,14 @@ make clean     # 清理生成文件
 | GET | `/api/analysis/correlation` | 持仓相关性矩阵 |
 | GET | `/api/analysis/suggestions` | 数据驱动的调仓建议 |
 
+### Investor Profile（3）
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/profile` | 获取风险画像（未测评返回 null） |
+| PUT | `/api/profile` | 提交/更新风险测评结果 |
+| GET | `/api/profile/labels` | 风险等级字典 |
+
 ### AI Chat & Reports（3）
 
 | Method | Endpoint | Description |
@@ -478,12 +497,14 @@ wealthpilot/
         ├── services/
         │   ├── ai_client.py     #   ⭐ Provider 抽象层（Anthropic / DeepSeek 自动适配）
         │   ├── agents/          #   ⭐ 多智能体系统
-        │   │   ├── base.py      #     BaseAgent — 共享 tool-use 循环
-        │   │   ├── router_agent.py #  Router — 意图分类 + 关键词兜底
+        │   │   ├── base.py      #     BaseAgent — 异步 tool-use 循环 + 并发工具
+        │   │   ├── planner_agent.py # ⭐ Planner — 任务 DAG 拆解 + 关键词兜底
+        │   │   ├── synthesizer_agent.py # ⭐ Synthesizer + 数值溯源检查
+        │   │   ├── streaming.py #     同步 SDK → 异步事件流桥接
         │   │   ├── market_agent.py #  市场 Agent（3 工具）
         │   │   ├── portfolio_agent.py # 持仓 Agent（4 工具）
         │   │   ├── risk_agent.py   #  风险 Agent（5 工具）
-        │   │   ├── orchestrator.py #  编排器 — Router → Agent 协调
+        │   │   ├── orchestrator.py #  编排器 — Plan → 并行 Execute → Synthesize
         │   │   ├── tools.py     #     12 个工具定义 + 统一执行器
         │   │   └── prompts.py   #     Agent 专属 system prompt
         │   ├── analysis.py      #   分析引擎（Sharpe、回撤、健康度、相关性）
@@ -533,6 +554,12 @@ docker compose up --build -d
 - [x] Docker Compose 部署
 - [x] AI 周报生成
 - [x] Demo 体验优化（SVG 图标系统、演示模式模拟多 Agent 流程、页面转场动画、动态雷达图）
+- [x] Planner/Synthesizer 架构（任务 DAG + 并行执行 + 冲突消解）
+- [x] 投资者画像（风险测评落库，注入 Planner/Agent/Synthesizer 作为硬约束）
+- [x] 数值溯源检查（答案中的数字必须来自工具返回）
+- [ ] 持仓穿透（重仓股重叠度 + 真实行业暴露）
+- [ ] 计算工具化（compute_* / check_* ，杜绝 LLM 算术）
+- [ ] 回测引擎（规则型策略的历史验证）
 - [ ] 推送通知（回撤预警）
 - [ ] 回测与情景分析
 - [ ] 多资产类别（股票、债券、ETF、加密货币）

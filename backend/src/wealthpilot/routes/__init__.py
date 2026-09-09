@@ -10,6 +10,7 @@ from wealthpilot.routes.market import router as market_router
 from wealthpilot.routes.analysis import router as analysis_router
 from wealthpilot.routes.chat import router as chat_router
 from wealthpilot.routes.report import router as report_router
+from wealthpilot.routes.profile import router as profile_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
@@ -20,3 +21,4 @@ api_router.include_router(analysis_router)
 api_router.include_router(chat_router)
 api_router.include_router(report_router)
 api_router.include_router(alerts_router)
+api_router.include_router(profile_router)

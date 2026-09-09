@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from wealthpilot.models.portfolio import PortfolioHolding
+from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import BaseAgent
 from wealthpilot.services.agents.prompts import build_portfolio_prompt
 from wealthpilot.services.agents.tools import PORTFOLIO_TOOLS
@@ -21,14 +22,16 @@ class PortfolioAgent(BaseAgent):
         holdings: list[PortfolioHolding],
         nav_data: dict[str, float],
         nav_history: dict[str, list[dict]] | None = None,
+        profile: InvestorProfile | None = None,
     ):
         super().__init__(
             name="portfolio",
             tools=PORTFOLIO_TOOLS,
-            system_prompt=build_portfolio_prompt(holdings, nav_data),
+            system_prompt=build_portfolio_prompt(holdings, nav_data, profile),
             client=client,
             model=model,
             holdings=holdings,
             nav_data=nav_data,
             nav_history=nav_history,
+            profile=profile,
         )

@@ -103,3 +103,27 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="用户消息")
     history: list[dict[str, str]] = Field(default_factory=list, description="对话历史")
     conversation_id: str | None = Field(default=None, description="会话 ID")
+
+
+# === Investor Profile ===
+class ProfileUpsert(BaseModel):
+    risk_level: int = Field(..., ge=1, le=5, description="风险等级 1-5")
+    horizon_months: int = Field(..., ge=0, description="投资期限（月）")
+    max_drawdown_tolerance: float = Field(..., ge=0.0, le=1.0, description="0.15 = 15%")
+    liquidity_reserve: float = Field(default=0.0, ge=0.0, description="半年内需动用资金（元）")
+    experience_years: float = Field(default=1.0, ge=0.0)
+    excluded_industries: list[str] = Field(default_factory=list)
+    raw_score: int = Field(default=0, description="问卷原始总分")
+
+
+class ProfileResponse(BaseModel):
+    risk_level: int
+    risk_label: str
+    horizon_months: int
+    max_drawdown_tolerance: float
+    liquidity_reserve: float
+    experience_years: float
+    excluded_industries: list[str]
+    raw_score: int
+    updated_at: str
+    is_stale: bool
