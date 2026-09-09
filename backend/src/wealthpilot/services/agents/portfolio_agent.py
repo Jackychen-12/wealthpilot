@@ -8,7 +8,7 @@ from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import BaseAgent
 from wealthpilot.services.agents.prompts import build_portfolio_prompt
-from wealthpilot.services.agents.tools import PORTFOLIO_TOOLS
+from wealthpilot.services.agents.tools import COMPUTE_TOOLS, PORTFOLIO_TOOLS
 
 if TYPE_CHECKING:
     from wealthpilot.services.ai_client import AIClient
@@ -26,7 +26,7 @@ class PortfolioAgent(BaseAgent):
     ):
         super().__init__(
             name="portfolio",
-            tools=PORTFOLIO_TOOLS,
+            tools=[*PORTFOLIO_TOOLS, *COMPUTE_TOOLS],
             system_prompt=build_portfolio_prompt(holdings, nav_data, profile),
             client=client,
             model=model,

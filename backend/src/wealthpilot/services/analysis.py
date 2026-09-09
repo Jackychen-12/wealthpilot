@@ -202,7 +202,7 @@ def calculate_attribution_by_industry(
 def calculate_max_drawdown(nav_list: list[dict]) -> dict:
     """计算单只基金最大回撤 + 恢复天数。"""
     if len(nav_list) < 2:
-        return {"max_drawdown": 0, "drawdown_days": 0, "recovered": True}
+        return {"max_drawdown_pct": 0, "drawdown_days": 0, "recovery_days": 0, "recovered": True}
 
     navs = [item["nav"] for item in reversed(nav_list)]  # 按时间正序
     peak = navs[0]

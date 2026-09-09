@@ -18,19 +18,22 @@ mcp = MCPServer(
     ),
 )
 
-_ctx: dict = {"holdings": None, "nav_data": None, "nav_history": None}
+_ctx: dict = {"holdings": None, "nav_data": None, "nav_history": None, "profile": None}
 
 
-async def _ensure_context() -> tuple[list, dict, dict]:
-    """Lazy-load holdings + NAV data from SQLite."""
+async def _ensure_context() -> tuple[list, dict, dict, object]:
+    """Lazy-load holdings + NAV data + risk profile from SQLite."""
     if _ctx["holdings"] is not None:
-        return _ctx["holdings"], _ctx["nav_data"], _ctx["nav_history"]
+        return _ctx["holdings"], _ctx["nav_data"], _ctx["nav_history"], _ctx["profile"]
 
+    from wealthpilot.routes.profile import load_profile
     from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
 
     engine = get_engine()
     with Session(engine) as session:
         _ctx["holdings"] = list(session.exec(select(PortfolioHolding)).all())
+        # MCP 是本机单用户场景，取匿名档；Web 侧才按登录用户隔离
+        _ctx["profile"] = load_profile(session)
 
     nav_data: dict[str, float] = {}
     nav_history: dict[str, list[dict]] = {}
@@ -43,7 +46,7 @@ async def _ensure_context() -> tuple[list, dict, dict]:
 
     _ctx["nav_data"] = nav_data
     _ctx["nav_history"] = nav_history
-    return _ctx["holdings"], nav_data, nav_history
+    return _ctx["holdings"], nav_data, nav_history, _ctx["profile"]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -79,7 +82,7 @@ async def search_market_news(keyword: str = "") -> str:
 async def get_portfolio_overview() -> str:
     """Calculate portfolio overview: total value, returns, weekly P&L, Sharpe ratio.
     持仓总览：总市值、总收益、周收益、Sharpe 比率。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("get_portfolio_overview", {}, h, nd, nh)
 
 
@@ -87,7 +90,7 @@ async def get_portfolio_overview() -> str:
 async def get_attribution() -> str:
     """Per-fund return attribution analysis.
     按基金维度收益归因：哪只贡献最大、哪只拖累最多。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("get_attribution", {}, h, nd, nh)
 
 
@@ -95,7 +98,7 @@ async def get_attribution() -> str:
 async def get_health_score() -> str:
     """5-dimension portfolio health score: returns, volatility, diversification, style, risk-return.
     组合健康度 5 维评分（收益表现、波动控制、分散度、风格匹配、风险收益比）。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("get_health_score", {}, h, nd, nh)
 
 
@@ -103,7 +106,7 @@ async def get_health_score() -> str:
 async def get_investment_suggestions() -> str:
     """Rule-based investment suggestions: concentration, loss, correlation, category balance.
     规则引擎投资建议（集中度、亏损、相关性、类别均衡检查）。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("get_investment_suggestions", {}, h, nd, nh)
 
 
@@ -115,7 +118,7 @@ async def get_investment_suggestions() -> str:
 async def calculate_return(fund_code: str, days: int) -> str:
     """Calculate cumulative return over N days. days: 7=1week, 30=1month, 90=3months.
     计算基金指定天数内的累计收益率。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("calculate_return", {"fund_code": fund_code, "days": days}, h, nd, nh)
 
 
@@ -123,7 +126,7 @@ async def calculate_return(fund_code: str, days: int) -> str:
 async def compare_funds(fund_codes: list[str]) -> str:
     """Compare multiple funds' recent performance (2-5 funds).
     对比多只基金近期表现（净值、涨跌幅），2-5 只。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("compare_funds", {"fund_codes": fund_codes}, h, nd, nh)
 
 
@@ -131,7 +134,7 @@ async def compare_funds(fund_codes: list[str]) -> str:
 async def get_drawdown_analysis() -> str:
     """Analyze drawdown for all holdings: current drop, max drawdown, recovery days.
     全部持仓回撤分析（当前跌幅、最大回撤、恢复天数）。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("get_drawdown_analysis", {}, h, nd, nh)
 
 
@@ -139,7 +142,7 @@ async def get_drawdown_analysis() -> str:
 async def get_max_drawdown(fund_code: str) -> str:
     """Calculate max drawdown + recovery days for a single fund.
     单只基金最大回撤 + 恢复天数。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("get_max_drawdown", {"fund_code": fund_code}, h, nd, nh)
 
 
@@ -147,8 +150,47 @@ async def get_max_drawdown(fund_code: str) -> str:
 async def get_correlation_matrix() -> str:
     """Calculate correlation matrix across held funds to assess diversification.
     持仓基金相关性矩阵，评估分散化程度。"""
-    h, nd, nh = await _ensure_context()
+    h, nd, nh, _ = await _ensure_context()
     return await execute_tool("get_correlation_matrix", {}, h, nd, nh)
+
+
+# ═══════════════════════════════════════════════════════════
+# Compute / Check Tools（确定性计算，不让模型自己算）
+# ═══════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def compute_concentration() -> str:
+    """Portfolio concentration: weights, max weight, HHI, effective holdings.
+    持仓集中度：各基金权重、最大单一权重、HHI 指数、有效持仓数。
+    需要引用任何占比数字时用本工具，不要按市值心算。"""
+    h, nd, nh, pf = await _ensure_context()
+    return await execute_tool("compute_concentration", {}, h, nd, nh, pf)
+
+
+@mcp.tool()
+async def simulate_portfolio_change(changes: list[dict]) -> str:
+    """Simulate portfolio metrics after proposed position changes.
+    推演仓位变动后的组合指标（变动前后的权重、集中度、加权回撤估计）。
+    changes 每项给 fund_code，加 target_pct(目标占比 0-100) 或 amount(增减金额，可为负)。"""
+    h, nd, nh, pf = await _ensure_context()
+    return await execute_tool("simulate_portfolio_change", {"changes": changes}, h, nd, nh, pf)
+
+
+@mcp.tool()
+async def check_profile_constraint(changes: list[dict] | None = None) -> str:
+    """Check current (or proposed) portfolio against the user's risk profile.
+    按风险画像逐条校验当前持仓，或校验一组拟议变动之后的状态。
+    返回是否通过、违反了哪几条、检查了哪几项。给仓位建议前应先调用本工具。"""
+    h, nd, nh, pf = await _ensure_context()
+    return await execute_tool("check_profile_constraint", {"changes": changes}, h, nd, nh, pf)
+
+
+@mcp.tool()
+async def compute_position_sizing(fund_code: str) -> str:
+    """Max position for a fund without breaching the drawdown tolerance.
+    在不突破用户回撤容忍度的前提下，该基金最多能占多少比例，以及相对当前还有多少空间。"""
+    h, nd, nh, pf = await _ensure_context()
+    return await execute_tool("compute_position_sizing", {"fund_code": fund_code}, h, nd, nh, pf)
 
 
 def main() -> None:
