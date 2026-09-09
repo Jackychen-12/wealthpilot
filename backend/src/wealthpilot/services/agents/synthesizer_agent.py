@@ -39,10 +39,22 @@ class SynthesizerAgent:
         results: list[AgentResult],
         success_criteria: list[str],
         emit: Emit,
+        *,
+        stream_output: bool = True,
+        extra_instruction: str = "",
     ) -> str:
+        """整合各 Agent 结果。
+
+        Args:
+            stream_output: True 时边生成边发 `delta`。Critic 开启时必须传 False ——
+                否则未经校验的草稿已经流到用户面前，"打回重写"就无从谈起。
+            extra_instruction: Critic 的重写要求，追加在证据之后。
+        """
         settings = get_settings()
         system = build_synthesizer_prompt(self.profile, success_criteria)
         user_content = self._build_evidence_block(question, results)
+        if extra_instruction:
+            user_content += f"\n\n{extra_instruction}"
 
         final_text = ""
         stream_error: Exception | None = None
@@ -59,7 +71,8 @@ class SynthesizerAgent:
             async for kind, payload in stream_sync_in_thread(make_stream):
                 if kind == "delta":
                     final_text += payload
-                    await emit({"type": "delta", "content": payload})
+                    if stream_output:
+                        await emit({"type": "delta", "content": payload})
                 elif kind == "error":
                     stream_error = payload
             if stream_error is not None:
@@ -68,7 +81,8 @@ class SynthesizerAgent:
             await emit({"type": "error", "content": f"synthesizer 异常: {e}"})
             # 退化：直接拼接各 Agent 结果，保证用户至少拿得到内容
             final_text = self._fallback_merge(results)
-            await emit({"type": "delta", "content": final_text})
+            if stream_output:
+                await emit({"type": "delta", "content": final_text})
 
         return final_text
 

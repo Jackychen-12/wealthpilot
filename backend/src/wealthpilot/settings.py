@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     agent_max_tokens: int = Field(default=4000)
     agent_max_parallel: int = Field(default=3, description="同一波内并发执行的 Agent 上限")
     planner_max_tasks: int = Field(default=4, description="Planner 单次拆解的任务数上限")
+    critic_enabled: bool = Field(default=True, description="是否启用 Critic 双闸门校验")
+    critic_max_replans: int = Field(default=1, description="证据不足时最多补充规划几轮")
+    critic_max_rewrites: int = Field(default=2, description="输出不合规时最多重写几次")
 
     db_path: Path = Field(default=Path("./data/wealthpilot.db"))
     host: str = "0.0.0.0"
