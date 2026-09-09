@@ -26,8 +26,14 @@ from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
+from wealthpilot.services.agents.critic_agent import CriticAgent, rewrite_instruction
 from wealthpilot.services.agents.market_agent import MarketAgent
-from wealthpilot.services.agents.planner_agent import Plan, PlannerAgent, Task
+from wealthpilot.services.agents.planner_agent import (
+    KEYWORD_RULES,
+    Plan,
+    PlannerAgent,
+    Task,
+)
 from wealthpilot.services.agents.portfolio_agent import PortfolioAgent
 from wealthpilot.services.agents.risk_agent import RiskAgent
 from wealthpilot.services.agents.synthesizer_agent import (
@@ -136,12 +142,22 @@ async def _run_pipeline(
             return RiskAgent(holdings=holdings, nav_data=nav_data, nav_history=nav_history, **kwargs)
         return PortfolioAgent(holdings=holdings, nav_data=nav_data, nav_history=nav_history, **kwargs)
 
-    # ── 2. 单任务快路径：直接流式输出，不经 Synthesizer ────────
+    critic = CriticAgent(client, model, profile) if settings.critic_enabled else None
+
+    # ── 2. 单任务快路径：不经 Synthesizer ──────────────────────
     if plan.is_single:
         agent = make_agent(first)
         messages = [*base_messages, {"role": "user", "content": message}]
-        result = await agent.run(messages, emit, goal=first.goal, stream_text=True)
+        # Critic 开启时不直接流式 —— 未经校验的文本一旦发出就收不回来
+        result = await agent.run(
+            messages, emit, goal=first.goal, stream_text=critic is None
+        )
         final_text = result.text
+
+        if critic is not None:
+            verdict = critic.review_answer(final_text, [result])
+            await emit(verdict.as_event("answer"))
+            await _emit_text(emit, final_text)
         grounding = check_numeric_grounding(final_text, [result])
         await _finish(emit, final_text, grounding, plan, message, holdings,
                       conversation_id, db_session, user_id, [first.agent])
@@ -178,10 +194,49 @@ async def _run_pipeline(
         wave_results = await asyncio.gather(*[run_task(t) for t in wave])
         results.extend(wave_results)
 
-    # ── 4. Synthesize ────────────────────────────────────────
+    # ── 4. 闸门 A：证据是否支撑 success_criteria ──────────────
+    if critic is not None:
+        for _ in range(settings.critic_max_replans):
+            verdict = await asyncio.to_thread(
+                critic.review_evidence, message, plan.success_criteria, results
+            )
+            await emit(verdict.as_event("evidence"))
+            if verdict.passed:
+                break
+
+            # 用未覆盖项生成补充任务，交给 risk/portfolio 之外最合适的 agent
+            extra = [
+                Task(id=f"s{i}", agent=_pick_agent(goal), goal=goal)
+                for i, goal in enumerate(critic.supplementary_goals(verdict.missing_evidence), 1)
+            ]
+            if not extra:
+                break
+            await emit({"type": "replan", "tasks": [
+                {"id": t.id, "agent": t.agent, "label": AGENT_LABELS.get(t.agent, t.agent), "goal": t.goal}
+                for t in extra
+            ]})
+            results.extend(await asyncio.gather(*[run_task(t) for t in extra]))
+
+    # ── 5. Synthesize + 闸门 B：输出是否可信 ──────────────────
     await emit({"type": "synthesizing", "agents": [r.agent for r in results]})
     synthesizer = SynthesizerAgent(client, model, profile)
-    final_text = await synthesizer.run(message, results, plan.success_criteria, emit)
+
+    if critic is None:
+        final_text = await synthesizer.run(message, results, plan.success_criteria, emit)
+    else:
+        instruction = ""
+        final_text = ""
+        for attempt in range(settings.critic_max_rewrites + 1):
+            final_text = await synthesizer.run(
+                message, results, plan.success_criteria, emit,
+                stream_output=False, extra_instruction=instruction,
+            )
+            verdict = critic.review_answer(final_text, results)
+            await emit({**verdict.as_event("answer"), "attempt": attempt + 1})
+            if verdict.passed or attempt == settings.critic_max_rewrites:
+                break
+            instruction = rewrite_instruction(verdict)
+        await _emit_text(emit, final_text)
 
     grounding = check_numeric_grounding(final_text, results)
     await _finish(emit, final_text, grounding, plan, message, holdings,
@@ -222,6 +277,23 @@ async def _finish(
             "grounding_rate": round(grounding["rate"], 3),
         },
     })
+
+
+def _pick_agent(goal: str) -> str:
+    """给补充任务挑执行者。复用 Planner 的关键词表，避免两处规则漂移。"""
+    scores = dict.fromkeys(("market", "portfolio", "risk"), 0)
+    for keywords, agent in KEYWORD_RULES:
+        for kw in keywords:
+            if kw in goal:
+                scores[agent] += 1
+    best = max(scores, key=lambda k: scores[k])
+    return best if scores[best] else "portfolio"
+
+
+async def _emit_text(emit, text: str, chunk: int = 48) -> None:
+    """把已通过校验的文本按块发出，保持前端逐字渲染的观感。"""
+    for i in range(0, len(text), chunk):
+        await emit({"type": "delta", "content": text[i:i + chunk]})
 
 
 def _prior_context(results: list[AgentResult]) -> str:
