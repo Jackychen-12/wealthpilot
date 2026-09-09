@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
+from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
 from wealthpilot.services.report import generate_weekly_report
@@ -16,9 +17,9 @@ router = APIRouter(prefix="/report", tags=["report"])
 
 
 @router.get("/weekly")
-async def get_weekly_report(db: Session = Depends(get_session)):
+async def get_weekly_report(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """获取/生成最新周报。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return {"error": "暂无持仓数据，请先添加持仓"}
 
@@ -41,9 +42,9 @@ async def get_weekly_report(db: Session = Depends(get_session)):
 
 
 @router.post("/generate")
-async def force_generate_report(db: Session = Depends(get_session)):
+async def force_generate_report(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """手动触发重新生成周报。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return {"error": "暂无持仓数据"}
 
@@ -66,9 +67,9 @@ async def force_generate_report(db: Session = Depends(get_session)):
 
 
 @router.get("/pdf")
-async def export_pdf(db: Session = Depends(get_session)):
+async def export_pdf(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """导出周报为纯文本 PDF（简易版，无第三方 PDF 库依赖）。"""
-    holdings = list(db.exec(select(PortfolioHolding)).all())
+    holdings = user_holdings(db, user_id)
     if not holdings:
         return {"error": "暂无持仓数据"}
 

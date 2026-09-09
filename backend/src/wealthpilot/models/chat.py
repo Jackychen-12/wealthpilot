@@ -9,6 +9,7 @@ class ChatMessage(SQLModel, table=True):
     __tablename__ = "chat_messages"
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(default=0, index=True, description="所属用户ID，0=公共/未登录")
     conversation_id: str = Field(default="", description="会话 ID")
     role: str = Field(description="user / assistant")
     content: str = Field(description="消息内容")

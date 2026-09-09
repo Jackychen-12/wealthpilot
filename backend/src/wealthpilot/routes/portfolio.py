@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import PortfolioCreate, PortfolioResponse, PortfolioUpdate
+from wealthpilot.services.deps import current_user_id, owned_holding, user_holdings
 from wealthpilot.services.market_data import fetch_fund_info
 from wealthpilot.storage.db import get_session
 
@@ -14,8 +15,11 @@ router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 
 @router.get("", response_model=list[PortfolioResponse])
-async def list_holdings(db: Session = Depends(get_session)):
-    holdings = list(db.exec(select(PortfolioHolding).order_by(PortfolioHolding.created_at)).all())
+async def list_holdings(
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    holdings = user_holdings(db, user_id)
     results = []
     for h in holdings:
         info = await fetch_fund_info(h.fund_code)
@@ -41,8 +45,13 @@ async def list_holdings(db: Session = Depends(get_session)):
 
 
 @router.post("", response_model=PortfolioResponse, status_code=201)
-def add_holding(req: PortfolioCreate, db: Session = Depends(get_session)):
+def add_holding(
+    req: PortfolioCreate,
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
     holding = PortfolioHolding(
+        user_id=user_id,
         fund_code=req.fund_code,
         fund_name=req.fund_name,
         shares=req.shares,
@@ -67,8 +76,13 @@ def add_holding(req: PortfolioCreate, db: Session = Depends(get_session)):
 
 
 @router.put("/{holding_id}", response_model=PortfolioResponse)
-def update_holding(holding_id: int, req: PortfolioUpdate, db: Session = Depends(get_session)):
-    holding = db.get(PortfolioHolding, holding_id)
+def update_holding(
+    holding_id: int,
+    req: PortfolioUpdate,
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    holding = owned_holding(db, holding_id, user_id)
     if not holding:
         raise HTTPException(status_code=404, detail="持仓不存在")
     for key, value in req.model_dump(exclude_unset=True).items():
@@ -90,8 +104,12 @@ def update_holding(holding_id: int, req: PortfolioUpdate, db: Session = Depends(
 
 
 @router.delete("/{holding_id}")
-def delete_holding(holding_id: int, db: Session = Depends(get_session)):
-    holding = db.get(PortfolioHolding, holding_id)
+def delete_holding(
+    holding_id: int,
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    holding = owned_holding(db, holding_id, user_id)
     if not holding:
         raise HTTPException(status_code=404, detail="持仓不存在")
     db.delete(holding)

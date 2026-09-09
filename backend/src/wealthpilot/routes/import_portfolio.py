@@ -9,6 +9,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlmodel import Session
 
+from wealthpilot.services.deps import current_user_id
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_session
@@ -17,7 +18,11 @@ router = APIRouter(prefix="/portfolio", tags=["import"])
 
 
 @router.post("/import/csv")
-async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_session)):
+async def import_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
     """从 CSV/Excel 批量导入持仓。
 
     支持格式（任意列名包含关键字即可匹配）：
@@ -70,6 +75,7 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_ses
         buy_date_val = _parse_date(buy_date_str) if buy_date_str else date.today()
 
         holding = PortfolioHolding(
+            user_id=user_id,
             fund_code=fund_code.strip(),
             fund_name=fund_name or fund_code,
             shares=shares,
@@ -85,7 +91,11 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_ses
 
 
 @router.post("/import/ocr")
-async def import_ocr(file: UploadFile = File(...), db: Session = Depends(get_session)):
+async def import_ocr(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
     """从持仓截图 OCR 识别并导入。使用 Claude Vision 识别。"""
     settings = get_settings()
     if not settings.anthropic_api_key:
@@ -142,6 +152,7 @@ async def import_ocr(file: UploadFile = File(...), db: Session = Depends(get_ses
         if not fund_code:
             continue
         holding = PortfolioHolding(
+            user_id=user_id,
             fund_code=str(fund_code).strip(),
             fund_name=item.get("fund_name") or fund_code,
             shares=float(item.get("shares") or 0),
