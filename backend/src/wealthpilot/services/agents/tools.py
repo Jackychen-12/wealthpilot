@@ -13,6 +13,13 @@ from wealthpilot.services.analysis import (
     calculate_overview,
     generate_suggestions,
 )
+from wealthpilot.services.backtest import backtest_rule
+from wealthpilot.services.lookthrough import (
+    aggregate_exposure,
+    fetch_fund_holdings,
+    overlap_between,
+    summarize_overlap,
+)
 from wealthpilot.services.simulation import (
     check_constraints,
     concentration_metrics,
@@ -257,6 +264,68 @@ COMPUTE_TOOLS = [
 ]
 
 
+# ═══════════════════════════════════════════════════════════
+# 穿透 / 回测工具（QuantAgent）
+# ═══════════════════════════════════════════════════════════
+
+QUANT_TOOLS = [
+    {
+        "name": "lookthrough_portfolio",
+        "description": (
+            "把组合穿透到个股层：汇总各基金重仓股的真实暴露，找出被多只基金"
+            "同时重仓的个股。净值相关性只说明'同涨同跌'，穿透才能解释'为什么'。"
+            "回答分散度、重叠、真实行业暴露类问题时调用。"
+            "注意：季报只披露前十大且滞后 1-3 个月，结果里带 report_date 必须转述。"
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "compute_stock_overlap",
+        "description": (
+            "对比两只基金的重仓股重叠：共有几只、合计权重多少、分别是哪些。"
+            "用于回答'这两只基金是不是买的差不多'。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fund_code_a": {"type": "string", "description": "基金代码 A"},
+                "fund_code_b": {"type": "string", "description": "基金代码 B"},
+            },
+            "required": ["fund_code_a", "fund_code_b"],
+        },
+    },
+    {
+        "name": "backtest_rule",
+        "description": (
+            "回测一条分批建仓规则，并与'一次性买入''等额定投'两个基线对比。"
+            "**给出任何分批加仓/止损规则之前，必须先用本工具验证它的历史表现**，"
+            "不要凭空给出未经检验的规则。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fund_code": {"type": "string", "description": "基金代码"},
+                "triggers": {
+                    "type": "array",
+                    "description": "触发档位，每档只触发一次",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "drawdown_pct": {"type": "number", "description": "自高点回调达到该比例时触发"},
+                            "add_pct": {"type": "number", "description": "投入总资金的百分比"},
+                        },
+                        "required": ["drawdown_pct", "add_pct"],
+                    },
+                },
+                "stop_loss_pct": {"type": "number", "description": "可选。相对持仓成本跌破该比例则清仓"},
+                "days": {"type": "integer", "description": "回测使用的历史天数，默认 250"},
+            },
+            "required": ["fund_code", "triggers"],
+        },
+    },
+]
+
+
 async def execute_tool(
     name: str,
     input_data: dict,
@@ -266,6 +335,41 @@ async def execute_tool(
     profile: InvestorProfile | None = None,
 ) -> str:
     """统一工具执行器。"""
+    # === 穿透 / 回测工具 ===
+    if name == "lookthrough_portfolio":
+        if not holdings:
+            return "当前没有持仓，无法穿透。"
+        fund_holdings = {}
+        for h in holdings:
+            fund_holdings[h.fund_code] = await fetch_fund_holdings(h.fund_code)
+        result = aggregate_exposure(holdings, nav_data, fund_holdings)
+        result["summary"] = summarize_overlap(result)
+        return json.dumps(result, ensure_ascii=False)
+
+    if name == "compute_stock_overlap":
+        a = await fetch_fund_holdings(input_data["fund_code_a"])
+        b = await fetch_fund_holdings(input_data["fund_code_b"])
+        if not a["stocks"] or not b["stocks"]:
+            missing = [c for c, d in ((a["fund_code"], a), (b["fund_code"], b)) if not d["stocks"]]
+            return f"未取到以下基金的季报持仓：{'、'.join(missing)}（可能是新基金或非股票型）"
+        return json.dumps(overlap_between(a, b), ensure_ascii=False)
+
+    if name == "backtest_rule":
+        code = input_data["fund_code"]
+        nav_list = (nav_history or {}).get(code) or await fetch_fund_nav(
+            code, input_data.get("days", 250)
+        )
+        if not nav_list:
+            return f"未获取到基金 {code} 的历史净值，无法回测。"
+        return json.dumps(
+            backtest_rule(
+                nav_list,
+                input_data["triggers"],
+                stop_loss_pct=input_data.get("stop_loss_pct"),
+            ),
+            ensure_ascii=False,
+        )
+
     # === 计算 / 校验工具 ===
     if name == "compute_concentration":
         weights = portfolio_weights(holdings, nav_data)

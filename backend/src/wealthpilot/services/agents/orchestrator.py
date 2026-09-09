@@ -35,6 +35,7 @@ from wealthpilot.services.agents.planner_agent import (
     Task,
 )
 from wealthpilot.services.agents.portfolio_agent import PortfolioAgent
+from wealthpilot.services.agents.quant_agent import QuantAgent
 from wealthpilot.services.agents.risk_agent import RiskAgent
 from wealthpilot.services.agents.synthesizer_agent import (
     SynthesizerAgent,
@@ -47,6 +48,7 @@ AGENT_LABELS = {
     "market": "📊 市场分析",
     "portfolio": "💼 持仓分析",
     "risk": "🛡️ 风险评估",
+    "quant": "🔬 量化验证",
 }
 
 
@@ -140,6 +142,8 @@ async def _run_pipeline(
             return MarketAgent(**kwargs)
         if task.agent == "risk":
             return RiskAgent(holdings=holdings, nav_data=nav_data, nav_history=nav_history, **kwargs)
+        if task.agent == "quant":
+            return QuantAgent(holdings=holdings, nav_data=nav_data, nav_history=nav_history, **kwargs)
         return PortfolioAgent(holdings=holdings, nav_data=nav_data, nav_history=nav_history, **kwargs)
 
     critic = CriticAgent(client, model, profile) if settings.critic_enabled else None
@@ -281,7 +285,7 @@ async def _finish(
 
 def _pick_agent(goal: str) -> str:
     """给补充任务挑执行者。复用 Planner 的关键词表，避免两处规则漂移。"""
-    scores = dict.fromkeys(("market", "portfolio", "risk"), 0)
+    scores = dict.fromkeys(("market", "portfolio", "risk", "quant"), 0)
     for keywords, agent in KEYWORD_RULES:
         for kw in keywords:
             if kw in goal:
