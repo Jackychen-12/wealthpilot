@@ -193,6 +193,48 @@ async def compute_position_sizing(fund_code: str) -> str:
     return await execute_tool("compute_position_sizing", {"fund_code": fund_code}, h, nd, nh, pf)
 
 
+# ═══════════════════════════════════════════════════════════
+# Look-through / Backtest Tools（QuantAgent 同款）
+# ═══════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def lookthrough_portfolio() -> str:
+    """Look through funds to stock-level exposure across the portfolio.
+    把组合穿透到个股层：汇总各基金重仓股的真实暴露，找出被多只基金同时重仓的个股。
+    净值相关性只说明"同涨同跌"，穿透才能解释"为什么"。
+    注意：季报只披露前十大且滞后 1-3 个月，返回的 report_date 必须一并转述。"""
+    h, nd, nh, pf = await _ensure_context()
+    return await execute_tool("lookthrough_portfolio", {}, h, nd, nh, pf)
+
+
+@mcp.tool()
+async def compute_stock_overlap(fund_code_a: str, fund_code_b: str) -> str:
+    """Compare top holdings overlap between two funds.
+    对比两只基金的重仓股重叠：共有几只、合计权重多少、分别是哪些。"""
+    h, nd, nh, pf = await _ensure_context()
+    return await execute_tool(
+        "compute_stock_overlap",
+        {"fund_code_a": fund_code_a, "fund_code_b": fund_code_b}, h, nd, nh, pf,
+    )
+
+
+@mcp.tool()
+async def backtest_rule(
+    fund_code: str, triggers: list[dict],
+    stop_loss_pct: float | None = None, days: int = 250,
+) -> str:
+    """Backtest a staged-buy rule against lump-sum and DCA baselines.
+    回测一条分批建仓规则，并与"一次性买入""等额定投"两个基线对比。
+    triggers 每项形如 {"drawdown_pct": 5, "add_pct": 30}，每档只触发一次。
+    给出任何分批加仓/止损规则之前应先用本工具验证其历史表现。"""
+    h, nd, nh, pf = await _ensure_context()
+    return await execute_tool(
+        "backtest_rule",
+        {"fund_code": fund_code, "triggers": triggers,
+         "stop_loss_pct": stop_loss_pct, "days": days}, h, nd, nh, pf,
+    )
+
+
 def main() -> None:
     mcp.run(transport="stdio")
 

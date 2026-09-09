@@ -22,13 +22,14 @@ from wealthpilot.settings import get_settings
 if TYPE_CHECKING:
     from wealthpilot.services.ai_client import AIClient
 
-VALID_AGENTS = ("market", "portfolio", "risk")
+VALID_AGENTS = ("market", "portfolio", "risk", "quant")
 
 # 关键词兜底：LLM 不可用时仍能路由，退化为旧 Router 的单任务行为
 KEYWORD_RULES: list[tuple[list[str], str]] = [
     (["基金", "净值", "新闻", "行情", "市场", "指数", "板块", "估值"], "market"),
     (["持仓", "收益", "配置", "健康", "归因", "总览", "建议", "调仓"], "portfolio"),
     (["风险", "回撤", "相关性", "预警", "对比", "波动", "亏损", "止损"], "risk"),
+    (["穿透", "重仓", "重叠", "回测", "验证", "分批", "历史表现", "个股", "真实暴露"], "quant"),
 ]
 
 # 触发仓位/操作类意图的词 —— 这类问题必须带上风险画像约束检查
