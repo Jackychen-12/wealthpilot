@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "wealthpilot": {
-      "command": "uv",
-      "args": ["run", "--directory", "./backend", "python", "-m", "wealthpilot", "mcp"]
+      "command": "./backend/.venv/bin/python",
+      "args": ["-m", "wealthpilot", "mcp"]
     }
   }
 }

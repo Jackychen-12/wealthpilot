@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+# mcp 2.x 把 FastMCP 改名为 MCPServer；构造器、.tool() 与 .run() 签名保持兼容
+from mcp.server.mcpserver import MCPServer
 from sqlmodel import Session, select
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.agents.tools import execute_tool
 from wealthpilot.storage.db import get_engine
 
-mcp = FastMCP(
+mcp = MCPServer(
     "wealthpilot",
     instructions=(
         "WealthPilot 智能投顾工具集：12 个实时投资分析工具，覆盖基金查询、持仓分析、风险评估。"

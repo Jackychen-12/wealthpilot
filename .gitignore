@@ -16,3 +16,6 @@ backend/.env
 # IDE
 .idea/
 .vscode/
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo

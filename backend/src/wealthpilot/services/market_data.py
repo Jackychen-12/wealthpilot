@@ -9,9 +9,19 @@
 """
 
 import json
+import re
 from datetime import date, datetime, timedelta
 
 import httpx
+
+# 东财系接口普遍校验 Referer，缺了会返回 ErrCode:-999 或 404 页面
+EM_HEADERS = {
+    "Referer": "https://fund.eastmoney.com/",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -162,7 +172,7 @@ async def fetch_fund_nav(fund_code: str, days: int = 30) -> list[dict]:
     """拉取基金近 N 天净值（天天基金 HTTP API）。"""
     url = "https://api.fund.eastmoney.com/f10/lsjz"
     params = {"fundCode": fund_code, "pageIndex": 1, "pageSize": days}
-    headers = {"Referer": "https://fundf10.eastmoney.com/"}
+    headers = {**EM_HEADERS, "Referer": "https://fundf10.eastmoney.com/"}
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -188,27 +198,70 @@ async def fetch_fund_nav(fund_code: str, days: int = 30) -> list[dict]:
         return get_fund_nav_akshare(fund_code, days)
 
 
+async def _fetch_fund_name(client: httpx.AsyncClient, fund_code: str) -> str:
+    """从东财 pingzhongdata 抓基金名称。"""
+    url = f"https://fund.eastmoney.com/pingzhongdata/{fund_code}.js"
+    resp = await client.get(url, headers=EM_HEADERS)
+    resp.raise_for_status()
+    match = re.search(r'fS_name\s*=\s*"([^"]+)"', resp.text)
+    return match.group(1) if match else ""
+
+
 async def fetch_fund_info(fund_code: str) -> dict | None:
-    """拉取基金实时估值（盘中有效）。"""
-    url = f"https://fundgz.1234567.com.cn/js/{fund_code}.js"
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url)
+    """拉取基金基本信息（盘中优先取实时估值，否则退回最新净值）。
+
+    原实现只依赖天天基金的 fundgz 实时估值接口，且没有兜底。该接口现已下线 ——
+    对任意基金代码都返回东财的「页面未找到」HTML，于是所有基金查询一律得到
+    "未找到基金 xxx 的信息"。这里改成两级：
+
+    1. 仍先试 fundgz（补上 Referer/UA）—— 它若恢复，能拿到盘中估值；
+    2. 拿不到就用已验证可用的历史净值接口 + pingzhongdata 名称，
+       至少保证名称、最新净值、净值日期、当日涨跌可用。
+    """
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        # 第一级：盘中实时估值
+        try:
+            resp = await client.get(
+                f"https://fundgz.1234567.com.cn/js/{fund_code}.js", headers=EM_HEADERS
+            )
             resp.raise_for_status()
             text = resp.text
-            json_str = text[text.index("{"):text.rindex("}") + 1]
-            data = json.loads(json_str)
-            return {
-                "code": data.get("fundcode", fund_code),
-                "name": data.get("name", ""),
-                "nav": float(data.get("dwjz", 0)),
-                "nav_date": data.get("jzrq", ""),
-                "estimated_nav": float(data.get("gsz", 0) or 0),
-                "estimated_change": float(data.get("gszzl", 0) or 0),
-                "update_time": data.get("gztime", ""),
-            }
-    except Exception:
+            data = json.loads(text[text.index("{"):text.rindex("}") + 1])
+            if data.get("name"):
+                return {
+                    "code": data.get("fundcode", fund_code),
+                    "name": data["name"],
+                    "nav": float(data.get("dwjz", 0)),
+                    "nav_date": data.get("jzrq", ""),
+                    "estimated_nav": float(data.get("gsz", 0) or 0),
+                    "estimated_change": float(data.get("gszzl", 0) or 0),
+                    "update_time": data.get("gztime", ""),
+                    "source": "fundgz",
+                }
+        except Exception:
+            pass
+
+        # 第二级：最新净值 + 名称
+        try:
+            name = await _fetch_fund_name(client, fund_code)
+        except Exception:
+            name = ""
+
+    nav_list = await fetch_fund_nav(fund_code, 2)
+    if not nav_list and not name:
         return None
+
+    latest = nav_list[0] if nav_list else {}
+    return {
+        "code": fund_code,
+        "name": name,
+        "nav": latest.get("nav", 0.0),
+        "nav_date": latest.get("nav_date", ""),
+        "estimated_nav": 0.0,
+        "estimated_change": latest.get("daily_return", 0.0),
+        "update_time": latest.get("nav_date", ""),
+        "source": "lsjz",
+    }
 
 
 # ═══════════════════════════════════════════════════════════
