@@ -15,6 +15,7 @@ from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.streaming import stream_sync_in_thread
 from wealthpilot.services.agents.tools import execute_tool
+from wealthpilot.services.evidence import ToolSession, record_evidence
 from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
@@ -26,11 +27,12 @@ Emit = Callable[[dict], Awaitable[None]]
 class AgentResult:
     """一个 Agent 的执行产物，供 Synthesizer 消费。"""
 
-    def __init__(self, agent: str, goal: str, text: str, evidence: list[dict]):
+    def __init__(self, agent: str, goal: str, text: str, evidence: list[dict], status: str = "completed"):
         self.agent = agent
         self.goal = goal
         self.text = text
         self.evidence = evidence  # [{"tool": ..., "input": ..., "output": ...}]
+        self.status = status
 
     @property
     def tool_names(self) -> list[str]:
@@ -61,6 +63,7 @@ class BaseAgent:
         self.nav_data = nav_data or {}
         self.nav_history = nav_history
         self.profile = profile
+        self.runtime = ToolSession()
 
     async def run(
         self,
@@ -86,6 +89,7 @@ class BaseAgent:
         tool_rounds = 0
         final_text = ""
         evidence: list[dict] = []
+        status = "completed"
 
         try:
             while True:
@@ -145,7 +149,9 @@ class BaseAgent:
                     tool_results = []
                     for tc, out in zip(response.tool_calls, outputs, strict=True):
                         content = f"工具执行失败: {out}" if isinstance(out, Exception) else out
-                        evidence.append({"tool": tc.name, "input": tc.input, "output": content})
+                        record = record_evidence(tc.name, tc.input, content, self.nav_history)
+                        evidence.append(record)
+                        await emit({"type": "evidence", "agent": self.name, "evidence": record})
                         tool_results.append(
                             {
                                 "type": "tool_result",
@@ -158,15 +164,20 @@ class BaseAgent:
                     messages.append({"role": "user", "content": tool_results})
                     final_text += round_text
                 else:
+                    if response.stop_reason == "tool_use":
+                        status = "budget_exhausted"
                     final_text += round_text
                     break
 
         except Exception as e:  # noqa: BLE001
+            status = "failed"
             await emit({"type": "error", "content": f"{self.name} 异常: {e}"})
 
-        return AgentResult(agent=self.name, goal=goal, text=final_text, evidence=evidence)
+        return AgentResult(agent=self.name, goal=goal, text=final_text, evidence=evidence, status=status)
 
     async def _run_tool(self, name: str, input_data: dict) -> str:
-        return await execute_tool(
+        if name not in {t["name"] for t in self.tools}:
+            raise ValueError(f"该 Agent 无权调用工具：{name}")
+        return await self.runtime.execute(name, input_data, lambda: execute_tool(
             name, input_data, self.holdings, self.nav_data, self.nav_history, self.profile
-        )
+        ))

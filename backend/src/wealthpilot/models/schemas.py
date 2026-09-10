@@ -18,8 +18,8 @@ class PortfolioCreate(BaseModel):
 
 class PortfolioUpdate(BaseModel):
     fund_name: str | None = None
-    shares: float | None = None
-    cost_price: float | None = None
+    shares: float | None = Field(default=None, gt=0)
+    cost_price: float | None = Field(default=None, gt=0)
     category: str | None = None
     industry: str | None = None
 
@@ -50,6 +50,9 @@ class IndexInfo(BaseModel):
 class NewsItem(BaseModel):
     tag: str
     text: str
+    source_url: str = ""
+    published_at: str = ""
+    retrieved_at: str = ""
 
 
 class FundDetail(BaseModel):
@@ -66,7 +69,7 @@ class FundDetail(BaseModel):
 class OverviewResponse(BaseModel):
     weekly_return: float
     weekly_growth_pct: float
-    excess_return_pct: float
+    excess_return_pct: float | None
     volatility_status: str
     description: str
     total_market_value: float
@@ -112,6 +115,7 @@ class ProfileUpsert(BaseModel):
     max_drawdown_tolerance: float = Field(..., ge=0.0, le=1.0, description="0.15 = 15%")
     liquidity_reserve: float = Field(default=0.0, ge=0.0, description="半年内需动用资金（元）")
     experience_years: float = Field(default=1.0, ge=0.0)
+    available_cash: float | None = Field(default=None, ge=0.0)
     excluded_industries: list[str] = Field(default_factory=list)
     raw_score: int = Field(default=0, description="问卷原始总分")
 
@@ -123,6 +127,7 @@ class ProfileResponse(BaseModel):
     max_drawdown_tolerance: float
     liquidity_reserve: float
     experience_years: float
+    available_cash: float | None = None
     excluded_industries: list[str]
     raw_score: int
     updated_at: str
