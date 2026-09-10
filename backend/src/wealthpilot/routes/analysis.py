@@ -52,15 +52,21 @@ async def get_overview(db: Session = Depends(get_session), user_id: int = Depend
     overview = calculate_overview(holdings, nav_data, nav_history)
     overview["holdings_count"] = len(holdings)
     # 生成文字描述
-    wr = overview.get("weekly_return", 0)
-    wg = overview.get("weekly_growth_pct", 0)
-    ex = overview.get("excess_return_pct", 0)
+    # 样本不足时 calculate_overview 会返回 None 而不是假装是 0，
+    # 所以这里不能依赖 .get(k, 0) —— 键存在、值为 None 时默认值不生效。
+    wr = overview.get("weekly_return") or 0
+    wg = overview.get("weekly_growth_pct") or 0
+    ex = overview.get("excess_return_pct")
     sharpe = overview.get("sharpe_ratio")
-    overview["description"] = (
-        f"本周组合收益 {'+' if wr >= 0 else ''}{wr:.0f} 元（{'+' if wg >= 0 else ''}{wg:.2f}%），"
-        f"{'跑赢' if ex >= 0 else '跑输'}基准 {abs(ex):.2f} 个百分点。"
-        + (f" 年化 Sharpe 比率 {sharpe:.2f}。" if sharpe is not None else "")
-    )
+
+    parts = [f"本周组合收益 {'+' if wr >= 0 else ''}{wr:.0f} 元（{'+' if wg >= 0 else ''}{wg:.2f}%）。"]
+    if ex is None:
+        parts.append("基准对比数据不足，未计算超额收益。")
+    else:
+        parts.append(f"{'跑赢' if ex >= 0 else '跑输'}基准 {abs(ex):.2f} 个百分点。")
+    if sharpe is not None:
+        parts.append(f"年化 Sharpe 比率 {sharpe:.2f}。")
+    overview["description"] = "".join(parts)
     return overview
 
 

@@ -9,6 +9,22 @@ from wealthpilot.services.analysis import calculate_attribution_by_fund, calcula
 from wealthpilot.settings import get_settings
 
 
+def _fmt(value, spec: str = ".2f", unknown: str = "数据不足") -> str:
+    """None 安全的数值格式化。
+
+    calculate_overview 在样本不足时会返回 None（而不是假装是 0），
+    而 `overview.get(k, 0):.2f` 的默认值只在**键不存在**时生效 ——
+    键存在、值为 None 时照样把 None 传给 format()，直接 TypeError。
+    这里把"不知道"如实显示成文字，而不是强转成 0 掩盖过去。
+    """
+    if value is None:
+        return unknown
+    try:
+        return format(value, spec)
+    except (TypeError, ValueError):
+        return unknown
+
+
 def generate_weekly_report(
     holdings: list[PortfolioHolding],
     nav_data: dict[str, float],
@@ -39,9 +55,9 @@ def generate_weekly_report(
 
 ## 本周数据
 - 周期：{week_start} 至 {week_end}
-- 组合周收益：{overview.get('weekly_return', 0):.0f} 元
-- 组合周涨幅：{overview.get('weekly_growth_pct', 0):.2f}%
-- 超额收益：{overview.get('excess_return_pct', 0):.2f}%
+- 组合周收益：{_fmt(overview.get('weekly_return'), '.0f')} 元
+- 组合周涨幅：{_fmt(overview.get('weekly_growth_pct'))}%
+- 超额收益：{_fmt(overview.get('excess_return_pct'))}%（{overview.get('benchmark_status', 'ok')}）
 
 ## 持仓表现
 {portfolio_summary}
@@ -95,12 +111,12 @@ def _fallback_report(overview: dict, attribution: list, week_start: date, week_e
     return {
         "week_start": str(week_start),
         "week_end": str(week_end),
-        "summary": f"本周组合收益 {overview.get('weekly_return', 0):.0f} 元，"
-                   f"涨幅 {overview.get('weekly_growth_pct', 0):.2f}%。",
+        "summary": f"本周组合收益 {_fmt(overview.get('weekly_return'), '.0f')} 元，"
+                   f"涨幅 {_fmt(overview.get('weekly_growth_pct'))}%。",
         "key_points": [
             {"title": f"收益贡献最大：{top['name']}", "desc": top["value"]},
             {"title": "组合波动", "desc": overview.get("volatility_status", "数据不足")},
-            {"title": "Sharpe 比率", "desc": str(overview.get("sharpe_ratio", "N/A"))},
+            {"title": "Sharpe 比率", "desc": _fmt(overview.get("sharpe_ratio"), ".2f", "样本不足，未计算")},
         ],
         "next_week_focus": [
             "关注宏观政策面变化",
