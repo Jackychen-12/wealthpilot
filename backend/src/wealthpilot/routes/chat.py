@@ -10,7 +10,8 @@ from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import ChatRequest
 from wealthpilot.services.agents import chat_stream
 from wealthpilot.routes.profile import load_profile
-from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
+from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.market_data import fetch_fund_nav
 from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -27,12 +28,9 @@ async def chat(
 
     nav_data: dict[str, float] = {}
     nav_history: dict[str, list[dict]] = {}
+    _prices = await fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings])
     for h in holdings:
-        info = await fetch_fund_info(h.fund_code)
-        if info:
-            nav_data[h.fund_code] = info["nav"]
-        else:
-            nav_data[h.fund_code] = h.cost_price
+        nav_data[h.fund_code] = _prices.get(h.fund_code, h.cost_price)
         hist = await fetch_fund_nav(h.fund_code, 60)
         if hist:
             nav_history[h.fund_code] = hist

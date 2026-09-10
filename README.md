@@ -542,14 +542,14 @@ docker compose up --build -d
 
 - [x] Full-stack Agent 架构（FastAPI + React）
 - [x] 免费实时行情（AKShare + 东方财富 + 天天基金）
-- [x] 多智能体系统（Router + Market/Portfolio/Risk，12 工具）
+- [x] 多智能体系统（Planner + Market/Portfolio/Risk/Quant，19 工具）
 - [x] Provider 抽象层（Claude + DeepSeek 一键切换）
 - [x] 持仓管理（CRUD + CSV 导入 + OCR）
 - [x] 高级量化分析（Sharpe、最大回撤、相关性矩阵）
 - [x] 用户认证（JWT + 多租户隔离）
 - [x] 对话历史持久化
 - [x] CLI 工具（init/config/chat/run）
-- [x] MCP Server（12 工具，Claude Code / Cursor 直接调用）
+- [x] MCP Server（19 工具，Claude Code / Cursor 直接调用）
 - [x] CLI 非交互模式（ask 子命令，支持管道）
 - [x] Docker Compose 部署
 - [x] AI 周报生成
@@ -557,13 +557,17 @@ docker compose up --build -d
 - [x] Planner/Synthesizer 架构（任务 DAG + 并行执行 + 冲突消解）
 - [x] 投资者画像（风险测评落库，注入 Planner/Agent/Synthesizer 作为硬约束）
 - [x] 数值溯源检查（答案中的数字必须来自工具返回）
-- [ ] 持仓穿透（重仓股重叠度 + 真实行业暴露）
-- [ ] 计算工具化（compute_* / check_* ，杜绝 LLM 算术）
-- [ ] 回测引擎（规则型策略的历史验证）
-- [ ] 推送通知（回撤预警）
-- [ ] 回测与情景分析
-- [ ] 多资产类别（股票、债券、ETF、加密货币）
-- [ ] 报告导出 PDF
+- [x] 持仓穿透（重仓股重叠度 + 真实行业暴露）
+- [x] 计算工具化（compute_* / check_*，杜绝 LLM 算术）
+- [x] Critic 双闸门（证据充分性 + 输出合规性，不通过则补任务或重写）
+- [x] 回测引擎（分批规则历史验证，含一次性买入 / 定投两个基线）
+- [x] 情景分析（5 个预设压力情景 + 自定义冲击，个股/行业/类别/全市场四级粒度）
+- [x] 多资产类别（基金 / 股票 / ETF / 加密货币，按类型分组批量取价）
+- [x] 推送通知（预警落库 + 冷却期去重 + 未读收件箱 + webhook 推送）
+- [x] 报告导出 PDF（reportlab 内置 CID 中文字体，不依赖宿主机字体）
+- [ ] 回答质量评估（黄金题集 + 新旧架构 A/B，需配 API Key）
+- [ ] 结构化记忆层（用户偏好与被否决建议）
+- [ ] PostgreSQL + Alembic 正式迁移
 
 ## License
 

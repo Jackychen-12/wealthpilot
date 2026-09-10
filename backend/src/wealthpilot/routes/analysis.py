@@ -15,22 +15,27 @@ from wealthpilot.services.analysis import (
     calculate_overview,
     generate_suggestions,
 )
-from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
+from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.market_data import fetch_fund_nav
 from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 
 async def _load_data(holdings: list[PortfolioHolding]):
-    """统一加载最新净值 + 历史净值。"""
-    nav_data: dict[str, float] = {}
+    """统一加载最新价 + 历史净值。
+
+    最新价按资产类型分组批量取（基金走净值、股票/ETF 走新浪、加密走 CoinGecko）；
+    历史序列目前只有场外基金有，股票/ETF/加密的历史行情尚未接入，
+    因此这些标的不会进入依赖 nav_history 的指标（回撤、相关性）。
+    """
+    prices = await fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings])
+    nav_data = {h.fund_code: prices.get(h.fund_code, h.cost_price) for h in holdings}
+
     nav_history: dict[str, list[dict]] = {}
     for h in holdings:
-        info = await fetch_fund_info(h.fund_code)
-        if info and info.get("nav"):
-            nav_data[h.fund_code] = info["nav"]
-        else:
-            nav_data[h.fund_code] = h.cost_price
+        if (h.asset_type or "fund") != "fund":
+            continue
         hist = await fetch_fund_nav(h.fund_code, 60)
         if hist:
             nav_history[h.fund_code] = hist

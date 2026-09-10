@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 
 # === Portfolio ===
 class PortfolioCreate(BaseModel):
-    fund_code: str = Field(..., description="基金代码", examples=["007340"])
+    asset_type: str = Field(default="fund", description="fund/stock/etf/crypto")
+    fund_code: str = Field(..., description="标的代码", examples=["007340", "600519", "BTC"])
     fund_name: str = Field(..., description="基金名称", examples=["国泰半导体芯片ETF联接"])
     shares: float = Field(..., gt=0, description="持有份额")
     cost_price: float = Field(..., gt=0, description="成本净值")
@@ -17,6 +18,7 @@ class PortfolioCreate(BaseModel):
 
 
 class PortfolioUpdate(BaseModel):
+    asset_type: str | None = None
     fund_name: str | None = None
     shares: float | None = None
     cost_price: float | None = None
@@ -26,6 +28,7 @@ class PortfolioUpdate(BaseModel):
 
 class PortfolioResponse(BaseModel):
     id: int
+    asset_type: str = "fund"
     fund_code: str
     fund_name: str
     shares: float

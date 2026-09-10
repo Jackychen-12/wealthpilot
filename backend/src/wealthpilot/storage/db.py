@@ -7,6 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from wealthpilot.models.chat import ChatMessage  # noqa: F401 — register table
 from wealthpilot.models.profile import InvestorProfile  # noqa: F401 — register table
+from wealthpilot.models.alert import Alert  # noqa: F401 — register table
 
 # 显式注册其余表，避免依赖 import 顺序
 from wealthpilot.models.market import FundNavCache, IndexSnapshot  # noqa: F401
