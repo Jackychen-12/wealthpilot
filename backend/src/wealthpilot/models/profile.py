@@ -34,6 +34,7 @@ class InvestorProfile(SQLModel, table=True):
         default=0.0, ge=0.0, description="半年内需要动用的资金（元），不可占用"
     )
     experience_years: float = Field(default=1.0, ge=0.0)
+    available_cash: float | None = Field(default=None, ge=0.0, description="未投资的可用现金余额（元）；未知时不得校验通过")
     excluded_industries: str = Field(default="", description="逗号分隔，不接受配置的行业")
 
     raw_score: int = Field(default=0, description="问卷原始总分，用于回溯")

@@ -27,6 +27,7 @@ def _to_response(p: InvestorProfile) -> ProfileResponse:
         max_drawdown_tolerance=p.max_drawdown_tolerance,
         liquidity_reserve=p.liquidity_reserve,
         experience_years=p.experience_years,
+        available_cash=p.available_cash,
         excluded_industries=p.excluded_list,
         raw_score=p.raw_score,
         updated_at=p.updated_at.isoformat(),
@@ -61,6 +62,7 @@ def upsert_profile(
     p.max_drawdown_tolerance = req.max_drawdown_tolerance
     p.liquidity_reserve = req.liquidity_reserve
     p.experience_years = req.experience_years
+    p.available_cash = req.available_cash
     p.excluded_industries = ",".join(req.excluded_industries)
     p.raw_score = req.raw_score
     p.updated_at = datetime.now()

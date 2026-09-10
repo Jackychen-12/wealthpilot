@@ -52,6 +52,8 @@ export function Chat() {
   const [streamingText, setStreamingText] = useState('')
   const [activeAgent, setActiveAgent] = useState('')
   const [toolCalls, setToolCalls] = useState<string[]>([])
+  const [researchStatus, setResearchStatus] = useState('')
+  const [evidenceIds, setEvidenceIds] = useState<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [apiStatus, setApiStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
   const [errorMsg, setErrorMsg] = useState('')
@@ -100,6 +102,8 @@ export function Chat() {
     setStreamingText('')
     setActiveAgent('')
     setToolCalls([])
+    setResearchStatus('')
+    setEvidenceIds([])
     setErrorMsg('')
 
     if (apiStatus === 'connected') {
@@ -120,8 +124,20 @@ export function Chat() {
             if (event.follow_ups) {
               setFollowUps(event.follow_ups)
             }
+            if (event.meta?.status) {
+              const labels: Record<string, string> = { passed: '研究完成', insufficient_data: '证据不足，未发布完整结论', rejected: '回答未通过校验', failed: '研究任务失败' }
+              setResearchStatus(labels[event.meta.status] || event.meta.status)
+            }
           } else if (event.type === 'tool_call') {
             setToolCalls(prev => [...prev, event.tool || ''])
+          } else if (event.type === 'plan') {
+            setResearchStatus(`已拆解 ${event.tasks?.length ?? 0} 个研究任务`)
+          } else if (event.type === 'evidence' && event.evidence?.id) {
+            setEvidenceIds(prev => prev.includes(event.evidence?.id || '') ? prev : [...prev, event.evidence?.id || ''])
+          } else if (event.type === 'critic') {
+            setResearchStatus(event.passed ? '证据校验通过' : '校验未通过，正在处理')
+          } else if (event.type === 'replan') {
+            setResearchStatus(`正在补充 ${event.tasks?.length ?? 0} 项证据`)
           } else if (event.type === 'error') {
             setApiStatus('disconnected')
             setErrorMsg(`AI 服务返回错误: ${event.content}`)
@@ -257,6 +273,11 @@ export function Chat() {
               </svg>
             </div>
             <div className="chat-bubble-ai" style={{ whiteSpace: 'pre-wrap' }}>
+              {(researchStatus || evidenceIds.length > 0) && (
+                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6 }} aria-live="polite">
+                  {researchStatus || '已收集'}{evidenceIds.length > 0 ? ` · ${evidenceIds.length} 条证据` : ''}
+                </div>
+              )}
               {activeAgent && (
                 <div className="agent-badge">{activeAgent}</div>
               )}

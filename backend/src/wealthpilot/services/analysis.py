@@ -10,6 +10,7 @@ def calculate_overview(
     holdings: list[PortfolioHolding],
     nav_data: dict[str, float],
     nav_history: dict[str, list[dict]] | None = None,
+    benchmark_history: list[dict] | None = None,
 ) -> dict:
     """计算持仓总览（含 Sharpe 比率）。"""
     total_cost = 0.0
@@ -38,8 +39,15 @@ def calculate_overview(
     sharpe = _calculate_sharpe(holdings, nav_history) if nav_history else None
 
     weekly_growth_pct = (weekly_return / total_cost * 100) if total_cost > 0 else 0
-    # 超额 = 假设基准周涨 0.5%
-    excess = weekly_growth_pct - 0.5
+    # 未提供同区间基准时不可制造超额收益。
+    excess = None
+    if benchmark_history and nav_history:
+        dates = sorted(set.intersection(*[
+            {r["nav_date"] for r in nav_history.get(h.fund_code, [])} for h in holdings
+        ])) if holdings else []
+        benchmark = {r["nav_date"]: r["nav"] for r in benchmark_history}
+        if len(dates) >= 6 and benchmark.get(dates[-6], 0) > 0 and dates[-1] in benchmark:
+            excess = weekly_growth_pct - (benchmark[dates[-1]] / benchmark[dates[-6]] - 1) * 100
 
     return {
         "total_market_value": round(total_market_value, 2),
@@ -48,7 +56,9 @@ def calculate_overview(
         "return_pct": round(return_pct, 2),
         "weekly_return": round(weekly_return, 2),
         "weekly_growth_pct": round(weekly_growth_pct, 2),
-        "excess_return_pct": round(excess, 2),
+        "excess_return_pct": round(excess, 2) if excess is not None else None,
+        "benchmark_status": "available" if excess is not None else "insufficient_data",
+        "methodology": "按当前份额计算的持仓快照收益；未纳入历史申赎现金流和费用，不等于账户实际收益。",
         "volatility_status": _volatility_label(nav_history, holdings),
         "sharpe_ratio": round(sharpe, 2) if sharpe is not None else None,
     }
@@ -74,7 +84,8 @@ def _calculate_sharpe(
     if len(dates) < 10:
         return None
 
-    for i in range(1, min(len(dates), 30)):
+    dates = dates[-31:]
+    for i in range(1, len(dates)):
         day_return = 0.0
         total_weight = 0.0
         for h in holdings:
@@ -338,16 +349,19 @@ def calculate_health(
     ]
 
 
-def calculate_correlation(nav_history: dict[str, list[dict]]) -> dict[str, dict[str, float]]:
+def calculate_correlation(nav_history: dict[str, list[dict]]) -> dict[str, dict[str, float | None]]:
     """计算持仓间相关性矩阵。"""
     codes = list(nav_history.keys())
     if len(codes) < 2:
         return {}
 
     # 提取日收益率序列
-    returns_by_code: dict[str, list[float]] = {}
+    returns_by_code: dict[str, dict[str, float]] = {}
     for code, hist in nav_history.items():
-        returns_by_code[code] = [item["daily_return"] for item in hist if item.get("daily_return")]
+        returns_by_code[code] = {
+            item["nav_date"]: float(item["daily_return"]) for item in hist
+            if item.get("daily_return") is not None and math.isfinite(float(item["daily_return"]))
+        }
 
     matrix: dict[str, dict[str, float]] = {}
     for i, c1 in enumerate(codes):
@@ -358,13 +372,14 @@ def calculate_correlation(nav_history: dict[str, list[dict]]) -> dict[str, dict[
             elif j < i:
                 matrix[c1][c2] = matrix[c2][c1]
             else:
-                r1 = returns_by_code.get(c1, [])
-                r2 = returns_by_code.get(c2, [])
-                n = min(len(r1), len(r2))
-                if n < 5:
-                    matrix[c1][c2] = 0.0
+                r1 = returns_by_code.get(c1, {})
+                r2 = returns_by_code.get(c2, {})
+                dates = sorted(r1.keys() & r2.keys())
+                x, y = [r1[d] for d in dates], [r2[d] for d in dates]
+                if len(dates) < 5 or len(set(x)) < 2 or len(set(y)) < 2:
+                    matrix[c1][c2] = None
                 else:
-                    corr = _pearson(r1[:n], r2[:n])
+                    corr = _pearson(x, y)
                     matrix[c1][c2] = round(corr, 3)
     return matrix
 
@@ -425,7 +440,7 @@ def generate_suggestions(
         for i, c1 in enumerate(codes):
             for c2 in codes[i+1:]:
                 corr = matrix.get(c1, {}).get(c2, 0)
-                if corr > 0.85:
+                if corr is not None and corr > 0.85:
                     suggestions.append({
                         "title": "高相关性持仓",
                         "desc": f"{name_map.get(c1, c1)} 与 {name_map.get(c2, c2)} 相关系数 {corr:.2f}，分散效果有限",

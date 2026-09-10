@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 Emit = Callable[[dict], Awaitable[None]]
 
-_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_NUMBER_RE = re.compile(r"[+-]?\d+(?:\.\d+)?")
 
 
 class SynthesizerAgent:
@@ -94,7 +94,7 @@ class SynthesizerAgent:
             if r.evidence:
                 parts.append("工具返回原始数据：")
                 for e in r.evidence:
-                    parts.append(f"- {e['tool']}({e['input']}) → {e['output']}")
+                    parts.append(f"- [{e.get('id', 'legacy')}] {e['tool']}({e['input']}) → {e['output']}\n元数据：{e.get('provenance', {})}")
             if r.text.strip():
                 parts.append(f"该 Agent 的初步结论：{r.text.strip()}")
         return "\n".join(parts)
@@ -113,15 +113,37 @@ def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
 
     返回 {"total": n, "grounded": n, "ungrounded": [...], "rate": 0.0-1.0}
     """
-    corpus = " ".join(str(e["output"]) for r in results for e in r.evidence)
-    corpus_numbers = {_normalize(n) for n in _NUMBER_RE.findall(corpus)}
-    corpus_numbers.discard(None)
-
-    # 过滤掉序号、年份、百分比里的小整数等噪声
-    candidates = [n for n in _NUMBER_RE.findall(answer) if _is_meaningful(n)]
-
-    ungrounded = [n for n in candidates if _normalize(n) not in corpus_numbers]
-    total = len(candidates)
+    records = [e for r in results for e in r.evidence if e.get("status", "ok") == "ok"]
+    by_id = {e["id"]: e for e in records if e.get("id")}
+    ungrounded = []
+    total = 0
+    for line in answer.splitlines():
+        refs = re.findall(r"\[(E-[a-f0-9]+)\]", line)
+        clean = re.sub(r"\[E-[a-f0-9]+\]", "", line)
+        clean = re.sub(r"^\s*\d+[.)、]\s*", "", clean)
+        corpus = " ".join(str(e["output"]) for e in ( [by_id[r] for r in refs if r in by_id] if by_id else records))
+        for match in _NUMBER_RE.finditer(clean):
+            token = match.group()
+            unit = re.match(r"\s*(%|％|元|天|个月|年|成|份)", clean[match.end():])
+            unit = unit.group(1).replace("％", "%") if unit else ""
+            if not unit and not _is_meaningful(token):
+                continue
+            if unit in ("年", "个月") or (unit == "" and 1900 <= abs(float(token)) <= 2100):
+                continue
+            total += 1
+            found = False
+            for source in _NUMBER_RE.finditer(corpus):
+                source_unit = re.match(r"\s*(%|％|元|天|个月|年|成|份)", corpus[source.end():])
+                source_unit = source_unit.group(1).replace("％", "%") if source_unit else ""
+                # 回撤可以用损失幅度表述；收益率等指标必须保留符号。
+                drawdown = "回撤" in clean[max(0, match.start() - 10):match.start()] and "回撤" in corpus[max(0, source.start() - 10):source.start()]
+                same = (_normalize(token) == _normalize(source.group()) or
+                        (drawdown and abs(float(token)) == abs(float(source.group()))))
+                if same and (not unit or not source_unit or unit == source_unit):
+                    found = True
+                    break
+            if not found:
+                ungrounded.append(token)
     grounded = total - len(ungrounded)
 
     return {
@@ -139,7 +161,7 @@ def _normalize(token: str) -> str | None:
     是同一个数。不做归一会把大量真实引用误判成"编造"，指标就没法用了。
     """
     try:
-        value = abs(float(token))
+        value = float(token)
     except ValueError:
         return None
     return f"{value:.6f}".rstrip("0").rstrip(".")

@@ -46,6 +46,7 @@ class Verdict:
     missing_evidence: list[str] = field(default_factory=list)
     ungrounded_numbers: list[str] = field(default_factory=list)
     grounding_rate: float = 1.0
+    review_complete: bool = True
 
     def as_event(self, gate: str) -> dict:
         return {
@@ -66,6 +67,8 @@ def _build_evidence_digest(results: list[AgentResult]) -> str:
         lines.append(f"- [{r.agent}] 目标：{r.goal or '（无）'}；工具：{tools}")
         if r.text.strip():
             lines.append(f"  结论：{r.text.strip()[:220]}")
+        for e in r.evidence:
+            lines.append(f"  原始证据 [{e.get('id', 'legacy')}]：{json.dumps(e, ensure_ascii=False)}")
     return "\n".join(lines) or "（本轮没有收集到任何证据）"
 
 
@@ -88,7 +91,7 @@ class CriticAgent:
             return Verdict(passed=True)
 
         # 一条证据都没有时不必问 LLM
-        if not any(r.evidence or r.text.strip() for r in results):
+        if not any(e.get("status", "ok") == "ok" for r in results for e in r.evidence):
             return Verdict(
                 passed=False,
                 issues=["本轮没有收集到任何证据"],
@@ -114,12 +117,14 @@ class CriticAgent:
             )
             match = re.search(r"\{.*\}", out.text.strip(), re.DOTALL)
             if not match:
-                return Verdict(passed=True)
-            missing = json.loads(match.group()).get("missing") or []
+                raise ValueError("审核结果不是 JSON")
+            data = json.loads(match.group())
+            if not isinstance(data.get("missing"), list):
+                raise ValueError("审核缺少 missing 列表")
+            missing = data["missing"]
             missing = [str(m) for m in missing if str(m).strip()][:4]
         except Exception:
-            # fail-open：Critic 不该成为新的单点故障
-            return Verdict(passed=True)
+            return Verdict(passed=True, issues=["证据审核未完成"], missing_evidence=list(success_criteria), review_complete=False)
 
         if not missing:
             return Verdict(passed=True)
@@ -135,11 +140,24 @@ class CriticAgent:
         issues: list[str] = []
 
         grounding = check_numeric_grounding(answer, results)
+        # 画像存在时，动作幅度是用户提出的目标而非行情事实；其是否可执行由
+        # check_profile_constraint 的结构化结果校验，避免把动作数字误当成行情数字。
+        if self.profile is not None and _ACTION_NUMBER_RE.search(answer):
+            grounding["ungrounded"] = [n for n in grounding["ungrounded"]
+                                        if not re.search(rf"(?:加仓|减仓|买入|卖出|建仓|清仓|止损|止盈|仓位)[^。；\n]{{0,12}}{re.escape(n)}", answer)]
+            grounding["grounded"] = grounding["total"] - len(grounding["ungrounded"])
+            grounding["rate"] = grounding["grounded"] / grounding["total"] if grounding["total"] else 1.0
         if grounding["ungrounded"]:
             nums = "、".join(grounding["ungrounded"][:6])
             issues.append(f"以下数字未出现在工具返回中，可能是编造的：{nums}")
 
         issues.extend(self._check_profile_constraints(answer))
+        available = {e["id"] for r in results for e in r.evidence if e.get("id") and e.get("status", "ok") == "ok"}
+        cited = set(re.findall(r"\[(E-[a-f0-9]+)\]", answer))
+        if cited - available:
+            issues.append("回答引用了不存在或不可用的证据")
+        if available and not cited:
+            issues.append("回答必须引用具体证据 ID")
 
         return Verdict(
             passed=not issues,
@@ -167,7 +185,7 @@ class CriticAgent:
                     rf"[^。；\n]{{0,30}}{re.escape(industry)}[^。；\n]{{0,30}}", answer
                 )
                 context = window.group() if window else industry
-                if re.search(r"建议|可以|考虑|配置|加仓|买入|增持", context):
+                if re.search(r"建议|可以|考虑|配置|加仓|买入|增持", context) and not re.search(r"不建议|不得|不应|避免|不要|不配置", context):
                     issues.append(f"用户已排除「{industry}」行业，但回答中建议配置：{context.strip()}")
 
         return issues

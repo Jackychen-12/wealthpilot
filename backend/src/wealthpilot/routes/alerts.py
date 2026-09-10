@@ -15,6 +15,7 @@ router = APIRouter(prefix="/alerts", tags=["alerts"])
 async def check_alerts(
     threshold: float = -3.0,
     db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
 ):
     """检查回撤预警。返回超过阈值的持仓列表。
 
