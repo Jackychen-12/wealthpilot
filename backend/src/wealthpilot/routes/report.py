@@ -7,9 +7,12 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
+from fastapi.responses import Response
+
 from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.models.portfolio import PortfolioHolding
-from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
+from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.market_data import fetch_fund_nav
 from wealthpilot.services.report import generate_weekly_report
 from wealthpilot.storage.db import get_session
 
@@ -26,12 +29,9 @@ async def get_weekly_report(db: Session = Depends(get_session), user_id: int = D
     nav_data: dict[str, float] = {}
     nav_history: dict[str, list[dict]] = {}
 
+    _prices = await fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings])
     for h in holdings:
-        info = await fetch_fund_info(h.fund_code)
-        if info:
-            nav_data[h.fund_code] = info["nav"]
-        else:
-            nav_data[h.fund_code] = h.cost_price
+        nav_data[h.fund_code] = _prices.get(h.fund_code, h.cost_price)
 
         hist = await fetch_fund_nav(h.fund_code, 30)
         if hist:
@@ -51,12 +51,9 @@ async def force_generate_report(db: Session = Depends(get_session), user_id: int
     nav_data: dict[str, float] = {}
     nav_history: dict[str, list[dict]] = {}
 
+    _prices = await fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings])
     for h in holdings:
-        info = await fetch_fund_info(h.fund_code)
-        if info:
-            nav_data[h.fund_code] = info["nav"]
-        else:
-            nav_data[h.fund_code] = h.cost_price
+        nav_data[h.fund_code] = _prices.get(h.fund_code, h.cost_price)
 
         hist = await fetch_fund_nav(h.fund_code, 30)
         if hist:
@@ -67,67 +64,68 @@ async def force_generate_report(db: Session = Depends(get_session), user_id: int
 
 
 @router.get("/pdf")
-async def export_pdf(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
-    """导出周报为纯文本 PDF（简易版，无第三方 PDF 库依赖）。"""
+async def export_pdf(
+    db: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    """导出周报 PDF。
+
+    原实现输出的是纯文本 .txt，只是端点叫 /pdf —— 这次换成真实 PDF。
+    中文用 reportlab 内置的 CID 字体 STSong-Light，不依赖宿主机字体文件，
+    Docker 容器里同样可用。
+    """
+    from wealthpilot.services.analysis import calculate_overview
+    from wealthpilot.services.assets import fetch_prices_by_type
+    from wealthpilot.services.pdf_report import build_weekly_pdf
+
     holdings = user_holdings(db, user_id)
     if not holdings:
-        return {"error": "暂无持仓数据"}
+        return Response(
+            content="暂无持仓数据，请先添加持仓".encode(),
+            status_code=400,
+            media_type="text/plain; charset=utf-8",
+        )
 
-    nav_data: dict[str, float] = {}
+    prices = await fetch_prices_by_type(
+        [(h.fund_code, getattr(h, "asset_type", "fund")) for h in holdings]
+    )
+    nav_data = {h.fund_code: prices.get(h.fund_code, h.cost_price) for h in holdings}
+
     nav_history: dict[str, list[dict]] = {}
     for h in holdings:
-        info = await fetch_fund_info(h.fund_code)
-        nav_data[h.fund_code] = info["nav"] if info else h.cost_price
+        if (getattr(h, "asset_type", "fund") or "fund") != "fund":
+            continue
         hist = await fetch_fund_nav(h.fund_code, 30)
         if hist:
             nav_history[h.fund_code] = hist
 
     report = generate_weekly_report(holdings, nav_data, nav_history)
 
-    # 生成纯文本格式报告（可用 txt 打开，也可直接粘贴）
-    lines = []
-    lines.append("=" * 50)
-    lines.append("WealthPilot AI 周复盘报告")
-    lines.append(f"周期: {report.get('week_start', '')} — {report.get('week_end', '')}")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append(f"【总结】{report.get('summary', '')}")
-    lines.append("")
+    # 归一化成 pdf_report 期望的键名
+    payload = {
+        "week_start": report.get("week_start", ""),
+        "week_end": report.get("week_end", ""),
+        "summary": report.get("summary", ""),
+        "key_points": [
+            f"{kp.get('title', '')}：{kp.get('desc', '')}"
+            for kp in report.get("key_points", [])
+        ],
+        "next_week_focus": report.get("next_week_focus", []),
+        "risks": [report["risk_alert"]] if report.get("risk_alert") else [],
+        "ai_insights": report.get("ai_insight", ""),
+    }
 
-    overview = report.get("overview", {})
-    lines.append("【本周数据】")
-    lines.append(f"  组合周收益: {overview.get('weekly_return', 0):.0f} 元")
-    lines.append(f"  组合涨幅: {overview.get('weekly_growth_pct', 0):.2f}%")
-    lines.append(f"  超额收益: {overview.get('excess_return_pct', 0):.2f}%")
-    lines.append(f"  Sharpe 比率: {overview.get('sharpe_ratio', 'N/A')}")
-    lines.append("")
+    try:
+        summary = calculate_overview(holdings, nav_data, nav_history)
+    except Exception:
+        summary = None
 
-    lines.append("【关键归因点】")
-    for kp in report.get("key_points", []):
-        lines.append(f"  • {kp.get('title', '')}: {kp.get('desc', '')}")
-    lines.append("")
-
-    lines.append("【下周关注】")
-    for f in report.get("next_week_focus", []):
-        lines.append(f"  • {f}")
-    lines.append("")
-
-    if report.get("risk_alert"):
-        lines.append(f"【风险提示】{report['risk_alert']}")
-        lines.append("")
-
-    lines.append(f"【AI 洞察】{report.get('ai_insight', '')}")
-    lines.append("")
-    lines.append("-" * 50)
-    lines.append("由 WealthPilot AI Engine 生成")
-    lines.append("⚠️ 以上仅为分析视角，不构成投资建议")
-
-    content = "\n".join(lines)
-    buf = io.BytesIO(content.encode("utf-8"))
-    filename = f"wealthpilot-weekly-{date.today().isoformat()}.txt"
-
-    return StreamingResponse(
-        buf,
-        media_type="text/plain; charset=utf-8",
+    pdf = build_weekly_pdf(payload, summary)
+    filename = f"wealthpilot-weekly-{date.today().isoformat()}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+

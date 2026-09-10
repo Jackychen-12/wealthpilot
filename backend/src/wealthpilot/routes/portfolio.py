@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import PortfolioCreate, PortfolioResponse, PortfolioUpdate
 from wealthpilot.services.deps import current_user_id, owned_holding, user_holdings
-from wealthpilot.services.market_data import fetch_fund_info
+from wealthpilot.services.assets import fetch_asset_price, fetch_prices_by_type
 from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -20,15 +20,18 @@ async def list_holdings(
     user_id: int = Depends(current_user_id),
 ):
     holdings = user_holdings(db, user_id)
+    prices = await fetch_prices_by_type(
+        [(h.fund_code, h.asset_type) for h in holdings]
+    )
     results = []
     for h in holdings:
-        info = await fetch_fund_info(h.fund_code)
-        latest_nav = info["nav"] if info else None
+        latest_nav = prices.get(h.fund_code)
         market_value = h.shares * latest_nav if latest_nav else None
         total_return = (latest_nav - h.cost_price) * h.shares if latest_nav else None
         return_pct = ((latest_nav - h.cost_price) / h.cost_price * 100) if latest_nav else None
         results.append(PortfolioResponse(
             id=h.id,
+            asset_type=h.asset_type,
             fund_code=h.fund_code,
             fund_name=h.fund_name,
             shares=h.shares,
@@ -52,6 +55,7 @@ def add_holding(
 ):
     holding = PortfolioHolding(
         user_id=user_id,
+        asset_type=(req.asset_type or "fund").lower(),
         fund_code=req.fund_code,
         fund_name=req.fund_name,
         shares=req.shares,
@@ -65,6 +69,7 @@ def add_holding(
     db.refresh(holding)
     return PortfolioResponse(
         id=holding.id,
+        asset_type=holding.asset_type,
         fund_code=holding.fund_code,
         fund_name=holding.fund_name,
         shares=holding.shares,
@@ -93,6 +98,7 @@ def update_holding(
     db.refresh(holding)
     return PortfolioResponse(
         id=holding.id,
+        asset_type=holding.asset_type,
         fund_code=holding.fund_code,
         fund_name=holding.fund_name,
         shares=holding.shares,

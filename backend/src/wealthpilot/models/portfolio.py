@@ -10,7 +10,8 @@ class PortfolioHolding(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(default=0, index=True, description="所属用户ID，0=公共/未登录")
-    fund_code: str = Field(index=True, description="基金代码")
+    asset_type: str = Field(default="fund", index=True, description="fund/stock/etf/crypto")
+    fund_code: str = Field(index=True, description="标的代码（基金/股票/ETF/加密货币）")
     fund_name: str = Field(description="基金名称")
     shares: float = Field(description="持有份额")
     cost_price: float = Field(description="成本净值")

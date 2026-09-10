@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     critic_max_replans: int = Field(default=1, description="证据不足时最多补充规划几轮")
     critic_max_rewrites: int = Field(default=2, description="输出不合规时最多重写几次")
 
+    alert_webhook_url: str = Field(default="", description="预警 webhook 推送地址，留空则不推送")
+
     db_path: Path = Field(default=Path("./data/wealthpilot.db"))
     host: str = "0.0.0.0"
     port: int = 8000
