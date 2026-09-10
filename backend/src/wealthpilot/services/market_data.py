@@ -8,6 +8,7 @@
 5. 网易财经 — 历史行情数据
 """
 
+import asyncio
 import json
 import re
 from datetime import date, datetime, timedelta
@@ -195,7 +196,7 @@ async def fetch_fund_nav(fund_code: str, days: int = 30) -> list[dict]:
         return records
     except Exception:
         # fallback 到 AKShare
-        return get_fund_nav_akshare(fund_code, days)
+        return await asyncio.to_thread(get_fund_nav_akshare, fund_code, days)
 
 
 async def _fetch_fund_name(client: httpx.AsyncClient, fund_code: str) -> str:
@@ -305,7 +306,7 @@ async def fetch_indices() -> list[dict]:
     return results
 
 
-async def fetch_market_news() -> list[dict]:
+async def fetch_market_news(keyword: str = "") -> list[dict]:
     """拉取财经要闻（东方财富）。"""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -317,6 +318,8 @@ async def fetch_market_news() -> list[dict]:
             news = []
             for item in data.get("data", {}).get("list", [])[:8]:
                 title = item.get("title", "")
+                if keyword and keyword.casefold() not in title.casefold():
+                    continue
                 # 自动打 tag
                 tag = "财经"
                 if any(k in title for k in ["美股", "纳斯达克", "标普"]):
@@ -329,10 +332,13 @@ async def fetch_market_news() -> list[dict]:
                     tag = "基金"
                 elif any(k in title for k in ["政策", "央行", "监管"]):
                     tag = "政策"
-                news.append({"tag": tag, "text": title[:60]})
-            return news if news else [{"tag": "市场", "text": "暂无最新资讯"}]
+                news.append({"tag": tag, "text": title,
+                             "source_url": item.get("url") or item.get("uniqueUrl") or "",
+                             "published_at": str(item.get("showTime") or item.get("publishTime") or ""),
+                             "retrieved_at": datetime.now().isoformat()})
+            return news
     except Exception:
-        return [{"tag": "市场", "text": "资讯加载失败，请稍后刷新"}]
+        return []
 
 
 # ═══════════════════════════════════════════════════════════
@@ -342,8 +348,10 @@ async def fetch_market_news() -> list[dict]:
 async def get_comprehensive_fund_info(fund_code: str) -> dict:
     """综合基金信息（估值 + 详情 + 排名）。"""
     realtime = await fetch_fund_info(fund_code)
-    detail = get_fund_detail_akshare(fund_code)
-    rank = get_fund_rank_akshare(fund_code)
+    detail, rank = await asyncio.gather(
+        asyncio.to_thread(get_fund_detail_akshare, fund_code),
+        asyncio.to_thread(get_fund_rank_akshare, fund_code),
+    )
 
     result = {"code": fund_code}
     if realtime:

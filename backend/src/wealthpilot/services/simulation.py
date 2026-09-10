@@ -12,6 +12,8 @@ check_* 组。原则：**最终答案里出现的每个数字，都应该是某�
 
 from __future__ import annotations
 
+import math
+
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.analysis import calculate_max_drawdown
@@ -25,11 +27,18 @@ def portfolio_weights(
     holdings: list[PortfolioHolding], nav_data: dict[str, float]
 ) -> dict[str, float]:
     """各基金市值占比（0-1）。空仓返回空字典。"""
-    values = {h.fund_code: _value(h, nav_data) for h in holdings}
+    values = _values(holdings, nav_data)
     total = sum(values.values())
     if total <= 0:
         return {}
     return {code: v / total for code, v in values.items()}
+
+
+def _values(holdings, nav_data) -> dict[str, float]:
+    values: dict[str, float] = {}
+    for h in holdings:
+        values[h.fund_code] = values.get(h.fund_code, 0.0) + _value(h, nav_data)
+    return values
 
 
 def concentration_metrics(weights: dict[str, float]) -> dict:
@@ -54,21 +63,21 @@ def concentration_metrics(weights: dict[str, float]) -> dict:
 
 def _weighted_drawdown(
     weights: dict[str, float], nav_history: dict[str, list[dict]] | None
-) -> float:
+) -> float | None:
     """按权重加权的历史最大回撤估计（正数，0.18 表示 18%）。
 
     这是**上界的粗略估计**，不是组合真实回撤 —— 真实回撤要用组合净值序列算，
     各基金的回撤不会同时发生。加权值会高估，作为约束校验的保守侧是可接受的，
     但不能当成预测值对外呈现。
     """
-    if not nav_history:
-        return 0.0
+    if not weights or not nav_history:
+        return None
     total = 0.0
     for code, w in weights.items():
         series = nav_history.get(code)
-        if not series:
-            continue
-        info = calculate_max_drawdown(series)
+        if not series or len(series) < 2 or any(not math.isfinite(r["nav"]) or r["nav"] <= 0 for r in series):
+            return None
+        info = calculate_max_drawdown(sorted(series, key=lambda r: r["nav_date"], reverse=True))
         # 正常路径返回 max_drawdown_pct；对历史上曾用过的键名保持兼容
         dd = info.get("max_drawdown_pct", info.get("max_drawdown", 0))
         total += w * abs(float(dd)) / 100.0
@@ -92,8 +101,31 @@ def simulate_change(
     before_weights = portfolio_weights(holdings, nav_data)
     before_total = sum(_value(h, nav_data) for h in holdings)
 
-    values = {h.fund_code: _value(h, nav_data) for h in holdings}
+    values = _values(holdings, nav_data)
     applied: list[dict] = []
+
+    targets = [ch for ch in changes if ch.get("target_pct") is not None]
+    codes = [str(ch.get("fund_code", "")).strip() for ch in changes]
+    error = ""
+    if not all(codes) or len(codes) != len(set(codes)):
+        error = "基金代码不能为空或重复"
+    elif targets and (len(targets) != len(changes) or any(ch.get("amount") is not None for ch in changes)):
+        error = "目标占比与增减金额不能混用"
+    elif any(not math.isfinite(float(ch.get("target_pct", ch.get("amount", 0)) or 0)) for ch in changes):
+        error = "变动必须是有限数值"
+    target_total = sum(float(ch["target_pct"]) / 100 for ch in targets)
+    if targets and (any(not 0 <= float(ch["target_pct"]) < 100 for ch in targets) or target_total > 1 + 1e-9):
+        error = "目标占比需在 0 到 100% 之间且合计不得超过 100%"
+    untouched = sum(v for code, v in values.items() if code not in codes)
+    if targets and not error:
+        if math.isclose(target_total, 1.0) and untouched == 0:
+            target_value = before_total
+        elif target_total < 1 and untouched > 0:
+            target_value = untouched / (1 - target_total)
+        else:
+            error = "目标占比与未调整持仓不相容，请给出完整配置或使用金额变动"
+    if error:
+        return {"error": error, "changes": [{"error": error}], "status": "invalid_input"}
 
     for ch in changes:
         code = str(ch.get("fund_code", "")).strip()
@@ -103,13 +135,7 @@ def simulate_change(
 
         if "target_pct" in ch and ch["target_pct"] is not None:
             target_pct = float(ch["target_pct"]) / 100.0
-            if target_pct >= 1.0:
-                # 目标占比 100% 意味着清掉其他所有仓位，语义上不该走这条路径
-                applied.append({"fund_code": code, "error": "目标占比需小于 100%"})
-                continue
-            others = before_total - current
-            # 解 new / (others + new) = target_pct
-            new_value = others * target_pct / (1 - target_pct)
+            new_value = target_value * target_pct
             delta = new_value - current
         elif "amount" in ch and ch["amount"] is not None:
             delta = float(ch["amount"])
@@ -171,6 +197,8 @@ def check_constraints(
 
     if changes:
         sim = simulate_change(holdings, nav_data, nav_history, changes)
+        if "error" in sim:
+            return {"passed": False, "status": "invalid_input", "violations": [sim["error"]], "checked": []}
         state = sim["after"]
     else:
         weights = portfolio_weights(holdings, nav_data)
@@ -182,12 +210,19 @@ def check_constraints(
 
     violations: list[str] = []
     checked: list[str] = []
+    missing: list[str] = []
+    if profile.is_stale():
+        missing.append("风险画像已过期，请复评")
+    if any(nav_data.get(code, 0) <= 0 for code in state["weights"]):
+        missing.append("缺少有效的当前净值")
 
     # 1. 回撤容忍度
     dd = state["weighted_max_drawdown"]
     limit = profile.max_drawdown_tolerance
-    checked.append(f"加权最大回撤估计 {dd:.1%} vs 容忍上限 {limit:.0%}")
-    if dd > limit:
+    checked.append(f"回撤容忍上限 {limit:.0%}")
+    if dd is None:
+        missing.append("缺少完整历史净值，无法校验回撤")
+    elif dd > limit:
         violations.append(
             f"加权最大回撤估计 {dd:.1%} 超过容忍上限 {limit:.0%}"
         )
@@ -198,6 +233,8 @@ def check_constraints(
         by_code = {h.fund_code: h for h in holdings}
         for code, w in state["weights"].items():
             holding = by_code.get(code)
+            if holding is None or not holding.industry:
+                missing.append(f"缺少 {code} 的行业资料，无法校验排除行业")
             if holding and holding.industry and holding.industry in excluded and w > 0:
                 violations.append(
                     f"{holding.fund_name}（{code}）属于已排除行业「{holding.industry}」，占比 {w:.1%}"
@@ -205,11 +242,22 @@ def check_constraints(
         checked.append(f"排除行业检查：{'、'.join(excluded)}")
 
     # 3. 流动性储备
-    if profile.liquidity_reserve > 0:
-        total = state.get("total_value", sum(_value(h, nav_data) for h in holdings))
-        checked.append(f"投入 {total:.0f} 元 vs 需保留 {profile.liquidity_reserve:.0f} 元")
+    before_total = sum(_value(h, nav_data) for h in holdings)
+    added = state.get("total_value", before_total) - before_total
+    cash = profile.available_cash
+    if cash is None and (profile.liquidity_reserve > 0 or added > 0):
+        missing.append("缺少可用现金余额，无法校验流动性储备")
+    elif cash is not None:
+        remaining = cash - added
+        checked.append(f"变动后现金 {remaining:.2f} 元；需保留 {profile.liquidity_reserve:.2f} 元")
+        if remaining < profile.liquidity_reserve:
+            violations.append("变动后现金不足或侵占流动性储备")
+    if changes and profile.horizon_months <= 0:
+        violations.append("投资期限必须大于零")
 
-    return {"passed": not violations, "violations": violations, "checked": checked}
+    return {"passed": not violations and not missing,
+            "status": "constraint_violation" if violations else "insufficient_data" if missing else "passed",
+            "violations": violations, "missing_data": missing, "checked": checked}
 
 
 def max_position_within_drawdown(
@@ -227,6 +275,11 @@ def max_position_within_drawdown(
     """
     if profile is None:
         return {"error": "用户尚未完成风险测评，无法计算约束下的仓位上限"}
+    codes = set(portfolio_weights(holdings, nav_data)) | {fund_code}
+    if not math.isfinite(step_pct) or step_pct <= 0:
+        return {"error": "扫描步长必须为正数"}
+    if any(nav_data.get(c, 0) <= 0 or _weighted_drawdown({c: 1.0}, nav_history) is None for c in codes):
+        return {"error": "缺少有效净值或历史样本，无法计算仓位上限", "status": "insufficient_data"}
 
     limit = profile.max_drawdown_tolerance
     best_pct = 0.0
@@ -237,9 +290,13 @@ def max_position_within_drawdown(
         sim = simulate_change(
             holdings, nav_data, nav_history, [{"fund_code": fund_code, "target_pct": pct}]
         )
+        if "error" in sim:
+            pct += step_pct
+            continue
         dd = sim["after"]["weighted_max_drawdown"]
         if dd > limit:
-            break
+            pct += step_pct
+            continue
         best_pct, best_dd = pct, dd
         pct += step_pct
 

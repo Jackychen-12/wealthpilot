@@ -356,9 +356,11 @@ async def execute_tool(
 
     if name == "backtest_rule":
         code = input_data["fund_code"]
-        nav_list = (nav_history or {}).get(code) or await fetch_fund_nav(
-            code, input_data.get("days", 250)
-        )
+        days = max(2, min(int(input_data.get("days", 250)), 1500))
+        nav_list = (nav_history or {}).get(code, [])
+        if len(nav_list) < days:
+            nav_list = await fetch_fund_nav(code, days)
+        nav_list = sorted(nav_list, key=lambda r: r["nav_date"], reverse=True)[:days]
         if not nav_list:
             return f"未获取到基金 {code} 的历史净值，无法回测。"
         return json.dumps(
@@ -366,6 +368,8 @@ async def execute_tool(
                 nav_list,
                 input_data["triggers"],
                 stop_loss_pct=input_data.get("stop_loss_pct"),
+                fee_pct=input_data.get("fee_pct", 0.0),
+                execution_lag=1,
             ),
             ensure_ascii=False,
         )
@@ -427,10 +431,10 @@ async def execute_tool(
         return f"未获取到基金 {input_data['fund_code']} 的净值数据"
 
     if name == "search_market_news":
-        news = await fetch_market_news()
+        news = await fetch_market_news(input_data.get("keyword", ""))
         if news:
-            return "最新财经要闻：\n" + "\n".join(f"  [{n['tag']}] {n['text']}" for n in news[:5])
-        return "暂无最新新闻"
+            return json.dumps({"news": news, "scope": "最新财经要闻标题过滤，非全网检索"}, ensure_ascii=False)
+        return json.dumps({"status": "insufficient_data", "error": "未获取到匹配新闻，不能据此推断没有相关新闻"}, ensure_ascii=False)
 
     # === Portfolio 工具 ===
     if name == "get_portfolio_overview":

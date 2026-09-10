@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     critic_enabled: bool = Field(default=True, description="是否启用 Critic 双闸门校验")
     critic_max_replans: int = Field(default=1, description="证据不足时最多补充规划几轮")
     critic_max_rewrites: int = Field(default=2, description="输出不合规时最多重写几次")
+    tool_timeout_seconds: float = Field(default=30, gt=0)
+    run_timeout_seconds: float = Field(default=180, gt=0)
+    run_max_tool_calls: int = Field(default=24, ge=1)
+    ai_timeout_seconds: float = Field(default=60, gt=0)
 
     alert_webhook_url: str = Field(default="", description="预警 webhook 推送地址，留空则不推送")
 
