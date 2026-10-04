@@ -12,7 +12,8 @@ const parseYuan = (s: string) => Number(s.replace(/[^\d.+-]/g, '')) || 0
 const SLICE_COLORS = ['#5645d4', '#2a9d99', '#dd5b00', '#0075de', '#ff64c8', '#1aae39', '#f5d75e', '#a4a097']
 const BY = [['fund', '按标的'], ['industry', '按行业'], ['category', '按类别']] as const
 
-const OverviewPage: React.FC = () => {
+/** 持仓的收益与归因。embedded 时作为「持仓」页的一个标签，不带页头、要闻和指数（那些在「今日」页）。 */
+const OverviewPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   const navigate = useNavigate()
   const [by, setBy] = useState<string>('fund')
   const overview = useApi(api.overview)
@@ -30,9 +31,8 @@ const OverviewPage: React.FC = () => {
   const noHoldings = !holdings.loading && !holdings.error && rows.length === 0
   const todo = (suggestions.data ?? []).filter((s) => s.priority !== 'low')
 
-  return (
-    <Page title="总览" description="市值、收益、归因与市场动态"
-      actions={<Button size="sm" variant="secondary" onClick={() => navigate('/holdings')}>管理持仓</Button>}>
+  const body = (
+    <>
       {noHoldings ? (
         <DataState empty="还没有持仓。先录入持仓，总览、风险体检和 AI 研究才有数据可算。"
           emptyAction={<Button size="sm" onClick={() => navigate('/holdings')}>去录入持仓</Button>}>{null}</DataState>
@@ -124,6 +124,14 @@ const OverviewPage: React.FC = () => {
           </Section>
         </>
       )}
+    </>
+  )
+  if (embedded) return <div className="flex flex-col gap-10">{body}</div>
+
+  return (
+    <Page title="总览" description="市值、收益、归因与市场动态"
+      actions={<Button size="sm" variant="secondary" onClick={() => navigate('/holdings')}>管理持仓</Button>}>
+      {body}
 
       <div className="grid gap-10 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Section title="财经要闻" hint="来自东方财富，点击查看原文">

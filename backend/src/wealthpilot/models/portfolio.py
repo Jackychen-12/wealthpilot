@@ -18,5 +18,6 @@ class PortfolioHolding(SQLModel, table=True):
     buy_date: date = Field(description="买入日期")
     category: str = Field(default="equity", description="equity/bond/money/hybrid")
     industry: str = Field(default="", description="行业标签")
+    source: str = Field(default="", description="来源：空=手工录入，broker=由模拟盘 / 券商持仓同步")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

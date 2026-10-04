@@ -4,14 +4,15 @@ import { Star } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
-  DEMO, api, runTool, useApi, type Announcement, type Dividend, type Indicator, type PeerValuation, type Peers,
+  DEMO, api, runTool, useApi, type Announcement, type Dividend, type Indicator, type PeerValuation, type Peers, type ReportExcerpts,
   type StockProfile, type StockQuote, type StockValuation, type Technicals, type ValuationBand, type ValuationHistory,
 } from '../api'
 import { AskAi } from '../components/AskAi'
+import { Candles, SeriesLine } from '../components/charts'
 import { CheckpointTable } from '../components/Checkpoints'
 import { SecuritySearch, securityPath } from '../components/SecuritySearch'
 import { DEMO_DEFAULTS } from '../demo/defaults'
-import { Button, Callout, Segmented, Tag } from '../components/kit'
+import { Button, Callout, Drawer, Segmented, Tag } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
 
@@ -117,11 +118,15 @@ const StockCheckpoints: React.FC<{ code: string }> = ({ code }) => {
   if (!items.length) return null
   const held = items.filter((c) => c.status === 'held').length
   const broken = items.filter((c) => c.status === 'broken').length
+  // 默认折成一行，不挡住下面的走势图；有被证伪的才自动展开
   return (
-    <Section title="此前研究的验证点" hint={`共 ${items.length} 条 · 成立 ${held} · 被证伪 ${broken} · 待核对 ${items.length - held - broken}`}
-      actions={<Link to="/review" className="text-[13px] text-steel hover:text-ink">验证与复盘</Link>}>
-      <CheckpointTable items={items.slice(0, 6)} showStock={false} />
-    </Section>
+    <details open={broken > 0} className="rounded-lg border border-hairline px-4 py-3">
+      <summary className="cursor-pointer select-none text-sm text-charcoal">
+        此前研究给它设过 <b className="font-semibold text-ink">{items.length}</b> 个验证点
+        <span className="ml-2 text-[13px] text-steel">成立 {held} · 被证伪 {broken} · 待核对 {items.length - held - broken}</span>
+      </summary>
+      <div className="mt-3"><CheckpointTable items={items.slice(0, 6)} showStock={false} /></div>
+    </details>
   )
 }
 
@@ -139,20 +144,10 @@ const OverviewTab: React.FC<{ code: string }> = ({ code }) => {
 
   return (
     <>
-      <Section title="日线走势" hint={points.length ? `前复权收盘价 · ${points[0].nav_date} 至 ${points[points.length - 1].nav_date} · 区间 ${signed(periodReturn, 2, '%')}` : undefined}
+      <Section title="日线走势" hint={points.length ? `${(kline.data?.price_basis ?? '前复权收盘价').replace('收盘价', '')}日 K · ${points[0].nav_date} 至 ${points[points.length - 1].nav_date} · 区间 ${signed(periodReturn, 2, '%')}` : undefined}
         actions={<Segmented value={days} onChange={setDays} options={RANGES} />}>
         <DataState loading={kline.loading && !points.length} error={kline.error} onRetry={kline.reload} empty={!kline.loading && points.length === 0 ? '没有取到日线数据' : undefined}>
-          <div className="h-[280px] rounded-lg border border-hairline p-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={points} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-                <CartesianGrid stroke="var(--hairline-soft)" vertical={false} />
-                <XAxis dataKey="nav_date" tick={AXIS} tickLine={false} axisLine={{ stroke: 'var(--hairline)' }} minTickGap={48} tickFormatter={(v: string) => v.slice(5)} />
-                <YAxis domain={['auto', 'auto']} tick={AXIS} tickLine={false} axisLine={false} width={56} tickFormatter={(v: number) => v.toFixed(v >= 100 ? 0 : 2)} />
-                <Tooltip formatter={(v) => [Number(v).toFixed(2), '收盘（前复权）']} labelStyle={{ color: 'var(--steel)' }} contentStyle={TOOLTIP} />
-                <Line type="monotone" dataKey="nav" stroke="var(--primary)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <Candles data={points} />
         </DataState>
         {range?.range_position_pct != null ? (
           <div className="mt-4 max-w-[560px]">
@@ -235,6 +230,8 @@ const FinancialsTab: React.FC<{ code: string }> = ({ code }) => {
         </Section>
       ) : null}
 
+      <ReportExcerptSection code={code} />
+
       <Section title="分红记录" hint="股息率为方案公布时按当时股价计算的数值">
         <DataState loading={div.loading} error={div.error} onRetry={div.reload} empty={div.missing || (!div.loading && !div.value?.dividends.length ? '没有取到分红记录' : undefined)}>
           <Table head={[{ label: '报告期' }, { label: '方案' }, { label: '股息率', right: true }, { label: '除权除息日', right: true }]}>
@@ -278,6 +275,19 @@ const Band: React.FC<{ label: string; band: ValuationBand }> = ({ label, band })
   )
 }
 
+const ValuationChart: React.FC<{ code: string; median?: number }> = ({ code, median }) => {
+  const series = useApi(() => api.valuationSeries(code), [code])
+  const [metric, setMetric] = useState('pe')
+  const rows = (series.data?.data ?? []).map((r) => ({ date: r.date, value: metric === 'pe' ? r.pe : r.pb }))
+  if (series.error || (!series.loading && rows.length < 2)) return null
+  return (
+    <div className="mt-4">
+      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] text-steel">近五年走势（每周一个点）</span><Segmented value={metric} onChange={setMetric} options={[['pe', 'PE'], ['pb', 'PB']] as const} /></div>
+      <DataState loading={series.loading}><SeriesLine data={rows} median={metric === 'pe' ? median : undefined} label={metric.toUpperCase()} /></DataState>
+    </div>
+  )
+}
+
 const ValuationTab: React.FC<{ code: string }> = ({ code }) => {
   const hist = useTool<ValuationHistory>('get_valuation_history', code)
   const peer = useTool<PeerValuation>('compare_peers_valuation', code)
@@ -294,6 +304,7 @@ const ValuationTab: React.FC<{ code: string }> = ({ code }) => {
                 <Band label="市净率 PB" band={h.pb} />
                 <Band label="市销率 PS（TTM）" band={h.ps} />
               </div>
+              <ValuationChart code={code} median={h.pe.median} />
               <p className="mt-3 text-[13px] text-steel">分位是当前值在这段时间自身历史里的位置（0% 最便宜，100% 最贵）。只和自己的过去比，不代表绝对便宜或贵——盈利下滑时低分位也可能是合理的。</p>
             </>
           ) : null}
@@ -342,17 +353,67 @@ const PeersTab: React.FC<{ code: string }> = ({ code }) => {
 const NewsTab: React.FC<{ code: string }> = ({ code }) => {
   const ann = useTool<{ announcements: Announcement[] }>('get_stock_announcements', code)
   const list = ann.value?.announcements ?? []
+  const [reading, setReading] = useState<Announcement | null>(null)
   return (
-    <Section title="公司公告" hint="来自东方财富公告，点标题看原文">
+    <Section title="公司公告" hint="点标题直接读正文；Agent 研究时读的也是这份文本">
       <DataState loading={ann.loading} error={ann.error} onRetry={ann.reload} empty={ann.missing || (!ann.loading && list.length === 0 ? '没有取到公告' : undefined)}>
         <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
           {list.map((a) => (
             <li key={a.url} className="flex items-baseline gap-4 px-4 py-2.5">
               <span className="shrink-0 font-mono text-xs text-stone">{a.date}</span>
-              <a href={a.url} target="_blank" rel="noreferrer" className="min-w-0 text-sm text-charcoal hover:text-ink hover:underline">{a.title}</a>
+              <button type="button" onClick={() => setReading(a)} className="min-w-0 flex-1 text-left text-sm text-charcoal hover:text-ink hover:underline">{a.title}</button>
+              <a href={a.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-steel hover:text-ink">原文</a>
             </li>
           ))}
         </ul>
+      </DataState>
+      <Drawer open={reading != null} onClose={() => setReading(null)} title="公告正文" width="max-w-2xl">
+        {reading ? <FilingReader key={reading.art_code} filing={reading} /> : null}
+      </Drawer>
+    </Section>
+  )
+}
+
+const FilingReader: React.FC<{ filing: Announcement }> = ({ filing }) => {
+  const [page, setPage] = useState(1)
+  const doc = useApi(() => api.filing(filing.art_code, page), [filing.art_code, page])
+  const d = doc.data
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h3 className="text-base font-semibold leading-snug text-ink">{filing.title}</h3>
+        <p className="mt-1 text-[13px] text-steel">{filing.date}{d ? ` · 共 ${d.total_chars.toLocaleString()} 字` : ''}</p>
+      </div>
+      <DataState loading={doc.loading} error={doc.error} onRetry={doc.reload}>
+        {d ? <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-charcoal">{d.text}</pre> : null}
+      </DataState>
+      {d?.pages && d.pages > 1 ? (
+        <div className="flex items-center gap-3 text-[13px] text-steel">
+          <Button size="xs" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</Button>
+          <span className="tabular-nums">{page} / {d.pages}</span>
+          <Button size="xs" variant="secondary" disabled={page >= d.pages} onClick={() => setPage((p) => p + 1)}>下一页</Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+const ReportExcerptSection: React.FC<{ code: string }> = ({ code }) => {
+  const report = useTool<ReportExcerpts>('read_latest_report', code)
+  const [topic, setTopic] = useState('')
+  const r = report.value
+  const current = r?.sections.find((s) => s.topic === topic) ?? r?.sections[0]
+  return (
+    <Section title="最新定期报告怎么说" hint={r ? `${r.title} · ${r.date}` : '公司在报告正文里的自我陈述，不等于事实'}
+      actions={r ? <a href={r.url} target="_blank" rel="noreferrer" className="text-[13px] text-steel hover:text-ink">原文</a> : undefined}>
+      <DataState loading={report.loading} error={report.error} onRetry={report.reload} empty={report.missing || undefined}>
+        {r && current ? (
+          <>
+            <div className="mb-3 border-b border-hairline"><Segmented value={current.topic} onChange={setTopic} options={r.sections.map((s) => [s.topic, s.topic] as const)} /></div>
+            <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-soft p-4 font-sans text-sm leading-relaxed text-charcoal">{current.excerpt}……</pre>
+            <p className="mt-2 text-[13px] text-steel">{r.note}。</p>
+          </>
+        ) : null}
       </DataState>
     </Section>
   )

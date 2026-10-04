@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.review import Checkpoint, TradeProposal
-from wealthpilot.services import checkpoints
+from wealthpilot.services import broker, checkpoints
 from wealthpilot.services.deps import current_user_id
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_session
@@ -35,7 +35,7 @@ async def verify_now(db: Session = Depends(get_session), user_id: int = Depends(
 
 @router.get("/checkpoints/scorecard")
 def get_scorecard(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
-    return {**checkpoints.scorecard(db, user_id), "advice_mode": get_settings().advice_mode}
+    return {**checkpoints.scorecard(db, user_id), "advice_mode": get_settings().advice_mode, "broker": get_settings().broker}
 
 
 @router.delete("/checkpoints/{checkpoint_id}")
@@ -54,8 +54,8 @@ def delete_checkpoint(checkpoint_id: int, db: Session = Depends(get_session), us
 # ── 操作建议单 ──────────────────────────────────────────
 
 class Authorize(BaseModel):
-    shares: int = Field(..., gt=0, description="实际成交数量（股）")
-    price: float = Field(..., gt=0, description="实际成交价")
+    shares: int = Field(..., gt=0, description="数量（股）")
+    price: float | None = Field(default=None, gt=0, description="实际成交价；模拟盘按最新价成交，不需要填")
 
 
 def _owned(db: Session, proposal_id: int, user_id: int) -> TradeProposal:
@@ -76,13 +76,27 @@ def list_proposals(status: str = "", db: Session = Depends(get_session), user_id
 
 
 @router.post("/proposals/{proposal_id}/authorize")
-def authorize_proposal(proposal_id: int, req: Authorize, db: Session = Depends(get_session),
-                       user_id: int = Depends(current_user_id)):
-    """用户授权后执行：把这笔操作记入持仓台账。
+async def authorize_proposal(proposal_id: int, req: Authorize, db: Session = Depends(get_session),
+                             user_id: int = Depends(current_user_id)):
+    """用户授权后执行。
 
-    这里不向券商下单 —— 用户在自己的券商成交后，把成交数量和价格填回来，持仓随之更新。
+    开了模拟盘（BROKER=paper）：按最新价在模拟盘下单，成交后持仓同步进组合。
+    没开：不下单，用户在自己的券商成交后把数量和价格填回来，记入持仓台账。
     """
     p = _owned(db, proposal_id, user_id)
+    if broker.enabled():
+        order = await broker.place_order(db, user_id, code=p.code, name=p.name, asset_type=p.asset_type,
+                                         side="buy" if p.action in ("buy", "add") else "sell", shares=req.shares, proposal_id=p.id)
+        if order.status != "filled":
+            raise HTTPException(422, f"模拟盘拒单：{order.reason}")
+        await broker.sync_holdings(db, user_id)
+        p.status, p.exec_shares, p.exec_price, p.decided_at = "executed", order.shares, order.price, datetime.now()
+        db.add(p)
+        db.commit()
+        db.refresh(p)
+        return checkpoints.serialize_proposal(p)
+    if req.price is None:
+        raise HTTPException(422, "请填写实际成交价")
     holding = db.exec(select(PortfolioHolding).where(PortfolioHolding.user_id == user_id,
                                                      PortfolioHolding.fund_code == p.code)).first()
     if p.action in ("buy", "add"):

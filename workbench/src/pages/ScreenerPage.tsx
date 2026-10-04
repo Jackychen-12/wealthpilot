@@ -2,18 +2,18 @@ import type React from 'react'
 import { useState } from 'react'
 import { Sparkles, Star } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import { DEMO, api, useApi, type ScreenResult } from '../api'
+import { DEMO, api, useApi, type ScreenBacktest, type ScreenResult } from '../api'
 import { research } from '../api/researchStore'
 import { DEMO_DEFAULTS } from '../demo/defaults'
 import { Button, Callout, Input, Select } from '../components/kit'
-import { DataState, Page, Section, Table, Td, signClass, signed } from '../components/ui'
+import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 
 // 字段名与后端 screener.screen 的条件一致；Agent 的 screen_stocks 工具用的也是这一套
 const FIELDS = [
   ['mv_min_yi', '总市值 ≥（亿元）'], ['mv_max_yi', '总市值 ≤（亿元）'], ['pe_max', 'PE（TTM）≤'], ['pb_max', 'PB ≤'],
-  ['roe_min', 'ROE ≥（%）'], ['revenue_yoy_min', '营收同比 ≥（%）'], ['profit_yoy_min', '净利同比 ≥（%）'], ['change_min', '当日涨跌 ≥（%）'],
+  ['roe_min', '年化 ROE ≥（%）'], ['revenue_yoy_min', '营收同比 ≥（%）'], ['profit_yoy_min', '净利同比 ≥（%）'], ['change_min', '当日涨跌 ≥（%）'],
 ] as const
-const SORTS = [['total_mv_yi', '总市值'], ['pe_ttm', 'PE'], ['pb', 'PB'], ['roe_pct', 'ROE'], ['revenue_yoy_pct', '营收同比'], ['profit_yoy_pct', '净利同比'], ['change_pct', '当日涨跌']] as const
+const SORTS = [['total_mv_yi', '总市值'], ['pe_ttm', 'PE'], ['pb', 'PB'], ['roe_annual_pct', '年化 ROE'], ['revenue_yoy_pct', '营收同比'], ['profit_yoy_pct', '净利同比'], ['change_pct', '当日涨跌']] as const
 const LABEL: Record<string, string> = { ...Object.fromEntries(FIELDS.map(([k, l]) => [k, l.replace(/（.*）/, '')])), industry: '行业', exclude_st: '剔除 ST' }
 const PRESETS: { label: string; form: Record<string, string> }[] = [
   { label: '低估值高 ROE', form: { pe_max: '15', roe_min: '15', mv_min_yi: '200' } },
@@ -37,6 +37,16 @@ const ScreenerPage: React.FC = () => {
   const [form, setForm] = useState<Form>(DEMO ? DEMO_DEFAULTS.screen : {})
   const [state, setState] = useState<{ loading: boolean; error: string; result: ScreenResult | null }>({ loading: false, error: '', result: null })
   const [picked, setPicked] = useState<string[]>([])
+  const [bt, setBt] = useState<{ loading: boolean; error: string; result: ScreenBacktest | null }>({ loading: false, error: '', result: null })
+  const backtest = async () => {
+    setBt({ loading: true, error: '', result: null })
+    try {
+      const { limit: _limit, sort_by: _sort, descending: _desc, ...criteria } = toCriteria(form)
+      setBt({ loading: false, error: '', result: await api.screenBacktest(criteria) })
+    } catch (e) {
+      setBt({ loading: false, error: e instanceof Error ? e.message : '回测失败', result: null })
+    }
+  }
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
   const run = async (next: Form = form) => {
@@ -89,10 +99,47 @@ const ScreenerPage: React.FC = () => {
           <Select id="sc-sort" label="排序" value={form.sort_by ?? 'total_mv_yi'} onChange={(v) => set('sort_by', v)} options={SORTS.map(([value, label]) => ({ value, label }))} />
           <Select id="sc-dir" label="方向" value={form.descending ?? 'desc'} onChange={(v) => set('descending', v)} options={[{ value: 'desc', label: '从高到低' }, { value: 'asc', label: '从低到高' }]} />
         </div>
-        <div><Button type="submit" loading={state.loading}>筛选</Button></div>
+        <div className="flex items-center gap-2">
+          <Button type="submit" loading={state.loading}>筛选</Button>
+          <Button variant="secondary" loading={bt.loading} onClick={() => void backtest()}>回测这组条件</Button>
+          <span className="text-[13px] text-steel">把同样的条件放回过去两年，看按它选股的结果</span>
+        </div>
       </form>
 
       {message ? <Callout tone={message.tone}>{message.text}</Callout> : null}
+
+      {bt.loading || bt.error || bt.result ? (
+        <Section title="历史回测" hint={bt.result ? `${bt.result.start} 至 ${bt.result.end} · 每期等权持有前 ${bt.result.top_n} 只 · 对比${bt.result.benchmark}` : '首次回测要取多个历史截面，约需半分钟'}>
+          <DataState loading={bt.loading} error={bt.error} onRetry={() => void backtest()}>
+            {bt.result ? (
+              <>
+                <Metrics>
+                  <Metric label="累计收益" value={signed(bt.result.total_return_pct, 2, '%')} tone={signClass(bt.result.total_return_pct)} hint={`年化 ${signed(bt.result.annualized_pct, 2, '%')}`} />
+                  <Metric label="基准累计" value={signed(bt.result.benchmark_return_pct, 2, '%')} tone={signClass(bt.result.benchmark_return_pct)} />
+                  <Metric label="超额" value={signed(bt.result.excess_return_pct, 2, '%')} tone={signClass(bt.result.excess_return_pct)} hint={`${bt.result.period_count} 期里 ${bt.result.periods_beating_benchmark} 期跑赢`} />
+                  <Metric label="最大回撤" value={`${bt.result.max_drawdown_pct}%`} hint="按调仓日逐期计" />
+                </Metrics>
+                <div className="mt-4">
+                  <Table minWidth={720} head={[{ label: '持有期' }, { label: '入选', right: true }, { label: '组合', right: true }, { label: '基准', right: true }, { label: '当期表现最好的' }]}>
+                    {bt.result.periods.map((p) => (
+                      <tr key={p.start}>
+                        <Td className="whitespace-nowrap font-mono text-[13px]">{p.start} → {p.end}</Td>
+                        <Td right num>{p.picked === 0 ? '空仓' : p.picked}</Td>
+                        <Td right num className={signClass(p.return_pct)}>{signed(p.return_pct, 2, '%')}</Td>
+                        <Td right num className={signClass(p.benchmark_pct)}>{signed(p.benchmark_pct, 2, '%')}</Td>
+                        <Td className="text-[13px] text-steel">{p.top.map((t) => `${t.name} ${signed(t.return_pct, 1, '%')}`).join('、') || '—'}</Td>
+                      </tr>
+                    ))}
+                  </Table>
+                </div>
+                <Callout tone="warning" title="读这个结果之前" className="mt-4">
+                  <ul className="list-disc space-y-0.5 pl-4">{bt.result.limitations.map((l) => <li key={l}>{l}</li>)}</ul>
+                </Callout>
+              </>
+            ) : null}
+          </DataState>
+        </Section>
+      ) : null}
 
       <Section title="筛选结果"
         hint={r ? `符合 ${r.matched} 只，显示前 ${r.shown} 只 · 行情 ${r.trade_date} · 业绩 ${r.report_date}` : undefined}
@@ -112,7 +159,7 @@ const ScreenerPage: React.FC = () => {
                 {Object.entries(r.criteria).map(([k, v]) => <span key={k}>{LABEL[k] ?? k}{v === true ? '' : ` ${String(v)}`}</span>)}
               </p>
               <Table minWidth={980} head={[{ label: '' }, { label: '公司' }, { label: '行业' }, { label: '总市值（亿元）', right: true }, { label: 'PE', right: true }, { label: 'PB', right: true },
-                { label: 'ROE', right: true }, { label: '营收同比', right: true }, { label: '净利同比', right: true }, { label: '最新价', right: true }, { label: '涨跌', right: true }]}>
+                { label: '年化 ROE', right: true }, { label: '营收同比', right: true }, { label: '净利同比', right: true }, { label: '最新价', right: true }, { label: '涨跌', right: true }]}>
                 {r.stocks.map((s) => (
                   <tr key={s.code}>
                     <Td className="w-8"><input type="checkbox" aria-label={`选择 ${s.name}`} checked={picked.includes(s.code)} onChange={() => toggle(s.code)} className="h-4 w-4 accent-[var(--primary)]" /></Td>
@@ -121,7 +168,7 @@ const ScreenerPage: React.FC = () => {
                     <Td right num>{num(s.total_mv_yi, 0)}</Td>
                     <Td right num>{num(s.pe_ttm)}</Td>
                     <Td right num>{num(s.pb)}</Td>
-                    <Td right num>{s.roe_pct == null ? '—' : `${s.roe_pct}%`}</Td>
+                    <Td right num>{(s.roe_annual_pct ?? s.roe_pct) == null ? '—' : `${s.roe_annual_pct ?? s.roe_pct}%`}</Td>
                     <Td right num className={signClass(s.revenue_yoy_pct)}>{signed(s.revenue_yoy_pct, 2, '%')}</Td>
                     <Td right num className={signClass(s.profit_yoy_pct)}>{signed(s.profit_yoy_pct, 2, '%')}</Td>
                     <Td right num>{num(s.price)}</Td>

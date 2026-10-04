@@ -6,6 +6,7 @@ from sqlalchemy import DateTime, inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from wealthpilot.models.alert import Alert  # noqa: F401 — register table
+from wealthpilot.models.broker import Digest, Order, PaperAccount, PaperPosition  # noqa: F401
 from wealthpilot.models.chat import ChatMessage  # noqa: F401 — register table
 
 # 显式注册其余表，避免依赖 import 顺序

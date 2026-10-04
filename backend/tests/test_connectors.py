@@ -83,7 +83,7 @@ async def test_real_stdio_connection_lists_tools_and_feeds_the_agent(config):
              "command": sys.executable, "args": ["-m", "wealthpilot", "mcp"]}])
     connector = svc.load_connectors()[0]
     tools = await svc.list_tools(connector)
-    assert len(tools) == 37 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
+    assert len(tools) == 40 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
 
     definitions, index = await svc.agent_tools()
     assert "ext_self_get_stock_quote" in index

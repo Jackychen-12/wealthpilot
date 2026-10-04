@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, LayoutDashboard, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, ShieldCheck, Star, Sun, UserRoundCog, Zap } from 'lucide-react'
+import { BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, Settings, ShieldCheck, Star, Sun, UserRoundCog, Wallet, Zap } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
@@ -19,41 +19,43 @@ export type SidebarNavProps = {
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; exact?: boolean; badge?: 'alerts' | 'busy' }
 
-// 股票在前：先看市场和研究，再看自己的组合，最后是工具与设置
+// 常用的放在上面并保持展开；分析工具和设置默认收起，要用的时候点开。少即是多
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
-  { label: '', items: [{ to: '/', label: '今日', icon: Home, exact: true }] },
-  { label: '研究', items: [
+  { label: '', items: [
+    { to: '/', label: '今日', icon: Home, exact: true },
     { to: '/research', label: 'AI 研究', icon: MessageSquareText, badge: 'busy' },
+  ] },
+  { label: '市场', items: [
     { to: '/stock', label: '个股', icon: CandlestickChart },
     { to: '/screener', label: '选股器', icon: ListFilter },
     { to: '/watchlist', label: '自选股', icon: Star },
+  ] },
+  { label: '我的', items: [
+    { to: '/holdings', label: '持仓', icon: BriefcaseBusiness },
+    { to: '/broker', label: '模拟盘', icon: Wallet },
     { to: '/review', label: '验证与复盘', icon: ClipboardCheck },
   ] },
-  { label: '组合', items: [
-    { to: '/holdings', label: '持仓', icon: BriefcaseBusiness },
-    { to: '/overview', label: '组合总览', icon: LayoutDashboard },
+  { label: '分析工具', items: [
     { to: '/lookthrough', label: '持仓穿透', icon: Layers },
-  ] },
-  { label: '风险', items: [
     { to: '/risk', label: '风险体检', icon: ShieldCheck, badge: 'alerts' },
     { to: '/stress', label: '压力测试', icon: Zap },
     { to: '/rebalance', label: '调仓推演', icon: Scale },
-  ] },
-  { label: '工具', items: [
     { to: '/backtest', label: '规则回测', icon: History },
     { to: '/fund', label: '基金查询', icon: Search },
   ] },
   { label: '设置', items: [
+    { to: '/settings', label: '设置', icon: Settings },
     { to: '/profile', label: '风险画像', icon: UserRoundCog },
     { to: '/connectors', label: '数据连接', icon: Cable },
     { to: '/report', label: '周报', icon: FileText },
     { to: '/history', label: '研究记录', icon: NotebookText },
   ] },
 ]
+const DEFAULT_COLLAPSED = ['分析工具', '设置']
 
-const COLLAPSED_KEY = 'wp_nav_collapsed'
+const COLLAPSED_KEY = 'wp_nav_collapsed_v2'
 const readCollapsed = (): string[] => {
-  try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]') as string[] } catch { return [] }
+  try { const saved = localStorage.getItem(COLLAPSED_KEY); return saved ? JSON.parse(saved) as string[] : DEFAULT_COLLAPSED } catch { return DEFAULT_COLLAPSED }
 }
 
 const ITEM = 'flex h-8 w-full items-center gap-2.5 rounded-sm px-2.5 text-sm text-slate transition-colors hover:bg-hover hover:text-ink'

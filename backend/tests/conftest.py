@@ -21,6 +21,8 @@ os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["DEEPSEEK_API_KEY"] = ""
 # 同理，不读开发者本机的外部连接器配置
 os.environ["ADVICE_MODE"] = "false"
+os.environ["BROKER"] = "none"
+os.environ["WATCH_ENABLED"] = "false"
 os.environ["CONNECTORS_FILE"] = str(_TMP_DIR / "connectors.json")
 
 import pytest  # noqa: E402 — 必须在设置 DB_PATH 之后

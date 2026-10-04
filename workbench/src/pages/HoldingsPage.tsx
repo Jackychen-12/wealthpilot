@@ -3,8 +3,10 @@ import { Fragment, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ImageUp, Plus, Upload } from 'lucide-react'
 import { api, runTool, useApi, type Holding, type HoldingInput, type StockProfile } from '../api'
+import { Donut, PnlBars } from '../components/charts'
 import { securityPath } from '../components/SecuritySearch'
-import { Button, Callout, ConfirmDialog, Drawer, Input, Select } from '../components/kit'
+import { Button, Callout, ConfirmDialog, Drawer, Input, Segmented, Select } from '../components/kit'
+import OverviewPage from './OverviewPage'
 import { ASSET, CATEGORY, DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed, yuan } from '../components/ui'
 
 const blank = (): HoldingInput => ({
@@ -13,9 +15,17 @@ const blank = (): HoldingInput => ({
 })
 // 股票在前，基金作为持仓的一种排在后面
 const GROUP_ORDER = ['stock', 'etf', 'fund', 'crypto']
+const groupSum = (rows: Holding[], key: (h: Holding) => string) => {
+  const sums = new Map<string, number>()
+  for (const h of rows) sums.set(key(h), (sums.get(key(h)) ?? 0) + (h.market_value ?? 0))
+  return [...sums].map(([name, value]) => ({ name, value })).filter((d) => d.value > 0)
+}
 const options = (map: Record<string, string>) => Object.entries(map).map(([value, label]) => ({ value, label }))
 
-const HoldingsPage: React.FC = () => {
+const TABS = [['list', '明细'], ['analysis', '收益与归因']] as const
+
+const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }) => {
+  const [tab, setTab] = useState(initialTab)
   const holdings = useApi(api.holdings)
   const [editing, setEditing] = useState<{ id: number | null; form: HoldingInput } | null>(null)
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
@@ -74,7 +84,7 @@ const HoldingsPage: React.FC = () => {
     setEditing((ed) => (ed ? { ...ed, form: { ...ed.form, [key]: value } } : ed))
 
   return (
-    <Page title="持仓" description="股票、ETF 和基金放在一起管理，按类型分组"
+    <Page title="持仓" description="股票、ETF 和基金放在一起：明细、分布、收益与归因"
       actions={(
         <>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => csvRef.current?.click()}><Upload className="h-4 w-4" />导入 CSV / Excel</Button>
@@ -95,6 +105,20 @@ const HoldingsPage: React.FC = () => {
         </Metrics>
       ) : null}
 
+      {rows.length > 0 ? <div className="border-b border-hairline"><Segmented value={tab} onChange={setTab} options={TABS} /></div> : null}
+      {tab === 'analysis' ? <OverviewPage embedded /> : null}
+
+      {tab === 'list' && rows.length > 1 ? (
+        <Section title="分布与盈亏" hint="按市值">
+          <div className="flex flex-col gap-3 lg:flex-row">
+            <Donut title="按资产类型" data={groupSum(rows, (h) => ASSET[h.asset_type] ?? h.asset_type)} />
+            <Donut title="按行业" data={groupSum(rows, (h) => h.industry || (h.asset_type === 'fund' ? '基金（未分类）' : '未分类'))} />
+          </div>
+          <div className="mt-3"><PnlBars data={[...rows].filter((h) => h.total_return != null).sort((a, b) => (b.total_return ?? 0) - (a.total_return ?? 0)).map((h) => ({ name: h.fund_name.slice(0, 8), value: h.total_return ?? 0 }))} /></div>
+        </Section>
+      ) : null}
+
+      {tab === 'list' ? (
       <Section title="持仓明细" hint="最新价来自实时行情；取不到时按成本价计">
         <DataState loading={holdings.loading} error={holdings.error} onRetry={holdings.reload}
           empty={rows.length === 0 ? '还没有持仓。点右上角「添加持仓」录入股票、ETF 或基金，或导入天天基金导出的 CSV。' : undefined}>
@@ -135,6 +159,7 @@ const HoldingsPage: React.FC = () => {
         </DataState>
         <p className="mt-3 text-[13px] text-steel">截图识别使用 Claude Vision，需要后端配置 Anthropic Key；CSV 支持天天基金导出格式。</p>
       </Section>
+      ) : null}
 
       <Drawer open={editing != null} onClose={() => setEditing(null)} title={editing?.id == null ? '添加持仓' : '修改持仓'} width="max-w-md">
         {editing ? (

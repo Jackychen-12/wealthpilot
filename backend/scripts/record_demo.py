@@ -51,13 +51,16 @@ GETS = [
     "/api/scenario", "/api/profile", "/api/report/weekly",
     *[f"/api/market/fund/110011/nav?days={d}" for d in (21, 63, 125, 250)],
     *[f"/api/market/stock/600519/kline?days={d}" for d in (21, 63, 125, 250)],
-    "/api/connectors", "/api/screener/industries",
+    "/api/connectors", "/api/screener/industries", "/api/market/stock/600519/valuation-history",
     *[f"/api/securities/search?q={q}" for q in ("600519", "300750", "600036", "000858", "510300", "110011", "161725")],
 ]
 # 非工具类的只读 POST（选股）。入参必须与工作台演示模式预填的条件一致
 POSTS = {
     "/api/screener": {"limit": 50, "sort_by": "total_mv_yi", "descending": True, "pe_max": 15, "roe_min": 15, "mv_min_yi": 200},
+    "/api/screener/backtest": {"criteria": {"pe_max": 15, "roe_min": 15, "mv_min_yi": 200}, "top_n": 20, "years": 2},
 }
+# 模拟盘里的示例委托（最后一笔当天卖出会被 T+1 规则拒掉，演示拒单长什么样）
+PAPER_ORDERS = [("601899", "buy", 1000), ("600519", "buy", 100), ("601899", "sell", 500)]
 TOOLS = {
     "compute_concentration": {},
     "lookthrough_portfolio": {},
@@ -75,8 +78,9 @@ TOOLS = {
     "compare_peers_valuation": {"code": "600519"},
     "get_industry_peers": {"code": "600519"},
     "get_stock_announcements": {"code": "600519"},
+    "read_latest_report": {"code": "600519"},
     "get_market_overview": {},
-    "get_sector_ranking": {"top": 5},
+    "get_sector_ranking": {"top": 20},
     "backtest_rule": {"fund_code": "110011", "days": 250,
                       "triggers": [{"drawdown_pct": 5, "add_pct": 30}, {"drawdown_pct": 10, "add_pct": 70}]},
 }
@@ -124,7 +128,10 @@ def main() -> None:
         client.post("/api/watchlist", json={"code": code, "name": name, "asset_type": asset_type, "note": note}).raise_for_status()
 
     fixtures: dict = {"recorded_at": time.strftime("%Y-%m-%d"), "get": {}, "post": {}, "tools": {}, "chats": {}}
-    for path in [*GETS, "/api/watchlist"]:
+    for code, side, shares in PAPER_ORDERS:
+        print("ORDER", code, side, client.post("/api/broker/orders", json={"code": code, "side": side, "shares": shares}).json().get("status"))
+    client.post("/api/digest/run")
+    for path in [*GETS, "/api/watchlist", "/api/broker", "/api/broker/orders", "/api/digest"]:
         print("GET", path)
         fixtures["get"][path] = client.get(path).json()
     for key in [s["scenario_key"] for s in fixtures["get"]["/api/scenario"]["scenarios"]]:
@@ -135,7 +142,11 @@ def main() -> None:
         fixtures["tools"][name] = {"inputs": inputs, "result": client.post(f"/api/tools/{name}", json=inputs).json()}
     for path, body in POSTS.items():
         print("POST", path)
-        fixtures["post"][path] = {"inputs": body, "result": client.post(path, json=body).json()}
+        resp = client.post(path, json=body)
+        if resp.status_code == 200:   # 没跑成功的不录，演示里如实显示"没有录这项"
+            fixtures["post"][path] = {"inputs": body, "result": resp.json()}
+        else:
+            print("   跳过：", resp.json().get("detail"))
     # --keep-chats：已录过的研究过程原样保留，只补录新增的问题（省模型调用）
     old = json.loads(OUT.read_text()) if "--keep-chats" in sys.argv and OUT.exists() else {}
     previous = old.get("chats", {})
@@ -152,7 +163,11 @@ def main() -> None:
         fixtures["chats"][question] = events
 
     for path in AFTER_CHATS:
-        fixtures["get"][path] = client.get(path).json()
+        # 沿用旧的研究录制时，验证点和建议单也得沿用旧快照里的（新库里没有）
+        fixtures["get"][path] = old["get"][path] if previous and path in old.get("get", {}) else client.get(path).json()
+    # 第一条公告的正文，给个股页的"读正文"用
+    first = fixtures["tools"]["get_stock_announcements"]["result"]["data"]["announcements"][0]["art_code"]
+    fixtures["get"][f"/api/filings/{first}?page=1"] = client.get(f"/api/filings/{first}?page=1").json()
     # 研究记录：本次新录的由后端存下；沿用旧录制时，把旧快照里对应的记录带过来
     records = client.get(HISTORY).json()
     fixtures["get"][HISTORY] = records

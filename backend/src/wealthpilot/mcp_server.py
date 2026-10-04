@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：37 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：40 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -349,6 +349,27 @@ async def screen_stocks(
         "sort_by": sort_by, "descending": descending, "limit": limit,
     }.items() if v not in (None, "")}
     return await execute_tool("screen_stocks", criteria, [], {}, None)
+
+
+@mcp.tool()
+async def read_latest_report(code: str, topics: list[str] | None = None) -> str:
+    """Read key sections of a stock's latest periodic report (MD&A, segments, reasons for change, risks, outlook).
+    读取个股最新定期报告正文的关键章节摘录。topics 可选：管理层讨论 / 主营构成 / 业绩变动原因 / 风险 / 展望。"""
+    return await execute_tool("read_latest_report", {"code": code, "topics": topics}, [], {}, None)
+
+
+@mcp.tool()
+async def read_announcement(art_code: str, keyword: str = "", page: int = 1) -> str:
+    """Read the body of one announcement (art_code from get_stock_announcements).
+    读取一条公告的正文。给 keyword 则返回该词附近的片段，否则按页返回。"""
+    return await execute_tool("read_announcement", {"art_code": art_code, "keyword": keyword, "page": page}, [], {}, None)
+
+
+@mcp.tool()
+async def backtest_screen(criteria: dict, top_n: int = 20, years: float = 2) -> str:
+    """Backtest a set of screening criteria over ~2 years against the CSI 300 ETF.
+    把一组选股条件放回历史验证：每个调仓日按当时已披露的数据筛选，等权持有，与沪深300ETF 比较。"""
+    return await execute_tool("backtest_screen", {"criteria": criteria, "top_n": top_n, "years": years}, [], {}, None)
 
 
 @mcp.tool()
