@@ -135,13 +135,18 @@ class CriticAgent:
         )
 
     # ── 闸门 B：输出是否可信、是否越过画像约束 ─────────────────
-    def review_answer(self, answer: str, results: list[AgentResult], question: str = "") -> Verdict:
-        """纯代码判定，不消耗 token。question 用于识别"用户自己提出的规则参数"。"""
+    def review_answer(self, answer: str, results: list[AgentResult], question: str = "",
+                      context: str = "") -> Verdict:
+        """纯代码判定，不消耗 token。
+
+        question 用于识别"用户自己提出的规则参数"；context 是系统交给模型的持仓快照
+        （代码、份额、成本、最新价、收益率），模型转述其中的数字同样不算编造。
+        """
         issues: list[str] = []
 
         grounding = check_numeric_grounding(answer, results)
         # 用户在问题里自己给出的数字（规则参数、金额）复述出来不算编造
-        asked = {float(m.group()) for m in re.finditer(r"\d+(?:\.\d+)?", question)}
+        asked = {float(m.group()) for m in re.finditer(r"\d+(?:\.\d+)?", f"{question} {context}")}
         if self.profile is not None:
             # 画像里的约束值（期限、回撤容忍度、储备金）是系统给模型的前提，转述它们不算编造
             p = self.profile

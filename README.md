@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>AI 多智能体智能投顾系统</strong><br/>
-  <sub>Multi-Agent Architecture · Claude & DeepSeek · 19 Real-time Tools · One-command Deploy</sub>
+  <sub>Multi-Agent Architecture · Claude & DeepSeek · 24 Real-time Tools · One-command Deploy</sub>
 </p>
 
 <p align="center">
@@ -32,20 +32,20 @@
 
 ## Why WealthPilot?
 
-大多数投资分析工具只是简单地调用一次 LLM 生成文本。WealthPilot 不同——它是一个**完整的多智能体系统**，由 Planner 把问题拆成任务图，4 个专业 Agent 并发取证，Critic 双闸门审核证据与回答，通过后才发布结论 —— 每个数字都能追溯到一次工具调用。
+大多数投资分析工具只是简单地调用一次 LLM 生成文本。WealthPilot 不同——它是一个**完整的多智能体系统**，由 Planner 把问题拆成任务图，5 个专业 Agent 并发取证，Critic 双闸门审核证据与回答，通过后才发布结论 —— 每个数字都能追溯到一次工具调用。
 
 ### 核心优势
 
 | | 优势 | 说明 |
 |--|------|------|
-| 🤖 | **Planner 多智能体架构** | Planner 拆解任务 DAG → 4 个专业 Agent 并发执行 → Critic 双闸门 → Synthesizer 整合并消解冲突 |
+| 🤖 | **Planner 多智能体架构** | Planner 拆解任务 DAG → 5 个专业 Agent 并发执行 → Critic 双闸门 → Synthesizer 整合并消解冲突 |
 | 🎯 | **风险画像硬约束** | 风险测评结果注入 Planner/Agent/Synthesizer 三处；未测评时不得给出具体仓位比例 |
 | 🔍 | **证据溯源 + Critic 闸门** | 每次工具调用生成证据 ID `[E-…]`，回答必须逐条引用；数字回查不到、证据不足或越过画像约束的草稿不会发布 |
-| 🔧 | **19 个实时工具** | 行情、持仓、风险之外，还有持仓穿透、规则回测，以及把算术从 LLM 手里拿走的 compute/check 工具 |
+| 🔧 | **24 个实时工具** | 行情、持仓、风险之外，还有持仓穿透、规则回测，以及把算术从 LLM 手里拿走的 compute/check 工具 |
 | 🌐 | **双模型支持** | Claude & DeepSeek 一行配置切换，Provider 抽象层自动适配 Anthropic SDK / OpenAI SDK |
 | 📊 | **免费实时数据** | AKShare + 东方财富 + 天天基金 + 新浪财经，无需付费数据源 |
 | ⚡ | **过程可见的 SSE** | 规划、工具调用、证据、Critic 结论实时推送；正文在通过校验后才下发，未过审的草稿不会流到用户面前 |
-| 🔌 | **MCP Server** | 19 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
+| 🔌 | **MCP Server** | 24 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
 | 💻 | **多入口调用** | Web UI / 终端交互 / CLI 管道 / MCP，任选其一接入分析能力 |
 | 🎨 | **精致 Demo 体验** | 离线演示模式完整模拟多 Agent 流程（路由 → 工具调用 → 流式输出），SVG 图标系统，页面转场动画 |
 | 🔐 | **多租户隔离** | JWT 认证 + 用户级数据隔离，对话历史持久化 |
@@ -125,7 +125,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 | 量化分析（Sharpe、回撤、健康度） | ✅ | ✅ |
 | AI 多智能体对话 | 前端演示模式（模拟流程）；后端直接提示未配置 Key | **多 Agent 实时分析** |
 | 截图 OCR 导入 | ❌ | ✅（仅 Anthropic Key，Claude Vision） |
-| MCP Server 的 19 个工具 | ✅（不调用 LLM） | ✅ |
+| MCP Server 的 24 个工具 | ✅（不调用 LLM） | ✅ |
 | AI 周报 | 模板回退 | **LLM 智能生成** |
 
 ---
@@ -134,7 +134,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 
 ### 多智能体系统
 
-WealthPilot 的 AI 核心是 **Planner + 4 个专业 Agent + Critic + Synthesizer** 的协作流程，不是单次 LLM 调用：
+WealthPilot 的 AI 核心是 **Planner + 5 个专业 Agent + Critic + Synthesizer** 的协作流程，不是单次 LLM 调用：
 
 ```
 用户消息
@@ -145,13 +145,13 @@ WealthPilot 的 AI 核心是 **Planner + 4 个专业 Agent + Critic + Synthesize
 │                  │  → TaskGraph(DAG) + success_criteria
 └──────┬───────────┘
        │  无依赖的任务同波并发（asyncio.gather）
-       ├──────────────┬───────────────┬──────────────┐
-       ▼              ▼               ▼              ▼
-  📊 Market      💼 Portfolio     🛡️ Risk        🔬 Quant
-   3 工具         4 + 4 工具       5 + 4 工具      3 + 4 工具
-   基金信息        总览/归因        回撤/相关性      持仓穿透
-   净值走势        健康度/建议      区间收益/对比    重仓股重叠
-   财经新闻                                        规则回测
+       ├────────────┬─────────────┬────────────┬────────────┐
+       ▼            ▼             ▼            ▼            ▼
+  📊 Market    💼 Portfolio   🛡️ Risk      🔬 Quant     📈 Stock
+   3 工具       4 + 4 工具     5 + 4 工具    3 + 4 工具    5 工具
+   基金信息      总览/归因      回撤/相关性    持仓穿透      个股行情
+   净值走势      健康度/建议    区间收益/对比  重仓股重叠    日线/估值
+   财经新闻                                   规则回测      业绩/行业
                  └── 共享 4 个 compute/check 工具：集中度、变动推演、
                      画像约束校验、回撤约束下的仓位上限 ──┘
        │  每次工具调用 → 一条带 ID 的证据 [E-…]（来源、数据日期、口径）
@@ -209,7 +209,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │          Workbench (Vite + React 19 + TypeScript)             │
-│   11 pages · real data only · SSE research process view       │
+│   13 pages · real data only · SSE research process view       │
 │     SVG icon system · Animated transitions · Smart demo mode  │
 └────────────────────────────┬─────────────────────────────────┘
                              │ HTTP / SSE
@@ -249,7 +249,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 |----|------|
 | Frontend | Vite 7, React 19, TypeScript 5.9, Tailwind 4, Recharts（`workbench/`） |
 | Backend | Python 3.11+, FastAPI, SQLModel, Uvicorn |
-| AI | Claude API (Anthropic SDK) + DeepSeek (OpenAI SDK)，Planner / 4 Agent / Critic / Synthesizer |
+| AI | Claude API (Anthropic SDK) + DeepSeek (OpenAI SDK)，Planner / 5 Agent / Critic / Synthesizer |
 | 数据源 | AKShare（免费）、东方财富 API、天天基金 API、新浪财经 API |
 | 认证 | JWT (PyJWT) + bcrypt，多租户隔离 |
 | 存储 | SQLite（开发），可替换 PostgreSQL |
@@ -286,22 +286,74 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 
 | 分组 | 页面 | 做什么 | 背后的 Agent 能力 |
 |---|---|---|---|
-| 研究 | **AI 研究** | 提问；右侧实时显示任务规划、每次工具调用的证据、Critic 的通过 / 打回，点回答里的证据标签定位到工具返回 | Planner + 4 个 Agent + Critic |
+| 研究 | **AI 研究** | 提问；右侧实时显示任务规划、每次工具调用的证据、Critic 的通过 / 打回，点回答里的证据标签定位到工具返回 | Planner + 5 个 Agent + Critic |
 | 组合 | 总览 | 市值、收益、持仓分布、收益归因（按标的 / 行业 / 类别）、要闻与指数 | 持仓 Agent |
 | | 持仓 | 增删改、CSV / Excel 导入、截图识别 | — |
 | | 持仓穿透 | 把基金拆到个股：真实暴露、被多只基金同时重仓的票、两只基金的重仓股重叠 | 量化 Agent |
 | 风险 | 风险体检 | 回撤、5 维健康度、相关性矩阵、集中度、预警 | 风险 Agent |
 | | 压力测试 | 预设情景下组合损益与逐持仓明细 | 情景分析 |
 | | 调仓推演 | 调仓前先算：占比、集中度、回撤估计怎么变，是否越过风险画像 | 计算 / 校验工具 |
-| 市场与量化 | 基金查询 | 任意基金的净值走势、阶段收益、经理与基准 | 市场 Agent |
+| 市场与量化 | 个股查询 | A 股个股 / ETF 的行情、日线走势、PE/PB、业绩、行业 | 个股 Agent |
+| | 基金查询 | 任意基金的净值走势、阶段收益、经理与基准 | 市场 Agent |
 | | 规则回测 | 分批建仓规则的历史表现，对比一次性买入与定投 | 量化 Agent |
 | 报告与设置 | 周报 / 风险画像 | 按需生成复盘；设置 AI 给建议时必须遵守的约束 | — |
+| | 数据连接 | 查看并测试已接入的券商 / 数据商 MCP 服务，标明哪些工具可用、哪些被屏蔽 | 外部连接器 |
 
 功能页通过 `POST /api/tools/{name}` 直接调用 Agent 的工具，所以页面上的数和 AI 回答里引用的证据出自同一份实现。每个功能页右上角都可以把当前话题一键交给 AI 解读。
 
 工作台代码在 `workbench/`（React 19 + Vite + Tailwind 4），视觉遵循 Notion 的设计规范：白色画布、暖灰侧栏、细线边框、柔和色标签。未登录时使用本机匿名档（`user_id = 0`）的持仓，登录后切换到自己的账户。
 
 **在线演示**（GitHub Pages）是同一个工作台的只读版本：Pages 上没有后端，所以构建成演示模式（`make demo-build`），回放一份示例组合在真实行情、真实工具、真实模型上跑出来的结果，页面顶部有明确标注。数据快照由 `make record-demo` 录制，写操作和没录过的查询会如实提示"演示模式不支持"。
+
+---
+
+## A 股个股
+
+基金之外，现在也支持 A 股个股与 ETF：
+
+- **历史行情打通**：持仓里的股票 / ETF 走前复权日线，和基金净值用同一种结构，所以回撤、Sharpe、相关性、健康度、压力测试会自动把它们算进去——此前股票只有最新价，会被这些分析悄悄漏掉。
+- **5 个个股工具 + StockAgent**：实时行情、日线走势、PE/PB、业绩报表、所属行业。问"贵州茅台现在估值怎么样"会交给个股 Agent，回答里每个数字照常带证据。
+- **老工具兼容股票**：区间收益、最大回撤、规则回测加了 `asset_type` 参数；股票回测默认计入 0.1% 单边费用，并在局限说明里写明未处理停牌与涨跌停。
+- **穿透合并直接持股**：直接持有的个股会和基金重仓股里的同一只票合并，一眼看出"我直接买了茅台，基金里又间接持有多少"。
+- **录入更省事**：在持仓页添加股票时，填完代码自动带出名称和行业。
+
+几点如实说明：估值工具给的是**价格**在近一年区间里的位置，不是 PE 历史分位（没有免费的历史估值序列）；财务数据带报告期，是滞后数据；行情源都是免费接口，偶尔会取不到，取不到时工具会直说。后续计划见 [docs/stock-roadmap.md](docs/stock-roadmap.md)。
+
+---
+
+## 接入券商与金融数据服务（MCP）
+
+很多券商和数据商开始提供 MCP 服务。WealthPilot 留了一个接入口，把它们的工具交给 Agent 使用：
+
+```
+backend/connectors.json            ← 你的配置（已被 git 忽略）
+backend/connectors.example.json    ← 模板
+```
+
+```json
+{
+  "connectors": [
+    {
+      "name": "my_broker",
+      "label": "我的券商（只读）",
+      "kind": "broker",
+      "transport": "http",
+      "url": "https://对方提供的地址/mcp",
+      "auth_env": "BROKER_MCP_TOKEN",
+      "enabled": true
+    }
+  ]
+}
+```
+
+- **只读，硬性屏蔽交易**：名字或说明像下单、撤单、转账、申赎的工具一律不暴露给 Agent，也不能通过本服务调用，配置里的白名单也绕不过。WealthPilot 只做研究与分析，不代你交易。
+- **凭据不进配置文件**：`auth_env` 只写环境变量名，令牌放在 `backend/.env`；接口返回里不会出现令牌或启动命令。
+- **只在服务器端配置**：没有"通过网页新增连接器"的接口——那等于让服务器替网页用户访问任意地址或执行命令。
+- **照常进证据链**：外部工具的返回和内置工具一样生成证据 ID，接受 Critic 的数字溯源。
+- 支持 HTTP（Streamable HTTP）和 stdio 两种传输；工作台的"数据连接"页可以测试连通性，并列出每个工具是可用还是被屏蔽。
+- 模板里带一个 `wealthpilot_self` 示例：把本项目自己的 MCP Server 当外部服务接进来，用来验证链路。
+
+哪家机构提供 MCP 服务、地址和鉴权方式，以对方官方文档为准；本项目不预置任何厂商的接入。
 
 ---
 
@@ -362,7 +414,7 @@ python -m wealthpilot ask "市场分析" 2>/dev/null
 
 ## MCP Server — Claude Code / Cursor 集成
 
-WealthPilot 提供标准 **MCP (Model Context Protocol) Server**，将 19 个投资分析工具直接暴露给 Claude Code、Cursor 等 MCP 客户端。Claude 可以自主调用这些工具获取实时行情和持仓分析——**无需自建 Agent，无需 API Key**（MCP Server 本身不调用 LLM）。
+WealthPilot 提供标准 **MCP (Model Context Protocol) Server**，将 24 个投资分析工具直接暴露给 Claude Code、Cursor 等 MCP 客户端。Claude 可以自主调用这些工具获取实时行情和持仓分析——**无需自建 Agent，无需 API Key**（MCP Server 本身不调用 LLM）。
 
 ### 配置方法
 
@@ -439,7 +491,7 @@ make clean     # 清理生成文件
 ## API Reference
 
 <details>
-<summary>完整 API 列表（39 个端点，点击展开）</summary>
+<summary>完整 API 列表（42 个端点，点击展开）</summary>
 
 ### Auth（3）
 
@@ -460,7 +512,7 @@ make clean     # 清理生成文件
 | POST | `/api/portfolio/import/csv` | CSV/Excel 批量导入 |
 | POST | `/api/portfolio/import/ocr` | 截图 OCR 导入 (Claude Vision) |
 
-### Market Data（8）
+### Market Data（9）
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -470,7 +522,8 @@ make clean     # 清理生成文件
 | GET | `/api/market/fund/{code}/nav` | 历史净值（N 日） |
 | GET | `/api/market/fund/{code}/rank` | 基金排名数据 |
 | GET | `/api/market/macro` | 宏观指标（PMI/CPI） |
-| GET | `/api/market/stock/{code}` | 股票 / ETF 行情 |
+| GET | `/api/market/stock/{code}` | 股票 / ETF 行情与估值 |
+| GET | `/api/market/stock/{code}/kline` | 股票 / ETF 前复权日线 |
 | GET | `/api/market/crypto/{symbol}` | 加密货币行情 |
 
 ### Analysis（6）
@@ -519,11 +572,18 @@ make clean     # 清理生成文件
 | POST | `/api/alerts/read` | 标记已读 |
 | POST | `/api/alerts/push` | 触发 webhook 推送 |
 
+### Connectors（2）
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/connectors` | 已配置的外部 MCP 连接器（不含凭据与启动命令） |
+| POST | `/api/connectors/{name}/test` | 连接一次，列出工具并标明可用 / 屏蔽 |
+
 ### Tools（2）
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/tools` | 19 个 Agent 工具及入参说明，按 Agent 分组 |
+| GET | `/api/tools` | 24 个 Agent 工具及入参说明，按 Agent 分组 |
 | POST | `/api/tools/{name}` | 直接执行一个工具，返回 `{ok, data, as_of}`；工作台功能页走这里 |
 
 `/api/chat` 的 SSE 事件类型：`plan`、`task_start`、`tool_call`、`evidence`、`task_done`、`critic`、`replan`、`synthesizing`、`delta`、`grounding_warning`、`error`、`done`（`done.meta.status` 为 `passed` / `partial` / `insufficient_data` / `rejected` / `failed`）。
@@ -543,7 +603,7 @@ wealthpilot/
 │   └── src/
 │       ├── api/                 #   接口层（失败即报错，无示例数据兜底）+ 研究会话状态
 │       ├── components/          #   Notion 风格组件（kit）、页面积木（ui）、外壳与导航
-│       ├── pages/               #   11 个功能页：研究 / 总览 / 持仓 / 穿透 / 风险 / 压测 / 调仓 / 基金 / 回测 / 周报 / 画像
+│       ├── pages/               #   13 个功能页：研究 / 总览 / 持仓 / 穿透 / 风险 / 压测 / 调仓 / 个股 / 基金 / 回测 / 周报 / 画像 / 数据连接
 │       └── demo/                #   在线演示模式：录好的真实结果 + 回放逻辑
 │
 ├── docs/stock-roadmap.md        # 股票能力规划
@@ -552,10 +612,10 @@ wealthpilot/
     ├── .env.example             #   环境配置模板
     └── src/wealthpilot/
         ├── __main__.py          #   CLI 入口 (run/init/config/chat/mcp/ask)
-        ├── mcp_server.py        #   ⭐ MCP Server（19 工具，for Claude Code）
+        ├── mcp_server.py        #   ⭐ MCP Server（24 工具，for Claude Code）
         ├── main.py              #   FastAPI 应用
         ├── settings.py          #   配置管理（支持双 Provider）
-        ├── routes/              #   11 个路由模块，39 个端点（含 tools：工具直调）
+        ├── routes/              #   12 个路由模块，42 个端点（含 tools：工具直调、connectors：外部连接）
         ├── models/              #   数据模型（SQLModel）
         ├── services/
         │   ├── ai_client.py     #   ⭐ Provider 抽象层（Anthropic / DeepSeek 自动适配）
@@ -569,10 +629,13 @@ wealthpilot/
         │   │   ├── portfolio_agent.py # 持仓 Agent（4 + 4 计算工具）
         │   │   ├── risk_agent.py   #  风险 Agent（5 + 4 计算工具）
         │   │   ├── quant_agent.py  #  量化 Agent（穿透 / 回测 3 + 4 计算工具）
+        │   │   ├── stock_agent.py  #  个股 Agent（行情 / 走势 / 估值 / 业绩 / 行业 5 工具）
         │   │   ├── orchestrator.py #  编排器 — Plan → Execute → Critic → Synthesize
-        │   │   ├── tools.py     #     19 个工具定义 + 统一执行器
+        │   │   ├── tools.py     #     24 个工具定义 + 统一执行器
         │   │   └── prompts.py   #     Agent 专属 system prompt
         │   ├── context.py       #   Web / CLI / MCP 共用的持仓与行情上下文加载
+        │   ├── stocks.py        #   A 股个股数据：日线、行情估值、业绩、行业
+        │   ├── connectors.py    #   外部 MCP 连接器（只读，屏蔽交易类工具）
         │   ├── evidence.py      #   证据记录、工具缓存与调用预算
         │   ├── analysis.py      #   分析引擎（Sharpe、回撤、健康度、相关性）
         │   ├── simulation.py    #   仓位推演与画像约束校验
@@ -620,14 +683,14 @@ docker compose up --build -d
 
 - [x] Full-stack Agent 架构（FastAPI + React）
 - [x] 免费实时行情（AKShare + 东方财富 + 天天基金）
-- [x] 多智能体系统（Planner + Market/Portfolio/Risk/Quant，19 工具）
+- [x] 多智能体系统（Planner + Market/Portfolio/Risk/Quant/Stock，24 工具）
 - [x] Provider 抽象层（Claude + DeepSeek 一键切换）
 - [x] 持仓管理（CRUD + CSV 导入 + OCR）
 - [x] 高级量化分析（Sharpe、最大回撤、相关性矩阵）
 - [x] 用户认证（JWT + 多租户隔离）
 - [x] 对话历史持久化
 - [x] CLI 工具（init/config/chat/run）
-- [x] MCP Server（19 工具，Claude Code / Cursor 直接调用）
+- [x] MCP Server（24 工具，Claude Code / Cursor 直接调用）
 - [x] CLI 非交互模式（ask 子命令，支持管道）
 - [x] Docker Compose 部署
 - [x] AI 周报生成
@@ -643,9 +706,11 @@ docker compose up --build -d
 - [x] 多资产类别（基金 / 股票 / ETF / 加密货币，按类型分组批量取价）
 - [x] 推送通知（预警落库 + 冷却期去重 + 未读收件箱 + webhook 推送）
 - [x] 报告导出 PDF（reportlab 内置 CID 中文字体，不依赖宿主机字体）
-- [x] 投研工作台（桌面端，11 个功能页，Agent 的每项能力都有对应页面）
+- [x] 投研工作台（桌面端，13 个功能页，Agent 的每项能力都有对应页面）
 - [x] 工具直调接口（功能页与 Agent 共用同一批工具）
-- [ ] **股票能力**（历史行情 → 个股工具与 StockAgent → 并入穿透与回测 → 个股页面），见 [docs/stock-roadmap.md](docs/stock-roadmap.md)
+- [x] **A 股个股**（历史行情、5 个个股工具、StockAgent、并入穿透与回测、个股查询页）
+- [x] **外部 MCP 连接器**（券商 / 数据商接入口，只读，交易类工具硬性屏蔽）
+- [ ] 股票后续：历史估值分位、行业自动归因、单票上限约束、港美股，见 [docs/stock-roadmap.md](docs/stock-roadmap.md)
 - [ ] 回答质量评估（黄金题集 + 新旧架构 A/B，需配 API Key）
 - [ ] 结构化记忆层（用户偏好与被否决建议）
 - [ ] PostgreSQL + Alembic 正式迁移

@@ -62,12 +62,20 @@ async def get_macro():
 
 @router.get("/stock/{code}")
 async def get_stock(code: str):
-    """A股/ETF 实时行情。code 格式: sh600519 / sz000001"""
-    from wealthpilot.services.stock_data import fetch_stock_quote
+    """A 股 / ETF 实时行情与估值。code 可写 600519、sh600519 或 600519.SH。"""
+    from wealthpilot.services.stocks import fetch_stock_quote
     result = await fetch_stock_quote(code)
     if not result:
         return {"error": f"股票 {code} 行情获取失败"}
     return result
+
+
+@router.get("/stock/{code}/kline")
+async def get_stock_kline(code: str, days: int = 120):
+    """A 股 / ETF 前复权日线（最新在前），字段与基金净值历史一致。"""
+    from wealthpilot.services.stocks import fetch_stock_kline
+    data = await fetch_stock_kline(code, max(5, min(days, 750)))
+    return {"code": code, "count": len(data), "data": data, "price_basis": "前复权收盘价"}
 
 
 @router.get("/crypto/{symbol}")

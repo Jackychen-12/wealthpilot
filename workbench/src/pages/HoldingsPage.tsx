@@ -1,7 +1,7 @@
 import type React from 'react'
 import { useRef, useState } from 'react'
 import { ImageUp, Plus, Upload } from 'lucide-react'
-import { api, useApi, type Holding, type HoldingInput } from '../api'
+import { api, runTool, useApi, type Holding, type HoldingInput, type StockProfile } from '../api'
 import { Button, Callout, ConfirmDialog, Drawer, Input, Select } from '../components/kit'
 import { ASSET, CATEGORY, DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed, yuan } from '../components/ui'
 
@@ -48,6 +48,17 @@ const HoldingsPage: React.FC = () => {
       setEditing(null)
       return id == null ? `已添加 ${form.fund_name}` : `已更新 ${form.fund_name}`
     })
+  }
+  // 录入股票 / ETF 时，按代码带出名称和行业，省得手填
+  const autofill = async () => {
+    const form = editing?.form
+    if (!form || form.asset_type === 'fund' || form.asset_type === 'crypto' || !form.fund_code || form.fund_name) return
+    try {
+      const res = await runTool<StockProfile | string>('get_stock_profile', { code: form.fund_code })
+      if (typeof res.data === 'string') return
+      const profile = res.data
+      setEditing((ed) => (ed && !ed.form.fund_name ? { ...ed, form: { ...ed.form, fund_name: profile.name, industry: ed.form.industry || profile.industry } } : ed))
+    } catch { /* 带不出来就让用户手填 */ }
   }
   const importFile = (kind: 'csv' | 'ocr', file: File | undefined) => {
     if (file) void run(async () => `已导入 ${(await api.importFile(kind, file)).imported_count} 条持仓`)
@@ -110,7 +121,8 @@ const HoldingsPage: React.FC = () => {
         {editing ? (
           <form className="flex flex-col gap-4" onSubmit={save}>
             <Select id="h-type" label="资产类型" value={editing.form.asset_type} onChange={(v) => set('asset_type', v)} options={options(ASSET)} />
-            <Input id="h-code" label="代码" placeholder="如 110011" value={editing.form.fund_code} onChange={(e) => set('fund_code', e.target.value.trim())} required />
+            <Input id="h-code" label="代码" placeholder={editing.form.asset_type === 'fund' ? '如 110011' : '如 600519'} hint={editing.form.asset_type === 'stock' || editing.form.asset_type === 'etf' ? '填完代码后会自动带出名称和行业' : undefined}
+              value={editing.form.fund_code} onChange={(e) => set('fund_code', e.target.value.trim())} onBlur={() => void autofill()} required />
             <Input id="h-name" label="名称" value={editing.form.fund_name} onChange={(e) => set('fund_name', e.target.value)} required />
             <div className="grid grid-cols-2 gap-3">
               <Input id="h-shares" label="持有份额" type="number" step="any" min="0" value={editing.form.shares || ''} onChange={(e) => set('shares', Number(e.target.value))} required />

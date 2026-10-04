@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { BriefcaseBusiness, FileText, History, Layers, LayoutDashboard, LogIn, LogOut, MessageSquareText, Moon, Scale, Search, ShieldCheck, Sun, UserRoundCog, Zap } from 'lucide-react'
+import { BriefcaseBusiness, Cable, CandlestickChart, FileText, History, Layers, LayoutDashboard, LogIn, LogOut, MessageSquareText, Moon, Scale, Search, ShieldCheck, Sun, UserRoundCog, Zap } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
@@ -32,12 +32,14 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { to: '/rebalance', label: '调仓推演', icon: Scale },
   ] },
   { label: '市场与量化', items: [
+    { to: '/stock', label: '个股查询', icon: CandlestickChart },
     { to: '/fund', label: '基金查询', icon: Search },
     { to: '/backtest', label: '规则回测', icon: History },
   ] },
   { label: '报告与设置', items: [
     { to: '/report', label: '周报', icon: FileText },
     { to: '/profile', label: '风险画像', icon: UserRoundCog },
+    { to: '/connectors', label: '数据连接', icon: Cable },
   ] },
 ]
 

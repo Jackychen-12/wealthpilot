@@ -176,6 +176,21 @@ async def fetch_asset_price(code: str, asset_type: str = "fund") -> dict | None:
     }
 
 
+async def fetch_price_history(code: str, asset_type: str = "fund", days: int = 60) -> list[dict]:
+    """按资产类型取最近 N 个交易日的价格序列，最新在前。
+
+    基金走净值，股票 / ETF 走前复权日线；两者字段一致（nav_date / nav / daily_return），
+    回撤、相关性、回测因此不用区分资产类型。加密货币暂无历史源，返回空。
+    """
+    asset_type = (asset_type or "fund").lower()
+    if asset_type in ("stock", "etf"):
+        from wealthpilot.services.stocks import fetch_stock_kline
+        return await fetch_stock_kline(code, days)
+    if asset_type == "crypto":
+        return []
+    return await fetch_fund_nav(code, days)
+
+
 async def fetch_prices_by_type(items: list[tuple[str, str]]) -> dict[str, float]:
     """批量取价，按类型分组以减少请求数。
 

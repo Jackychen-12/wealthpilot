@@ -19,3 +19,6 @@ backend/.env
 
 # TypeScript 增量编译缓存
 *.tsbuildinfo
+
+# 外部 MCP 连接器配置（本机专用）
+backend/connectors.json

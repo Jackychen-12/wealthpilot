@@ -14,6 +14,7 @@ from wealthpilot.services.analysis import (
     calculate_overview,
     generate_suggestions,
 )
+from wealthpilot.services.assets import fetch_price_history
 from wealthpilot.services.backtest import backtest_rule
 from wealthpilot.services.lookthrough import (
     aggregate_exposure,
@@ -33,6 +34,13 @@ from wealthpilot.services.simulation import (
     max_position_within_drawdown,
     portfolio_weights,
     simulate_change,
+)
+from wealthpilot.services.stocks import (
+    fetch_stock_financials,
+    fetch_stock_kline,
+    fetch_stock_profile,
+    fetch_stock_quote,
+    summarize_kline,
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -128,6 +136,10 @@ RISK_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "asset_type": {
+                    "type": "string", "enum": ["fund", "stock", "etf"],
+                    "description": "标的类型。不填时：在用户持仓里的按持仓记录判断，否则按基金处理。查个股必须填 stock",
+                },
                 "fund_code": {"type": "string", "description": "基金代码"},
                 "days": {"type": "integer", "description": "区间交易日数（5≈近1周, 21≈近1月, 63≈近3月）"},
             },
@@ -163,6 +175,10 @@ RISK_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "asset_type": {
+                    "type": "string", "enum": ["fund", "stock", "etf"],
+                    "description": "标的类型。不填时：在用户持仓里的按持仓记录判断，否则按基金处理。查个股必须填 stock",
+                },
                 "fund_code": {"type": "string", "description": "基金代码"},
             },
             "required": ["fund_code"],
@@ -305,6 +321,10 @@ QUANT_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "asset_type": {
+                    "type": "string", "enum": ["fund", "stock", "etf"],
+                    "description": "标的类型。不填时：在用户持仓里的按持仓记录判断，否则按基金处理。查个股必须填 stock",
+                },
                 "fund_code": {"type": "string", "description": "基金代码"},
                 "triggers": {
                     "type": "array",
@@ -327,6 +347,68 @@ QUANT_TOOLS = [
 ]
 
 
+# ═══════════════════════════════════════════════════════════
+# StockAgent 工具 —— A 股个股 / ETF
+# ═══════════════════════════════════════════════════════════
+
+_STOCK_CODE = {"type": "string", "description": "A 股代码，如 600519、000858、510300（可带 sh/sz 前缀）"}
+
+STOCK_TOOLS = [
+    {
+        "name": "get_stock_quote",
+        "description": "查询个股或 ETF 的实时行情：现价、涨跌幅、成交额、换手率、总市值。",
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE}, "required": ["code"]},
+    },
+    {
+        "name": "get_stock_kline",
+        "description": (
+            "查询个股或 ETF 最近 N 个交易日的前复权日线摘要：区间涨跌幅、区间高低点、"
+            "当前价在区间内的位置，以及最近几日收盘。用于回答'近期走势如何''现在在高位还是低位'。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"code": _STOCK_CODE,
+                           "days": {"type": "integer", "description": "交易日数，默认 60（21≈1月，250≈1年）"}},
+            "required": ["code"],
+        },
+    },
+    {
+        "name": "get_stock_valuation",
+        "description": (
+            "查询个股估值：PE(TTM)、PB、总市值，以及当前价在近一年价格区间里的位置。"
+            "注意返回的是**价格**分位而不是估值分位——没有历史 PE 序列，不要把它说成'PE 处于历史 xx 分位'。"
+        ),
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE}, "required": ["code"]},
+    },
+    {
+        "name": "get_stock_financials",
+        "description": (
+            "查询个股最近几期业绩：营收、归母净利润及同比、ROE、每股收益、毛利率。"
+            "每条都带 report_date（报告期），引用时必须转述报告期——财报是滞后数据，不代表现状。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"code": _STOCK_CODE,
+                           "periods": {"type": "integer", "description": "取最近几期，默认 4"}},
+            "required": ["code"],
+        },
+    },
+    {
+        "name": "get_stock_profile",
+        "description": "查询个股的所属行业、地域板块与市值。",
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE}, "required": ["code"]},
+    },
+]
+
+
+def _asset_type_of(code: str, input_data: dict, holdings: list[PortfolioHolding]) -> str:
+    """工具入参没指明类型时：持仓里有就按持仓记录，否则按基金。"""
+    explicit = input_data.get("asset_type")
+    if explicit:
+        return str(explicit).lower()
+    return next((h.asset_type or "fund" for h in holdings if h.fund_code == code), "fund")
+
+
 async def execute_tool(
     name: str,
     input_data: dict,
@@ -336,11 +418,54 @@ async def execute_tool(
     profile: InvestorProfile | None = None,
 ) -> str:
     """统一工具执行器。"""
+    # === 个股工具 ===
+    if name in ("get_stock_quote", "get_stock_valuation"):
+        code = input_data["code"]
+        quote = await fetch_stock_quote(code)
+        if not quote:
+            return f"未获取到 {code} 的行情（代码有误、已退市或处于停牌）"
+        if name == "get_stock_quote":
+            return json.dumps(quote, ensure_ascii=False)
+        kline = await fetch_stock_kline(code, 250)
+        result = {k: quote[k] for k in ("code", "name", "price", "pe_ttm", "pb", "total_mv_yi", "quote_time")}
+        if kline:
+            summary = summarize_kline(kline)
+            result["price_range_1y"] = {k: summary[k] for k in
+                                        ("period_high", "period_low", "range_position_pct", "trading_days")}
+        result["note"] = ("pe_ttm 为滚动市盈率，亏损时为负或缺失；price_range_1y 是近一年**价格**所处位置，"
+                          "不是估值分位；市值单位为亿元")
+        return json.dumps(result, ensure_ascii=False)
+
+    if name == "get_stock_kline":
+        code = input_data["code"]
+        days = max(5, min(int(input_data.get("days", 60)), 750))
+        kline = await fetch_stock_kline(code, days)
+        if not kline:
+            return f"未获取到 {code} 的日线数据"
+        recent = [{"date": r["nav_date"], "close": r["nav"], "change_pct": r["daily_return"]} for r in kline[:5]]
+        return json.dumps({"code": code, **summarize_kline(kline), "recent": recent}, ensure_ascii=False)
+
+    if name == "get_stock_financials":
+        code = input_data["code"]
+        rows = await fetch_stock_financials(code, int(input_data.get("periods", 4)))
+        if not rows:
+            return f"未获取到 {code} 的业绩报表"
+        return json.dumps({"code": code, "reports": rows,
+                           "note": "金额单位为亿元；同比为相对上年同期；各期为累计值（如 06-30 是上半年合计）"},
+                          ensure_ascii=False)
+
+    if name == "get_stock_profile":
+        profile_data = await fetch_stock_profile(input_data["code"])
+        if not profile_data:
+            return f"未获取到 {input_data['code']} 的公司信息"
+        return json.dumps(profile_data, ensure_ascii=False)
+
     # === 穿透 / 回测工具 ===
     if name == "lookthrough_portfolio":
         if not holdings:
             return "当前没有持仓，无法穿透。"
-        codes = list(dict.fromkeys(h.fund_code for h in holdings))
+        # 只有基金有季报重仓股；直接持有的个股由 aggregate_exposure 并入
+        codes = list(dict.fromkeys(h.fund_code for h in holdings if (h.asset_type or "fund") == "fund"))
         fetched = await asyncio.gather(*[fetch_fund_holdings(c) for c in codes])
         fund_holdings = dict(zip(codes, fetched, strict=True))
         result = aggregate_exposure(holdings, nav_data, fund_holdings)
@@ -360,19 +485,23 @@ async def execute_tool(
     if name == "backtest_rule":
         code = input_data["fund_code"]
         days = max(2, min(int(input_data.get("days", 250)), 1500))
+        asset_type = _asset_type_of(code, input_data, holdings)
         nav_list = (nav_history or {}).get(code, [])
         if len(nav_list) < days:
-            nav_list = await fetch_fund_nav(code, days)
+            nav_list = await fetch_price_history(code, asset_type, days)
         nav_list = sorted(nav_list, key=lambda r: r["nav_date"], reverse=True)[:days]
         if not nav_list:
-            return f"未获取到基金 {code} 的历史净值，无法回测。"
+            return f"未获取到 {code} 的历史价格，无法回测。"
+        # A 股卖出有印花税 + 双边佣金；没指定费率时给股票一个保守的默认值
+        default_fee = 0.1 if asset_type == "stock" else 0.0
         return json.dumps(
             backtest_rule(
                 nav_list,
                 input_data["triggers"],
                 stop_loss_pct=input_data.get("stop_loss_pct"),
-                fee_pct=input_data.get("fee_pct", 0.0),
+                fee_pct=input_data.get("fee_pct", default_fee),
                 execution_lag=1,
+                price_basis="forward_adjusted_close" if asset_type in ("stock", "etf") else "unit_nav_unadjusted",
             ),
             ensure_ascii=False,
         )
@@ -460,15 +589,17 @@ async def execute_tool(
 
     # === Risk 工具 ===
     if name == "calculate_return":
-        nav_list = await fetch_fund_nav(input_data["fund_code"], input_data["days"])
+        nav_list = await fetch_price_history(
+            input_data["fund_code"], _asset_type_of(input_data["fund_code"], input_data, holdings),
+            input_data["days"])
         if nav_list and len(nav_list) >= 2:
             first_nav = nav_list[-1]["nav"]
             last_nav = nav_list[0]["nav"]
             ret = (last_nav - first_nav) / first_nav * 100
             return (
-                f"基金 {input_data['fund_code']} 近 {len(nav_list)} 个交易日收益率: {ret:+.2f}%\n"
-                f"起始净值: {first_nav}（{nav_list[-1]['nav_date']}）\n"
-                f"最新净值: {last_nav}（{nav_list[0]['nav_date']}）"
+                f"{input_data['fund_code']} 近 {len(nav_list)} 个交易日收益率: {ret:+.2f}%\n"
+                f"起始: {first_nav}（{nav_list[-1]['nav_date']}）\n"
+                f"最新: {last_nav}（{nav_list[0]['nav_date']}）"
             )
         return "数据不足，无法计算"
 
@@ -491,7 +622,7 @@ async def execute_tool(
         code = input_data["fund_code"]
         hist = nav_history.get(code, []) if nav_history else []
         if not hist:
-            hist = await fetch_fund_nav(code, 60)
+            hist = await fetch_price_history(code, _asset_type_of(code, input_data, holdings), 60)
         if hist:
             dd = calculate_max_drawdown(hist)
             return json.dumps(dd, ensure_ascii=False)

@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlmodel import Session
 
-from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.context import load_market_context
 from wealthpilot.services.deps import current_user_id, user_holdings
-from wealthpilot.services.market_data import fetch_fund_nav
 from wealthpilot.services.report import generate_weekly_report
 from wealthpilot.storage.db import get_session
 
@@ -22,16 +21,7 @@ async def get_weekly_report(db: Session = Depends(get_session), user_id: int = D
     if not holdings:
         return {"error": "暂无持仓数据，请先添加持仓"}
 
-    nav_data: dict[str, float] = {}
-    nav_history: dict[str, list[dict]] = {}
-
-    _prices = await fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings])
-    for h in holdings:
-        nav_data[h.fund_code] = _prices.get(h.fund_code, h.cost_price)
-
-        hist = await fetch_fund_nav(h.fund_code, 30)
-        if hist:
-            nav_history[h.fund_code] = hist
+    nav_data, nav_history = await load_market_context(holdings, 30)
 
     report = generate_weekly_report(holdings, nav_data, nav_history)
     return report
@@ -44,16 +34,7 @@ async def force_generate_report(db: Session = Depends(get_session), user_id: int
     if not holdings:
         return {"error": "暂无持仓数据"}
 
-    nav_data: dict[str, float] = {}
-    nav_history: dict[str, list[dict]] = {}
-
-    _prices = await fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings])
-    for h in holdings:
-        nav_data[h.fund_code] = _prices.get(h.fund_code, h.cost_price)
-
-        hist = await fetch_fund_nav(h.fund_code, 30)
-        if hist:
-            nav_history[h.fund_code] = hist
+    nav_data, nav_history = await load_market_context(holdings, 30)
 
     report = generate_weekly_report(holdings, nav_data, nav_history)
     return {"status": "generated", "report": report}
@@ -71,7 +52,6 @@ async def export_pdf(
     Docker 容器里同样可用。
     """
     from wealthpilot.services.analysis import calculate_overview
-    from wealthpilot.services.assets import fetch_prices_by_type
     from wealthpilot.services.pdf_report import build_weekly_pdf
 
     holdings = user_holdings(db, user_id)
@@ -82,18 +62,7 @@ async def export_pdf(
             media_type="text/plain; charset=utf-8",
         )
 
-    prices = await fetch_prices_by_type(
-        [(h.fund_code, getattr(h, "asset_type", "fund")) for h in holdings]
-    )
-    nav_data = {h.fund_code: prices.get(h.fund_code, h.cost_price) for h in holdings}
-
-    nav_history: dict[str, list[dict]] = {}
-    for h in holdings:
-        if (getattr(h, "asset_type", "fund") or "fund") != "fund":
-            continue
-        hist = await fetch_fund_nav(h.fund_code, 30)
-        if hist:
-            nav_history[h.fund_code] = hist
+    nav_data, nav_history = await load_market_context(holdings, 30)
 
     report = generate_weekly_report(holdings, nav_data, nav_history)
 

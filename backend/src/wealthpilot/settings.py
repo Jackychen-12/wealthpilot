@@ -47,6 +47,8 @@ class Settings(BaseSettings):
 
     local_user_id: int = Field(default=0, description="CLI / MCP 使用哪个用户的持仓与画像，0=匿名档")
 
+    connectors_file: Path = Field(default=Path("./connectors.json"), description="外部 MCP 连接器配置文件")
+
     alert_webhook_url: str = Field(default="", description="预警 webhook 推送地址，留空则不推送")
 
     db_path: Path = Field(default=Path("./data/wealthpilot.db"))

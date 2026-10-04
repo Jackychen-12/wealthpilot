@@ -13,6 +13,7 @@ const AGENT: Record<string, { label: string; tone: Tone }> = {
   portfolio: { label: '持仓分析', tone: 'green' },
   risk: { label: '风险评估', tone: 'orange' },
   quant: { label: '量化验证', tone: 'purple' },
+  stock: { label: '个股研究', tone: 'pink' },
 }
 const STATUS: Record<string, { tone: Tone; label: string }> = {
   passed: { tone: 'green', label: '已通过校验' },
@@ -26,6 +27,7 @@ const STARTERS = [
   { agent: 'portfolio', desc: '总览、归因、健康度', qs: ['我的组合整体表现如何，收益主要来自哪里？', '我的持仓集中度高吗？'] },
   { agent: 'risk', desc: '回撤、相关性、约束校验', qs: ['我的组合回撤风险大吗？哪只最危险？', '我的持仓之间相关性高不高，分散得够吗？'] },
   { agent: 'quant', desc: '持仓穿透、重叠、规则回测', qs: ['把我的组合穿透到个股，真实暴露集中在哪里？', '110011 回撤5%加30%、回撤10%加70%的分批建仓规则，历史上比一次性买入好吗'] },
+  { agent: 'stock', desc: 'A 股行情、估值、业绩、行业', qs: ['贵州茅台现在估值怎么样，最近业绩如何？', '宁德时代近半年走势如何，现在在高位还是低位？'] },
   { agent: 'market', desc: '基金信息、净值走势、要闻', qs: ['110011 最新净值多少，近一个月表现如何', '今天有什么重要的财经新闻'] },
 ]
 

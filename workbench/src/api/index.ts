@@ -119,6 +119,9 @@ export const api = {
   profile: () => request<Profile | null>('/api/profile'),
   saveProfile: (p: ProfileInput) => request<Profile>('/api/profile', json('PUT', p)),
   weekly: () => request<WeeklyReport>('/api/report/weekly'),
+  stockKline: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/stock/${code}/kline?days=${days}`),
+  connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
+  testConnector: (name: string) => request<ConnectorTest>(`/api/connectors/${name}/test`, { method: 'POST' }),
   fundNav: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/fund/${code}/nav?days=${days}`),
   login: (username: string, password: string) =>
     request<{ access_token: string; username: string }>('/api/auth/login', json('POST', { username, password })),
@@ -155,6 +158,17 @@ export interface Backtest {
 export interface FundInfo { code: string; name: string; nav: number; nav_date: string; estimated_change?: number; manager?: string; company?: string; scale?: string; type?: string; benchmark?: string
   return_1w?: string; return_1m?: string; return_3m?: string; return_1y?: string }
 export interface NavPoint { nav_date: string; nav: number; daily_return: number }
+export interface StockQuote { code: string; name: string; price: number; prev_close: number; open: number; high: number; low: number
+  change: number; change_pct: number; amount_yi: number | null; turnover_pct: number | null; pe_ttm: number | null; pb: number | null
+  total_mv_yi: number | null; quote_time: string }
+export interface StockValuation { price_range_1y?: { period_high: number; period_low: number; range_position_pct: number | null; trading_days: number }; note: string }
+export interface StockKline { trading_days: number; start_date: string; end_date: string; period_return_pct: number | null; period_high: number; period_low: number; range_position_pct: number | null }
+export interface StockReport { report_date: string; revenue_yi: number | null; revenue_yoy_pct: number | null; net_profit_yi: number | null; net_profit_yoy_pct: number | null
+  roe_pct: number | null; eps: number | null; gross_margin_pct: number | null }
+export interface StockProfile { code: string; name: string; industry: string; listing_board: string; total_mv_yi: number | null }
+export interface ConnectorInfo { name: string; label: string; kind: string; transport: string; endpoint: string; enabled: boolean; description: string; auth: string }
+export interface ConnectorTest { ok: boolean; error?: string; allowed_count?: number; blocked_count?: number
+  tools: { name: string; description: string; allowed: boolean; reason: string }[] }
 
 /** 取数 hook：加载中 / 出错 / 数据三态，页面不用各写一遍。 */
 export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {

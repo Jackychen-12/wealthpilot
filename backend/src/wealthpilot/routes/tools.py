@@ -1,4 +1,4 @@
-"""工具直调路由 —— 把 Agent 用的 19 个工具原样暴露给工作台。
+"""工具直调路由 —— 把 Agent 用的全部工具原样暴露给工作台。
 
 Agent 的每项能力（穿透、回测、仓位推演……）背后都是一个确定性工具。工作台的
 功能页直接调这些工具，和 AI 研究里看到的证据出自同一份实现，不会出现
@@ -17,6 +17,7 @@ from wealthpilot.services.agents.tools import (
     PORTFOLIO_TOOLS,
     QUANT_TOOLS,
     RISK_TOOLS,
+    STOCK_TOOLS,
     execute_tool,
 )
 from wealthpilot.services.context import load_market_context
@@ -28,12 +29,12 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 
 TOOL_GROUPS = {
     "market": MARKET_TOOLS, "portfolio": PORTFOLIO_TOOLS, "risk": RISK_TOOLS,
-    "compute": COMPUTE_TOOLS, "quant": QUANT_TOOLS,
+    "compute": COMPUTE_TOOLS, "quant": QUANT_TOOLS, "stock": STOCK_TOOLS,
 }
 _TOOLS = {t["name"]: (group, t) for group, tools in TOOL_GROUPS.items() for t in tools}
 # 只查公开行情、不需要用户持仓的工具 —— 不必为它们去拉整个组合的行情
-_STATELESS = {"get_fund_info", "get_nav_history", "search_market_news", "calculate_return",
-              "compare_funds", "compute_stock_overlap"}
+_STATELESS = {"get_fund_info", "get_nav_history", "search_market_news", "compare_funds",
+              "compute_stock_overlap", *(t["name"] for t in STOCK_TOOLS)}
 
 
 @router.get("")

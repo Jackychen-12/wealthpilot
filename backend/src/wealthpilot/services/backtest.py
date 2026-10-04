@@ -51,6 +51,7 @@ def backtest_rule(
     stop_loss_pct: float | None = None,
     fee_pct: float = 0.0,
     execution_lag: int = 0,
+    price_basis: str = "unit_nav_unadjusted",
 ) -> dict:
     """在历史净值上回测一条分批建仓规则。
 
@@ -161,7 +162,7 @@ def backtest_rule(
         "period": {"start": dates[0], "end": dates[-1], "trading_days": days},
         "assumptions": {"execution": "next_observation_nav", "fee_pct": fee_pct,
                         "annualization": "252_trading_days", "execution_lag": execution_lag, "cash_interest": 0,
-                        "price_basis": "unit_nav_unadjusted"},
+                        "price_basis": price_basis},
         "strategy": {
             "total_return_pct": round(strategy_return, 2),
             "annualized_pct": _annualized(strategy_return, days - 1),
@@ -185,7 +186,9 @@ def backtest_rule(
         "excess_vs_dca_pct": round(strategy_return - dca_return, 2),
         "limitations": (
             f"单标的回测，单边费率 {fee_pct}%（零费率时不计申赎费），不计冲击成本；"
-            "信号在下一观察日净值成交；单位净值未调整分红拆分，不是账户实际收益；"
+            + ("信号在下一交易日收盘价成交；使用前复权价，未处理停牌与涨跌停无法成交的情况；"
+               if price_basis == "forward_adjusted_close"
+               else "信号在下一观察日净值成交；单位净值未调整分红拆分，不是账户实际收益；") +
             f"样本区间仅 {days} 个交易日（{dates[0]} 至 {dates[-1]}），"
             "未必覆盖完整市场周期，历史表现不代表未来。"
         ),

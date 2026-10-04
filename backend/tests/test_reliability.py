@@ -139,10 +139,10 @@ async def test_real_orchestrator_never_releases_rejected_draft(monkeypatch, coun
 
 async def test_backtest_fetches_requested_window(monkeypatch):
     fetch = AsyncMock(return_value=series([1] * 250))
-    monkeypatch.setattr(tools, "fetch_fund_nav", fetch)
+    monkeypatch.setattr(tools, "fetch_price_history", fetch)
     await tools.execute_tool("backtest_rule", {"fund_code": "A", "days": 250, "triggers": []},
                              [], {}, {"A": series([1] * 60)})
-    fetch.assert_awaited_once_with("A", 250)
+    fetch.assert_awaited_once_with("A", "fund", 250)
 
 
 def test_alert_endpoint_has_user_dependency():

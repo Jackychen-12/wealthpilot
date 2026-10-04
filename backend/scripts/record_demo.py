@@ -5,7 +5,8 @@
 工作台在演示模式下回放。录的是真实结果，不是手写的假数据。
 
 用法（在 backend/ 下，需已配置模型 Key）：
-    uv run python scripts/record_demo.py
+    uv run python scripts/record_demo.py               # 全部重录
+    uv run python scripts/record_demo.py --keep-chats  # 只刷新行情数据，研究过程沿用已有的
 """
 
 import json
@@ -40,6 +41,8 @@ GETS = [
     "/api/analysis/suggestions", "/api/market/indices", "/api/market/news", "/api/alerts",
     "/api/scenario", "/api/profile", "/api/report/weekly",
     *[f"/api/market/fund/110011/nav?days={d}" for d in (21, 63, 125, 250)],
+    *[f"/api/market/stock/600519/kline?days={d}" for d in (21, 63, 125, 250)],
+    "/api/connectors",
 ]
 TOOLS = {
     "compute_concentration": {},
@@ -48,6 +51,10 @@ TOOLS = {
     "get_fund_info": {"fund_code": "110011"},
     "simulate_portfolio_change": {"changes": [{"fund_code": "161725", "target_pct": 15}]},
     "check_profile_constraint": {"changes": [{"fund_code": "161725", "target_pct": 15}]},
+    "get_stock_quote": {"code": "600519"},
+    "get_stock_valuation": {"code": "600519"},
+    "get_stock_profile": {"code": "600519"},
+    "get_stock_financials": {"code": "600519"},
     "backtest_rule": {"fund_code": "110011", "days": 250,
                       "triggers": [{"drawdown_pct": 5, "add_pct": 30}, {"drawdown_pct": 10, "add_pct": 70}]},
 }
@@ -55,6 +62,7 @@ QUESTIONS = [
     "我的持仓集中度高吗？",
     "把我的组合穿透到个股，真实暴露集中在哪里？",
     "110011 最新净值多少，近一个月表现如何",
+    "贵州茅台现在估值怎么样，最近业绩如何？",
 ]
 
 
@@ -93,7 +101,13 @@ def main() -> None:
         print("TOOL", name)
         # 入参一并存下：演示模式只在参数与录制时一致才回放，免得"填的是 A、显示的是 B"
         fixtures["tools"][name] = {"inputs": inputs, "result": client.post(f"/api/tools/{name}", json=inputs).json()}
+    # --keep-chats：已录过的研究过程原样保留，只补录新增的问题（省模型调用）
+    previous = json.loads(OUT.read_text())["chats"] if "--keep-chats" in sys.argv and OUT.exists() else {}
     for question in QUESTIONS:
+        if question in previous:
+            fixtures["chats"][question] = previous[question]
+            print("CHAT", question, "-> 沿用已有录制")
+            continue
         events = record_chat(client, question)
         status = events[-1].get("meta", {}).get("status")
         print("CHAT", question, "->", status)

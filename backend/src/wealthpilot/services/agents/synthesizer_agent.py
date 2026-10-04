@@ -31,7 +31,7 @@ _NUMBER_RE = re.compile(r"(?<![\d.])[+-]?\d+(?:\.\d+)?")
 _DATE_RE = re.compile(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|(?<!\d)\d{1,2}[-/]\d{1,2}(?![\d.%])|\d{1,2}月\d{1,2}日|(?<!\d)\d{1,2}[日号](?!均)")
 # 指数名里的数字是名字的一部分（沪深300、中证500）
 _INDEX_NAME_RE = re.compile(r"(沪深|中证|上证|深证|国证|标普|纳指|纳斯达克|恒生|科创|创业板|MSCI\s?)\d+")
-_LOSS_RE = re.compile(r"回撤|跌|亏|损失|回落|下降|减少|缩水")
+_LOSS_RE = re.compile(r"回撤|跌|亏|损|回落|下滑|降|减|缩|负")
 
 
 def _evidence_text(e: dict) -> str:
@@ -157,7 +157,8 @@ def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
     ungrounded = []
     total = 0
     for line in answer.splitlines():
-        clean = re.sub(r"\[E-[a-f0-9]+\]", "", line)
+        # 证据 ID 不是数值；模型偶尔会漏掉方括号，一并剔除
+        clean = re.sub(r"\[?E-[a-f0-9]{8,}\]?", "", line)
         clean = re.sub(r"^\s*\d+[.)、]\s*", "", clean)
         clean = _THOUSANDS_RE.sub("", _INDEX_NAME_RE.sub(" ", _DATE_RE.sub(" ", clean)))
         for match in _NUMBER_RE.finditer(clean):
@@ -183,6 +184,9 @@ def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
                 if unit == "%" and not source_unit and abs(value) <= 1:
                     # 工具用小数表示占比，正文写成百分比
                     targets += [t * 100 for t in targets]
+                elif abs(value) >= 1e4 and unit != "%":
+                    # 量级换算：元 → 万 / 亿（479725 万写成 47.97 亿）
+                    targets += [t / 1e4 for t in targets] + [t / 1e8 for t in targets]
                 elif unit and source_unit and unit != source_unit:
                     continue
                 if any(_same_value(token, t) for t in targets):
