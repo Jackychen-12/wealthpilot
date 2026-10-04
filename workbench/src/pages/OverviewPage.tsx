@@ -104,7 +104,7 @@ const OverviewPage: React.FC = () => {
                   ))}
                 </ul>
               </DataState>
-              <Button size="sm" variant="secondary" className="mt-4" onClick={() => navigate('/')}>让 AI 深入分析</Button>
+              <Button size="sm" variant="secondary" className="mt-4" onClick={() => navigate('/research')}>让 AI 深入分析</Button>
             </Section>
           </div>
 

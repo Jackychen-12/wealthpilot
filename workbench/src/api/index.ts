@@ -120,6 +120,15 @@ export const api = {
   saveProfile: (p: ProfileInput) => request<Profile>('/api/profile', json('PUT', p)),
   weekly: () => request<WeeklyReport>('/api/report/weekly'),
   stockKline: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/stock/${code}/kline?days=${days}`),
+  searchSecurities: (q: string) => request<Security[]>(`/api/securities/search?q=${encodeURIComponent(q)}`),
+  watchlist: () => request<WatchItem[]>('/api/watchlist'),
+  addWatch: (item: { code: string; name: string; asset_type: string; note?: string }) => request<{ id: number; already: boolean }>('/api/watchlist', json('POST', item)),
+  updateWatch: (id: number, note: string) => request<unknown>(`/api/watchlist/${id}`, json('PUT', { note })),
+  removeWatch: (id: number) => request<unknown>(`/api/watchlist/${id}`, { method: 'DELETE' }),
+  screen: (criteria: Record<string, unknown>) => request<ScreenResult>('/api/screener', json('POST', criteria)),
+  industries: () => request<{ industry: string; count: number }[]>('/api/screener/industries'),
+  researchHistory: () => request<ResearchRecord[]>('/api/research/history'),
+  researchDetail: (id: number) => request<ResearchDetail>(`/api/research/history/${id}`),
   connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
   testConnector: (name: string) => request<ConnectorTest>(`/api/connectors/${name}/test`, { method: 'POST' }),
   fundNav: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/fund/${code}/nav?days=${days}`),
@@ -166,6 +175,27 @@ export interface StockKline { trading_days: number; start_date: string; end_date
 export interface StockReport { report_date: string; revenue_yi: number | null; revenue_yoy_pct: number | null; net_profit_yi: number | null; net_profit_yoy_pct: number | null
   roe_pct: number | null; eps: number | null; gross_margin_pct: number | null }
 export interface StockProfile { code: string; name: string; industry: string; listing_board: string; total_mv_yi: number | null }
+export interface Security { code: string; name: string; asset_type: 'stock' | 'etf' | 'fund'; type_label?: string; industry?: string }
+export interface WatchItem { id: number; code: string; name: string; asset_type: string; note: string; created_at: string; price: number | null; change_pct: number | null }
+export interface ScreenStock { code: string; name: string; industry: string; price: number | null; change_pct: number | null; total_mv_yi: number | null
+  pe_ttm: number | null; pb: number | null; roe_pct: number | null; revenue_yoy_pct: number | null; profit_yoy_pct: number | null }
+export interface ScreenResult { criteria: Record<string, unknown>; matched: number; shown: number; stocks: ScreenStock[]; trade_date: string; report_date: string; note: string }
+export interface ValuationBand { current: number | null; percentile: number | null; min?: number; median?: number; max?: number; note?: string }
+export interface ValuationHistory { name: string; as_of: string; window_start: string; trading_days: number; pe: ValuationBand; pb: ValuationBand; ps: ValuationBand }
+export interface Indicator { report_date: string; report_name: string; revenue_yi: number | null; revenue_yoy_pct: number | null; net_profit_yi: number | null; net_profit_yoy_pct: number | null
+  deducted_net_profit_yi: number | null; roe_pct: number | null; gross_margin_pct: number | null; net_margin_pct: number | null; debt_ratio_pct: number | null; eps: number | null; operating_cashflow_per_share: number | null }
+export interface Peer { code: string; name: string; pe_ttm: number | null; pb: number | null; total_mv_yi: number | null; change_pct: number | null }
+export interface Peers { industry: string; as_of: string; peer_count: number; mv_rank: number | null; target: Peer | null; peers: Peer[] }
+export interface PeerValuation { industry: string; as_of: string; peer_count: number; industry_median_pe: number | null; pe_rank_low_to_high: number | null; positive_pe_peer_count: number }
+export interface Technicals { as_of: string; ma5: number | null; ma20: number | null; ma60: number | null; vs_ma20_pct: number | null; vs_ma60_pct: number | null; ma_alignment: string; volatility_20d_annualized_pct: number | null }
+export interface Announcement { date: string; title: string; url: string }
+export interface Dividend { report_date: string; plan: string; dividend_yield_pct: number | null; ex_dividend_date: string }
+export interface Sector { industry: string; stock_count: number; median_change_pct: number; up_ratio_pct: number; leader: { code: string; name: string; change_pct: number } }
+export interface SectorRanking { trade_date: string; top: Sector[]; bottom: Sector[] }
+export interface MarketOverview { indices: IndexQuote[]; breadth: { trade_date: string; up: number; down: number; flat: number; median_change_pct: number; limit_up_like: number; limit_down_like: number } }
+export interface ResearchRecord { id: number; created_at: string; question: string; status: string; playbook: string; intent: string; securities: Security[]; evidence_count: number }
+export interface ResearchDetail { id: number; created_at: string; question: string; answer: string
+  meta: { status?: string; evidence?: { id: string; tool: string; input: unknown; output: unknown; status: string }[]; tasks?: { agent: string; goal: string }[] } }
 export interface ConnectorInfo { name: string; label: string; kind: string; transport: string; endpoint: string; enabled: boolean; description: string; auth: string }
 export interface ConnectorTest { ok: boolean; error?: string; allowed_count?: number; blocked_count?: number
   tools: { name: string; description: string; allowed: boolean; reason: string }[] }
@@ -195,23 +225,24 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
 export interface StreamEvent {
   type: string; content?: string; agent?: string; tool?: string; input?: unknown
   id?: string; goal?: string; status?: string; tools?: string[]
+  playbook?: string; securities?: Security[]
   intent?: string; source?: string; success_criteria?: string[]
   tasks?: { id: string; agent: string; goal: string }[]
   evidence?: { id: string; tool: string; status: string; input: unknown; output: unknown; provenance?: { as_of?: Record<string, string | null>; sources?: { url?: string }[] } }
   gate?: string; passed?: boolean; issues?: string[]; attempt?: number
   agents?: string[]; ungrounded?: string[]; follow_ups?: string[]
-  meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[] }
+  meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string }
 }
 
 export async function* streamChat(
-  message: string, history: { role: string; content: string }[], signal: AbortSignal,
+  message: string, history: { role: string; content: string }[], signal: AbortSignal, conversationId = '',
 ): AsyncGenerator<StreamEvent> {
   if (DEMO) {
     const { demoChat } = await import('../demo')
     yield* demoChat(message, signal)
     return
   }
-  const resp = await fetch(`${API_BASE}/api/chat`, { ...json('POST', { message, history }), headers: { 'Content-Type': 'application/json', ...authHeaders() }, signal })
+  const resp = await fetch(`${API_BASE}/api/chat`, { ...json('POST', { message, history, conversation_id: conversationId || undefined }), headers: { 'Content-Type': 'application/json', ...authHeaders() }, signal })
   if (!resp.ok || !resp.body) throw new ApiError(`对话请求失败（${resp.status}）`)
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()

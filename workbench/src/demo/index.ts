@@ -11,6 +11,7 @@ import fixtures from './fixtures.json'
 type Fixtures = {
   recorded_at: string
   get: Record<string, unknown>
+  post?: Record<string, { inputs: unknown; result: unknown }>
   tools: Record<string, { inputs: Record<string, unknown>; result: unknown }>
   chats: Record<string, (StreamEvent & { t: number })[]>
 }
@@ -37,8 +38,9 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
 
   if (method === 'GET') {
     if (path in data.get) return data.get[path]
+    if (path.startsWith(SEARCH)) return demoSearch(decodeURIComponent(path.slice(SEARCH.length)))
     if (path.startsWith('/api/market/fund/')) throw new Error(`在线演示只录了 ${DEMO_FUND} 这一只基金的数据`)
-    if (path.startsWith('/api/market/stock/')) throw new Error('在线演示只录了 600519 这一只股票的数据')
+    if (path.startsWith('/api/market/stock/')) throw new Error('在线演示只录了贵州茅台（600519）这一只股票的数据')
     throw new Error('在线演示没有录这项数据')
   }
 
@@ -53,7 +55,27 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
     }
     return recorded.result
   }
+  const posted = method === 'POST' ? data.post?.[path] : undefined
+  if (posted) {
+    const inputs = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
+    if (canonical(inputs) !== canonical(posted.inputs)) {
+      throw new Error(`在线演示只录了一组条件的结果：${describe(posted.inputs as Record<string, unknown>)}。换别的条件需要在本地运行。`)
+    }
+    return posted.result
+  }
   throw new Error(READ_ONLY)
+}
+
+const SEARCH = '/api/securities/search?q='
+type Hit = { code: string; name: string }
+/** 演示里的搜索只在录过的那几只证券里找，找不到就如实返回空。 */
+function demoSearch(query: string): Hit[] {
+  const q = query.trim().toLowerCase()
+  const seen = new Map<string, Hit>()
+  for (const [path, hits] of Object.entries(data.get)) {
+    if (path.startsWith(SEARCH)) for (const h of hits as Hit[]) seen.set(h.code, h)
+  }
+  return [...seen.values()].filter((h) => h.code.includes(q) || h.name.replace(/\s/g, '').toLowerCase().includes(q))
 }
 
 /** 按录制时的节奏回放一次研究（间隔压缩到原来的 1/4，免得演示时干等）。 */

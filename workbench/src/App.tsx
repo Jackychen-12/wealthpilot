@@ -18,6 +18,10 @@ import FundPage from './pages/FundPage'
 import BacktestPage from './pages/BacktestPage'
 import StockPage from './pages/StockPage'
 import ConnectorsPage from './pages/ConnectorsPage'
+import TodayPage from './pages/TodayPage'
+import WatchlistPage from './pages/WatchlistPage'
+import ScreenerPage from './pages/ScreenerPage'
+import HistoryPage from './pages/HistoryPage'
 
 const App: React.FC = () => {
   // 登录状态变化后换 key，让所有页面重新取数
@@ -42,20 +46,24 @@ const App: React.FC = () => {
             />
           )}
         >
-          <Route path="/" element={<ResearchPage key={epoch} />} />
+          <Route path="/" element={<TodayPage key={epoch} />} />
+          <Route path="/research" element={<ResearchPage key={epoch} />} />
+          <Route path="/screener" element={<ScreenerPage key={epoch} />} />
+          <Route path="/watchlist" element={<WatchlistPage key={epoch} />} />
+          <Route path="/history/:id?" element={<HistoryPage key={epoch} />} />
           <Route path="/overview" element={<OverviewPage key={epoch} />} />
           <Route path="/holdings" element={<HoldingsPage key={epoch} />} />
           <Route path="/risk" element={<RiskPage key={epoch} />} />
           <Route path="/stress" element={<StressPage key={epoch} />} />
           <Route path="/lookthrough" element={<LookthroughPage key={epoch} />} />
           <Route path="/rebalance" element={<RebalancePage key={epoch} />} />
-          <Route path="/fund" element={<FundPage key={epoch} />} />
+          <Route path="/fund/:code?" element={<FundPage key={epoch} />} />
           <Route path="/backtest" element={<BacktestPage key={epoch} />} />
-          <Route path="/stock" element={<StockPage key={epoch} />} />
+          <Route path="/stock/:code?" element={<StockPage key={epoch} />} />
           <Route path="/connectors" element={<ConnectorsPage key={epoch} />} />
           <Route path="/report" element={<ReportPage key={epoch} />} />
           <Route path="/profile" element={<ProfilePage key={epoch} />} />
-          <Route path="*" element={<ResearchPage key={epoch} />} />
+          <Route path="*" element={<TodayPage key={epoch} />} />
         </Route>
       </Routes>
       <AuthDrawer open={authOpen} onClose={() => setAuthOpen(false)} onDone={() => { setAuthOpen(false); setEpoch((e) => e + 1) }} />

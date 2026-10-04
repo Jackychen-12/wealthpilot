@@ -24,12 +24,21 @@ from wealthpilot.main import app  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[2] / "workbench" / "src" / "demo" / "fixtures.json"
 
+# 示例组合：股票和 ETF 为主，基金作为持仓的一种
 HOLDINGS = [
-    ("110011", "易方达优质精选混合", 2500, 4.35, "2025-03-10", "equity", "消费"),
-    ("007340", "南方科技创新混合A", 6000, 2.10, "2025-01-15", "equity", "科技"),
-    ("161725", "招商中证白酒指数A", 8000, 0.92, "2024-11-20", "equity", "白酒"),
-    ("000216", "华安黄金ETF联接A", 5000, 2.05, "2025-05-08", "hybrid", "黄金"),
-    ("110017", "易方达增强回报债券A", 9000, 1.38, "2024-09-01", "bond", "债券"),
+    ("stock", "300750", "宁德时代", 100, 262.0, "2025-04-10", "equity", "电池"),
+    ("stock", "600036", "招商银行", 600, 36.5, "2024-12-02", "equity", "银行"),
+    ("stock", "000858", "五粮液", 200, 78.4, "2025-02-18", "equity", "白酒"),
+    ("etf", "510300", "沪深300ETF华泰柏瑞", 5000, 3.95, "2024-10-08", "equity", "宽基"),
+    ("fund", "110011", "易方达优质精选混合", 2500, 4.35, "2025-03-10", "equity", "消费"),
+    ("fund", "161725", "招商中证白酒指数A", 8000, 0.92, "2024-11-20", "equity", "白酒"),
+    ("fund", "110017", "易方达增强回报债券A", 9000, 1.38, "2024-09-01", "bond", "债券"),
+]
+WATCHLIST = [
+    ("600519", "贵州茅台", "stock", "白酒龙头，等估值分位和业绩拐点"),
+    ("300750", "宁德时代", "stock", "已持有，跟踪季度毛利率"),
+    ("601899", "紫金矿业", "stock", ""),
+    ("510300", "沪深300ETF华泰柏瑞", "etf", "宽基底仓"),
 ]
 PROFILE = {"risk_level": 3, "horizon_months": 36, "max_drawdown_tolerance": 0.2,
            "liquidity_reserve": 20000, "experience_years": 4, "available_cash": 50000,
@@ -42,8 +51,13 @@ GETS = [
     "/api/scenario", "/api/profile", "/api/report/weekly",
     *[f"/api/market/fund/110011/nav?days={d}" for d in (21, 63, 125, 250)],
     *[f"/api/market/stock/600519/kline?days={d}" for d in (21, 63, 125, 250)],
-    "/api/connectors",
+    "/api/connectors", "/api/screener/industries",
+    *[f"/api/securities/search?q={q}" for q in ("600519", "300750", "600036", "000858", "510300", "110011", "161725")],
 ]
+# 非工具类的只读 POST（选股）。入参必须与工作台演示模式预填的条件一致
+POSTS = {
+    "/api/screener": {"limit": 50, "sort_by": "total_mv_yi", "descending": True, "pe_max": 15, "roe_min": 15, "mv_min_yi": 200},
+}
 TOOLS = {
     "compute_concentration": {},
     "lookthrough_portfolio": {},
@@ -54,21 +68,33 @@ TOOLS = {
     "get_stock_quote": {"code": "600519"},
     "get_stock_valuation": {"code": "600519"},
     "get_stock_profile": {"code": "600519"},
-    "get_stock_financials": {"code": "600519"},
+    "get_technical_indicators": {"code": "600519"},
+    "get_financial_indicators": {"code": "600519"},
+    "get_dividend_history": {"code": "600519"},
+    "get_valuation_history": {"code": "600519"},
+    "compare_peers_valuation": {"code": "600519"},
+    "get_industry_peers": {"code": "600519"},
+    "get_stock_announcements": {"code": "600519"},
+    "get_market_overview": {},
+    "get_sector_ranking": {"top": 5},
     "backtest_rule": {"fund_code": "110011", "days": 250,
                       "triggers": [{"drawdown_pct": 5, "add_pct": 30}, {"drawdown_pct": 10, "add_pct": 70}]},
 }
+# 四个研究模板各一题，外加一个自由问答。第一题的措辞与个股页"深度研究"按钮一致，演示里点按钮即可回放
 QUESTIONS = [
-    "我的持仓集中度高吗？",
-    "把我的组合穿透到个股，真实暴露集中在哪里？",
+    "帮我深度分析一下贵州茅台（600519）",
+    "对比一下贵州茅台和五粮液的基本面和估值",
+    "帮我诊断一下我的持仓",
+    "帮我筛选市盈率低于15、ROE高于15%的大市值股票",
     "110011 最新净值多少，近一个月表现如何",
-    "贵州茅台现在估值怎么样，最近业绩如何？",
 ]
+HISTORY = "/api/research/history"
 
 
 def record_chat(client: TestClient, question: str) -> list[dict]:
     events, started = [], time.time()
-    with client.stream("POST", "/api/chat", json={"message": question, "history": []}) as resp:
+    # 带上会话 ID，后端才会把这一轮存进研究记录
+    with client.stream("POST", "/api/chat", json={"message": question, "history": [], "conversation_id": f"demo-{QUESTIONS.index(question)}"}) as resp:
         for line in resp.iter_lines():
             if not line.startswith("data: "):
                 continue
@@ -85,14 +111,16 @@ def record_chat(client: TestClient, question: str) -> list[dict]:
 
 def main() -> None:
     client = TestClient(app)
-    for code, name, shares, cost, date, category, industry in HOLDINGS:
+    for asset_type, code, name, shares, cost, date, category, industry in HOLDINGS:
         client.post("/api/portfolio", json={
-            "fund_code": code, "fund_name": name, "shares": shares, "cost_price": cost,
+            "asset_type": asset_type, "fund_code": code, "fund_name": name, "shares": shares, "cost_price": cost,
             "buy_date": date, "category": category, "industry": industry}).raise_for_status()
     client.put("/api/profile", json=PROFILE).raise_for_status()
+    for code, name, asset_type, note in reversed(WATCHLIST):
+        client.post("/api/watchlist", json={"code": code, "name": name, "asset_type": asset_type, "note": note}).raise_for_status()
 
-    fixtures: dict = {"recorded_at": time.strftime("%Y-%m-%d"), "get": {}, "tools": {}, "chats": {}}
-    for path in GETS:
+    fixtures: dict = {"recorded_at": time.strftime("%Y-%m-%d"), "get": {}, "post": {}, "tools": {}, "chats": {}}
+    for path in [*GETS, "/api/watchlist"]:
         print("GET", path)
         fixtures["get"][path] = client.get(path).json()
     for key in [s["scenario_key"] for s in fixtures["get"]["/api/scenario"]["scenarios"]]:
@@ -101,8 +129,12 @@ def main() -> None:
         print("TOOL", name)
         # 入参一并存下：演示模式只在参数与录制时一致才回放，免得"填的是 A、显示的是 B"
         fixtures["tools"][name] = {"inputs": inputs, "result": client.post(f"/api/tools/{name}", json=inputs).json()}
+    for path, body in POSTS.items():
+        print("POST", path)
+        fixtures["post"][path] = {"inputs": body, "result": client.post(path, json=body).json()}
     # --keep-chats：已录过的研究过程原样保留，只补录新增的问题（省模型调用）
-    previous = json.loads(OUT.read_text())["chats"] if "--keep-chats" in sys.argv and OUT.exists() else {}
+    old = json.loads(OUT.read_text()) if "--keep-chats" in sys.argv and OUT.exists() else {}
+    previous = old.get("chats", {})
     for question in QUESTIONS:
         if question in previous:
             fixtures["chats"][question] = previous[question]
@@ -114,6 +146,16 @@ def main() -> None:
         if status not in ("passed", "partial"):
             sys.exit(f"这个问题没有跑出可发布的回答（{status}），不写入快照；请重试")
         fixtures["chats"][question] = events
+
+    # 研究记录：本次新录的由后端存下；沿用旧录制时，把旧快照里对应的记录带过来
+    records = client.get(HISTORY).json()
+    fixtures["get"][HISTORY] = records
+    for r in records:
+        fixtures["get"][f"{HISTORY}/{r['id']}"] = client.get(f"{HISTORY}/{r['id']}").json()
+    kept = [r for r in old.get("get", {}).get(HISTORY, []) if r["question"] in previous and r["question"] not in {x["question"] for x in records}]
+    for r in kept:
+        fixtures["get"][HISTORY].append(r)
+        fixtures["get"][f"{HISTORY}/{r['id']}"] = old["get"][f"{HISTORY}/{r['id']}"]
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(fixtures, ensure_ascii=False, separators=(",", ":")))

@@ -1,10 +1,11 @@
 import type React from 'react'
 import { useState } from 'react'
-import { BriefcaseBusiness, Cable, CandlestickChart, FileText, History, Layers, LayoutDashboard, LogIn, LogOut, MessageSquareText, Moon, Scale, Search, ShieldCheck, Sun, UserRoundCog, Zap } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { BriefcaseBusiness, Cable, CandlestickChart, FileText, History, Home, Layers, LayoutDashboard, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, ShieldCheck, Star, Sun, UserRoundCog, Zap } from 'lucide-react'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
 import { Dot } from '../kit'
+import { SecuritySearch, securityPath } from '../SecuritySearch'
 
 export type SidebarNavProps = {
   onNavigate?: () => void
@@ -18,12 +19,18 @@ export type SidebarNavProps = {
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; exact?: boolean; badge?: 'alerts' | 'busy' }
 
-// 按功能分组：研究是主入口，其余是它依赖和验证的数据
+// 股票在前：先看市场和研究，再看自己的组合，最后是工具与设置
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
-  { label: '研究', items: [{ to: '/', label: 'AI 研究', icon: MessageSquareText, exact: true, badge: 'busy' }] },
+  { label: '', items: [{ to: '/', label: '今日', icon: Home, exact: true }] },
+  { label: '研究', items: [
+    { to: '/research', label: 'AI 研究', icon: MessageSquareText, badge: 'busy' },
+    { to: '/stock', label: '个股', icon: CandlestickChart },
+    { to: '/screener', label: '选股器', icon: ListFilter },
+    { to: '/watchlist', label: '自选股', icon: Star },
+  ] },
   { label: '组合', items: [
-    { to: '/overview', label: '总览', icon: LayoutDashboard },
     { to: '/holdings', label: '持仓', icon: BriefcaseBusiness },
+    { to: '/overview', label: '组合总览', icon: LayoutDashboard },
     { to: '/lookthrough', label: '持仓穿透', icon: Layers },
   ] },
   { label: '风险', items: [
@@ -31,21 +38,22 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { to: '/stress', label: '压力测试', icon: Zap },
     { to: '/rebalance', label: '调仓推演', icon: Scale },
   ] },
-  { label: '市场与量化', items: [
-    { to: '/stock', label: '个股查询', icon: CandlestickChart },
-    { to: '/fund', label: '基金查询', icon: Search },
+  { label: '工具', items: [
     { to: '/backtest', label: '规则回测', icon: History },
+    { to: '/fund', label: '基金查询', icon: Search },
   ] },
-  { label: '报告与设置', items: [
-    { to: '/report', label: '周报', icon: FileText },
+  { label: '设置', items: [
     { to: '/profile', label: '风险画像', icon: UserRoundCog },
     { to: '/connectors', label: '数据连接', icon: Cable },
+    { to: '/report', label: '周报', icon: FileText },
+    { to: '/history', label: '研究记录', icon: NotebookText },
   ] },
 ]
 
 const ITEM = 'flex h-8 w-full items-center gap-2.5 rounded-sm px-2.5 text-sm text-slate transition-colors hover:bg-hover hover:text-ink'
 
 export const SidebarNav: React.FC<SidebarNavProps> = ({ onNavigate, backend, username, alertCount, researchBusy, onLogin, onLogout }) => {
+  const navigate = useNavigate()
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
   const toggleTheme = () => {
     const next = !dark
@@ -56,15 +64,17 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ onNavigate, backend, use
 
   return (
     <div className="flex h-full flex-col px-2 py-3">
-      <div className="mb-4 flex items-center gap-2.5 px-2.5 py-1.5">
+      <div className="mb-2 flex items-center gap-2.5 px-2.5 py-1.5">
         <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-ink text-xs font-semibold text-canvas">W</div>
         <span className="truncate text-sm font-semibold text-ink">WealthPilot</span>
       </div>
 
+      <SecuritySearch hotkey className="mx-1 mb-3" onPick={(sec) => { navigate(securityPath(sec)); onNavigate?.() }} />
+
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto" aria-label="主导航">
         {NAV_GROUPS.map((group) => (
           <div key={group.label} className="flex flex-col gap-0.5">
-            <span className="px-2.5 pb-1 text-xs font-medium text-stone">{group.label}</span>
+            {group.label ? <span className="px-2.5 pb-1 text-xs font-medium text-stone">{group.label}</span> : null}
             {group.items.map(({ to, label, icon: Icon, exact, badge }) => (
               <NavLink key={to} to={to} end={exact} onClick={onNavigate}
                 className={({ isActive }) => cn(ITEM, isActive && 'bg-hover font-medium text-ink')}>

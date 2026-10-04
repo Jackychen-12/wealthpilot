@@ -1,14 +1,18 @@
 import type React from 'react'
-import { useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ImageUp, Plus, Upload } from 'lucide-react'
 import { api, runTool, useApi, type Holding, type HoldingInput, type StockProfile } from '../api'
+import { securityPath } from '../components/SecuritySearch'
 import { Button, Callout, ConfirmDialog, Drawer, Input, Select } from '../components/kit'
 import { ASSET, CATEGORY, DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed, yuan } from '../components/ui'
 
 const blank = (): HoldingInput => ({
-  asset_type: 'fund', fund_code: '', fund_name: '', shares: 0, cost_price: 0,
+  asset_type: 'stock', fund_code: '', fund_name: '', shares: 0, cost_price: 0,
   buy_date: new Date().toISOString().slice(0, 10), category: 'equity', industry: '',
 })
+// 股票在前，基金作为持仓的一种排在后面
+const GROUP_ORDER = ['stock', 'etf', 'fund', 'crypto']
 const options = (map: Record<string, string>) => Object.entries(map).map(([value, label]) => ({ value, label }))
 
 const HoldingsPage: React.FC = () => {
@@ -24,6 +28,9 @@ const HoldingsPage: React.FC = () => {
   const total = rows.reduce((s, h) => s + (h.market_value ?? 0), 0)
   const cost = rows.reduce((s, h) => s + h.shares * h.cost_price, 0)
   const totalReturn = rows.reduce((s, h) => s + (h.total_return ?? 0), 0)
+  const groups = [...GROUP_ORDER, ...new Set(rows.map((h) => h.asset_type).filter((t) => !GROUP_ORDER.includes(t)))]
+    .map((type) => ({ type, items: rows.filter((h) => h.asset_type === type).sort((a, b) => (b.market_value ?? 0) - (a.market_value ?? 0)) }))
+    .filter((g) => g.items.length > 0)
 
   const run = async (work: () => Promise<string>) => {
     setBusy(true)
@@ -67,7 +74,7 @@ const HoldingsPage: React.FC = () => {
     setEditing((ed) => (ed ? { ...ed, form: { ...ed.form, [key]: value } } : ed))
 
   return (
-    <Page title="持仓" description="录入、导入和维护持仓"
+    <Page title="持仓" description="股票、ETF 和基金放在一起管理，按类型分组"
       actions={(
         <>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => csvRef.current?.click()}><Upload className="h-4 w-4" />导入 CSV / Excel</Button>
@@ -90,14 +97,23 @@ const HoldingsPage: React.FC = () => {
 
       <Section title="持仓明细" hint="最新价来自实时行情；取不到时按成本价计">
         <DataState loading={holdings.loading} error={holdings.error} onRetry={holdings.reload}
-          empty={rows.length === 0 ? '还没有持仓。点右上角"添加持仓"，或导入天天基金导出的 CSV。' : undefined}>
+          empty={rows.length === 0 ? '还没有持仓。点右上角「添加持仓」录入股票、ETF 或基金，或导入天天基金导出的 CSV。' : undefined}>
           <Table minWidth={980} head={[
             { label: '标的' }, { label: '类别' }, { label: '份额', right: true }, { label: '成本价', right: true }, { label: '最新价', right: true },
             { label: '市值', right: true }, { label: '占比', right: true }, { label: '持有收益', right: true }, { label: '收益率', right: true }, { label: '', right: true },
           ]}>
-            {rows.map((h) => (
+            {groups.map((g) => {
+              const value = g.items.reduce((sum, h) => sum + (h.market_value ?? 0), 0)
+              return (
+              <Fragment key={g.type}>
+              <tr className="bg-surface-soft">
+                <Td colSpan={10} className="!py-1.5 text-[13px] text-steel">
+                  <b className="font-medium text-ink">{ASSET[g.type] ?? g.type}</b> · {g.items.length} 项 · 市值 {yuan(value)} 元{total ? ` · 占 ${((value / total) * 100).toFixed(1)}%` : ''}
+                </Td>
+              </tr>
+              {g.items.map((h) => (
               <tr key={h.id}>
-                <Td><div className="font-medium text-ink">{h.fund_name}</div><div className="font-mono text-xs text-stone">{h.fund_code} · {h.buy_date}</div></Td>
+                <Td><Link to={securityPath({ code: h.fund_code, asset_type: h.asset_type })} className="font-medium text-ink hover:underline">{h.fund_name}</Link><div className="font-mono text-xs text-stone">{h.fund_code} · {h.buy_date}</div></Td>
                 <Td>{CATEGORY[h.category] ?? h.category}{h.industry ? <div className="text-xs text-steel">{h.industry}</div> : null}</Td>
                 <Td right num>{yuan(h.shares, 2)}</Td>
                 <Td right num>{h.cost_price.toFixed(4)}</Td>
@@ -111,7 +127,10 @@ const HoldingsPage: React.FC = () => {
                   <Button size="xs" variant="danger" onClick={() => setRemoving(h)}>删除</Button>
                 </Td>
               </tr>
-            ))}
+              ))}
+              </Fragment>
+              )
+            })}
           </Table>
         </DataState>
         <p className="mt-3 text-[13px] text-steel">截图识别使用 Claude Vision，需要后端配置 Anthropic Key；CSV 支持天天基金导出格式。</p>

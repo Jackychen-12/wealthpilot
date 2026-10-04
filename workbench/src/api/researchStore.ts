@@ -3,7 +3,7 @@
  * 切到别的页面再回来，对话和正在跑的研究都还在。
  */
 import { useSyncExternalStore } from 'react'
-import { streamChat, type StreamEvent } from '../api'
+import { streamChat, type Security, type StreamEvent } from '../api'
 
 export interface Evidence { id: string; tool: string; agent: string; taskId: string; ok: boolean; input: string; output: string; asOf: string; source: string }
 export interface Task { id: string; agent: string; goal: string; state: 'pending' | 'running' | 'done' | 'failed' }
@@ -12,6 +12,7 @@ export interface Turn {
   id: number; question: string; answer: string; status: string; running: boolean
   intent: string; fallbackPlan: boolean; tasks: Task[]; criteria: string[]; evidence: Evidence[]; checks: Check[]
   missing: string[]; followUps: string[]; seconds: number; error: string
+  playbook: string; securities: Security[]
 }
 
 interface State { turns: Turn[]; selected: number | null; focusEvidence: string }
@@ -20,6 +21,8 @@ let state: State = { turns: [], selected: null, focusEvidence: '' }
 const listeners = new Set<() => void>()
 let controller: AbortController | null = null
 let nextId = 1
+// 同一次会话里的问答共用一个 ID，后端据此把它们存进研究记录
+let conversationId = crypto.randomUUID()
 
 const emit = (next: State) => { state = next; listeners.forEach(l => l()) }
 const patch = (id: number, fn: (t: Turn) => Turn) => emit({ ...state, turns: state.turns.map(t => (t.id === id ? fn(t) : t)) })
@@ -34,8 +37,9 @@ function apply(turn: Turn, e: StreamEvent): Turn {
       ? turn.tasks.map(t => (t.id === e.id ? { ...t, state } : t))
       : [...turn.tasks, { id: e.id || String(turn.tasks.length), agent: e.agent || '', goal: e.goal || '', state }]
   switch (e.type) {
+    case 'resolved': return { ...turn, securities: e.securities || [] }
     case 'plan':
-      return { ...turn, intent: e.intent || '', fallbackPlan: e.source === 'fallback', criteria: e.success_criteria || [],
+      return { ...turn, playbook: e.playbook || '', intent: e.intent || '', fallbackPlan: e.source === 'fallback', criteria: e.success_criteria || [],
         tasks: (e.tasks || []).map(t => ({ ...t, state: 'pending' as const })) }
     case 'task_start': return { ...turn, tasks: setTask('running') }
     case 'task_done': return { ...turn, tasks: setTask(e.status === 'completed' ? 'done' : 'failed') }
@@ -74,7 +78,7 @@ export const research = {
   select: (id: number) => emit({ ...state, selected: id, focusEvidence: '' }),
   focus: (turnId: number, evidenceId: string) => emit({ ...state, selected: turnId, focusEvidence: evidenceId }),
   stop: () => controller?.abort(),
-  clear: () => { controller?.abort(); emit({ turns: [], selected: null, focusEvidence: '' }) },
+  clear: () => { controller?.abort(); conversationId = crypto.randomUUID(); emit({ turns: [], selected: null, focusEvidence: '' }) },
   get busy() { return state.turns.some(t => t.running) },
 
   async ask(question: string) {
@@ -83,14 +87,14 @@ export const research = {
     const history = state.turns.filter(t => t.status && t.answer).slice(-5)
       .flatMap(t => [{ role: 'user', content: t.question }, { role: 'assistant', content: t.answer }])
     const turn: Turn = { id, question: question.trim(), answer: '', status: '', running: true, intent: '', fallbackPlan: false,
-      tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '' }
+      tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '', playbook: '', securities: [] }
     emit({ turns: [...state.turns, turn], selected: id, focusEvidence: '' })
 
     const started = Date.now()
     const clock = setInterval(() => patch(id, t => ({ ...t, seconds: (Date.now() - started) / 1000 })), 500)
     controller = new AbortController()
     try {
-      for await (const event of streamChat(turn.question, history, controller.signal)) patch(id, t => apply(t, event))
+      for await (const event of streamChat(turn.question, history, controller.signal, conversationId)) patch(id, t => apply(t, event))
       patch(id, t => (t.running ? { ...t, running: false, status: 'failed', error: '连接中断，没有收到完整回答' } : t))
     } catch (err) {
       const aborted = err instanceof DOMException && err.name === 'AbortError'
