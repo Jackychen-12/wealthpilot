@@ -1,0 +1,36 @@
+{
+  "_说明": "复制为 connectors.json 后按需修改。凭据不要写在这里：auth_env 填环境变量名，令牌放进 .env。交易 / 资金划转类工具会被强制屏蔽。",
+  "connectors": [
+    {
+      "name": "wealthpilot_self",
+      "label": "WealthPilot 自身（连通性自测）",
+      "kind": "custom",
+      "transport": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "-m", "wealthpilot", "mcp"],
+      "enabled": false,
+      "description": "把本项目自己的 MCP Server 当作外部服务接进来，用于验证连接器链路是否通。"
+    },
+    {
+      "name": "my_broker",
+      "label": "我的券商（只读）",
+      "kind": "broker",
+      "transport": "http",
+      "url": "https://example.com/mcp",
+      "auth_env": "BROKER_MCP_TOKEN",
+      "enabled": false,
+      "allow_tools": [],
+      "description": "券商提供的 MCP 服务：查询持仓、资金、成交记录。下单类工具即使存在也不会暴露给 Agent。"
+    },
+    {
+      "name": "market_data",
+      "label": "行情 / 财务数据服务",
+      "kind": "data",
+      "transport": "http",
+      "url": "https://example.com/mcp",
+      "auth_env": "DATA_MCP_TOKEN",
+      "enabled": false,
+      "description": "付费或自建的行情、财务、研报数据服务。"
+    }
+  ]
+}

@@ -15,6 +15,7 @@ from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.streaming import stream_sync_in_thread
 from wealthpilot.services.agents.tools import execute_tool
+from wealthpilot.services.connectors import call_tool as call_external
 from wealthpilot.services.evidence import ToolSession, record_evidence
 from wealthpilot.settings import get_settings
 
@@ -64,6 +65,8 @@ class BaseAgent:
         self.nav_history = nav_history
         self.profile = profile
         self.runtime = ToolSession()
+        # 外部 MCP 连接器提供的工具：{带前缀的工具名: (连接器, 原始工具名)}
+        self.external: dict = {}
 
     async def run(
         self,
@@ -197,6 +200,9 @@ class BaseAgent:
     async def _run_tool(self, name: str, input_data: dict) -> str:
         if name not in {t["name"] for t in self.tools}:
             raise ValueError(f"该 Agent 无权调用工具：{name}")
+        if name in self.external:
+            connector, tool = self.external[name]
+            return await self.runtime.execute(name, input_data, lambda: call_external(connector, tool, input_data))
         return await self.runtime.execute(name, input_data, lambda: execute_tool(
             name, input_data, self.holdings, self.nav_data, self.nav_history, self.profile
         ))

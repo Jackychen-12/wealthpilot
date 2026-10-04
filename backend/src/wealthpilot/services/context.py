@@ -8,19 +8,21 @@ from sqlmodel import Session
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.assets import fetch_price_history, fetch_prices_by_type
 from wealthpilot.services.deps import user_holdings
-from wealthpilot.services.market_data import fetch_fund_nav
 
 
 async def load_market_context(
     holdings: list[PortfolioHolding], history_days: int = 60
 ) -> tuple[dict[str, float], dict[str, list[dict]]]:
     """并发取各持仓的最新价与净值历史。取不到价格时退回成本价。"""
-    codes = list(dict.fromkeys(h.fund_code for h in holdings))
+    types = {h.fund_code: h.asset_type for h in holdings}
+    codes = list(types)
     prices, histories = await asyncio.gather(
         fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings]),
-        asyncio.gather(*[fetch_fund_nav(c, history_days) for c in codes], return_exceptions=True),
+        # 股票 / ETF 走日线而不是基金净值接口，否则它们会被回撤、相关性等分析悄悄漏掉
+        asyncio.gather(*[fetch_price_history(c, types[c], history_days) for c in codes],
+                       return_exceptions=True),
     )
     nav_data = {h.fund_code: prices.get(h.fund_code, h.cost_price) for h in holdings}
     nav_history = {c: hist for c, hist in zip(codes, histories, strict=True)

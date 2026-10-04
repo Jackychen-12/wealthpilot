@@ -16,6 +16,8 @@ import LookthroughPage from './pages/LookthroughPage'
 import RebalancePage from './pages/RebalancePage'
 import FundPage from './pages/FundPage'
 import BacktestPage from './pages/BacktestPage'
+import StockPage from './pages/StockPage'
+import ConnectorsPage from './pages/ConnectorsPage'
 
 const App: React.FC = () => {
   // 登录状态变化后换 key，让所有页面重新取数
@@ -49,6 +51,8 @@ const App: React.FC = () => {
           <Route path="/rebalance" element={<RebalancePage key={epoch} />} />
           <Route path="/fund" element={<FundPage key={epoch} />} />
           <Route path="/backtest" element={<BacktestPage key={epoch} />} />
+          <Route path="/stock" element={<StockPage key={epoch} />} />
+          <Route path="/connectors" element={<ConnectorsPage key={epoch} />} />
           <Route path="/report" element={<ReportPage key={epoch} />} />
           <Route path="/profile" element={<ProfilePage key={epoch} />} />
           <Route path="*" element={<ResearchPage key={epoch} />} />

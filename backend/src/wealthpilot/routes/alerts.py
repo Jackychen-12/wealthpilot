@@ -5,9 +5,8 @@ from sqlmodel import Session
 
 from wealthpilot.routes.profile import load_profile
 from wealthpilot.services import alerting
-from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.context import load_market_context
 from wealthpilot.services.deps import current_user_id, user_holdings
-from wealthpilot.services.market_data import fetch_fund_nav
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_session
 
@@ -15,18 +14,7 @@ router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
 async def _load_market(holdings) -> tuple[dict, dict]:
-    prices = await fetch_prices_by_type(
-        [(h.fund_code, getattr(h, "asset_type", "fund")) for h in holdings]
-    )
-    nav_data = {h.fund_code: prices.get(h.fund_code, h.cost_price) for h in holdings}
-    nav_history = {}
-    for h in holdings:
-        if (getattr(h, "asset_type", "fund") or "fund") != "fund":
-            continue
-        hist = await fetch_fund_nav(h.fund_code, 60)
-        if hist:
-            nav_history[h.fund_code] = hist
-    return nav_data, nav_history
+    return await load_market_context(holdings)
 
 
 @router.get("")

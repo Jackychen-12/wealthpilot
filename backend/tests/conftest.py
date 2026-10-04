@@ -19,6 +19,8 @@ os.environ["DB_PATH"] = str(_TMP_DIR / "test.db")
 # （花钱、变慢、结果不确定）。环境变量优先级高于 .env，这里统一清空。
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["DEEPSEEK_API_KEY"] = ""
+# 同理，不读开发者本机的外部连接器配置
+os.environ["CONNECTORS_FILE"] = str(_TMP_DIR / "connectors.json")
 
 import pytest  # noqa: E402 — 必须在设置 DB_PATH 之后
 

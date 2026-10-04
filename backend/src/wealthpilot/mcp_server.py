@@ -1,4 +1,4 @@
-"""WealthPilot MCP Server — 19 investment tools for Claude Code / Cursor."""
+"""WealthPilot MCP Server — 24 investment tools for Claude Code / Cursor."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：19 个实时投资分析工具，覆盖基金查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：24 个实时投资分析工具，覆盖基金与 A 股个股查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -219,6 +219,45 @@ async def backtest_rule(
         {"fund_code": fund_code, "triggers": triggers,
          "stop_loss_pct": stop_loss_pct, "days": days}, h, nd, nh, pf,
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# Stock Tools（A 股个股 / ETF，无需持仓）
+# ═══════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def get_stock_quote(code: str) -> str:
+    """Real-time quote for an A-share stock or ETF: price, change, turnover, market cap.
+    个股 / ETF 实时行情：现价、涨跌幅、成交额、换手率、总市值。code 示例: 600519"""
+    return await execute_tool("get_stock_quote", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_stock_kline(code: str, days: int = 60) -> str:
+    """Daily K-line summary (forward-adjusted): period return, high/low, position in range.
+    近 N 个交易日前复权日线摘要：区间涨跌幅、高低点、当前价在区间内的位置。"""
+    return await execute_tool("get_stock_kline", {"code": code, "days": days}, [], {}, None)
+
+
+@mcp.tool()
+async def get_stock_valuation(code: str) -> str:
+    """Valuation: PE(TTM), PB, market cap, and where price sits in its 1-year range.
+    个股估值：PE(TTM)、PB、总市值，以及当前价在近一年价格区间的位置（是价格分位，不是估值分位）。"""
+    return await execute_tool("get_stock_valuation", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_stock_financials(code: str, periods: int = 4) -> str:
+    """Recent earnings reports: revenue, net profit, YoY, ROE, EPS, gross margin.
+    最近几期业绩：营收、归母净利润及同比、ROE、每股收益、毛利率。引用时须转述报告期。"""
+    return await execute_tool("get_stock_financials", {"code": code, "periods": periods}, [], {}, None)
+
+
+@mcp.tool()
+async def get_stock_profile(code: str) -> str:
+    """Company profile: industry, region, market cap.
+    个股所属行业、地域板块与市值。"""
+    return await execute_tool("get_stock_profile", {"code": code}, [], {}, None)
 
 
 def main() -> None:

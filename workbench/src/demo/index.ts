@@ -38,6 +38,7 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
   if (method === 'GET') {
     if (path in data.get) return data.get[path]
     if (path.startsWith('/api/market/fund/')) throw new Error(`在线演示只录了 ${DEMO_FUND} 这一只基金的数据`)
+    if (path.startsWith('/api/market/stock/')) throw new Error('在线演示只录了 600519 这一只股票的数据')
     throw new Error('在线演示没有录这项数据')
   }
 

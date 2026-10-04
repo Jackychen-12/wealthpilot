@@ -21,6 +21,7 @@ import httpx
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.market_data import EM_HEADERS
 from wealthpilot.services.simulation import portfolio_weights
+from wealthpilot.services.stocks import plain_code
 
 _F10_URL = "https://fundf10.eastmoney.com/FundArchivesDatas.aspx"
 
@@ -143,7 +144,20 @@ def aggregate_exposure(
     report_dates: dict[str, str] = {}
     coverage_by_fund: dict[str, float] = {}
 
+    # 直接持有的个股：整只票 100% 暴露在自己身上
+    direct = {h.fund_code for h in holdings if (getattr(h, "asset_type", "fund") or "fund") == "stock"}
+    stock_names = {h.fund_code: h.fund_name for h in holdings}
+
     for code, fw in fund_weights.items():
+        if code in direct:
+            key = plain_code(code)
+            e = exposure.setdefault(
+                key, {"stock_code": key, "stock_name": stock_names.get(code, key),
+                      "exposure_pct": 0.0, "via_funds": []},
+            )
+            e["exposure_pct"] += fw * 100
+            e["direct_pct"] = round(e.get("direct_pct", 0.0) + fw * 100, 3)
+            continue
         data = fund_holdings.get(code)
         if not data or not data.get("stocks"):
             continue
@@ -165,7 +179,8 @@ def aggregate_exposure(
         s["exposure_pct"] = round(s["exposure_pct"], 3)
         s["held_by_funds"] = len(s["via_funds"])
 
-    multi = [s for s in stocks if s["held_by_funds"] > 1]
+    # 重叠 = 同一只票有不止一个来源：多只基金同时重仓，或直接持有的同时基金里也有
+    multi = [s for s in stocks if s["held_by_funds"] + (1 if s.get("direct_pct") else 0) > 1]
 
     return {
         "stocks": stocks,
@@ -173,7 +188,8 @@ def aggregate_exposure(
         "multi_fund_stocks": multi,
         "multi_fund_exposure_pct": round(sum(s["exposure_pct"] for s in multi), 3),
         "covered_fund_count": covered,
-        "total_fund_count": len(fund_weights),
+        "total_fund_count": len(fund_weights) - len(direct),
+        "direct_stock_count": len(direct),
         "report_dates": report_dates,
         "coverage_by_fund": coverage_by_fund,
         "note": (
