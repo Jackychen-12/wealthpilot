@@ -38,6 +38,9 @@ clean:           ## 清理生成文件
 config:          ## 查看当前配置
 	cd backend && uv run python -m wealthpilot config
 
+tui:             ## 终端入口：研究、行情、选股、复盘（远程：make tui SERVER=http://host:8000）
+	cd backend && uv run wealthpilot $(if $(SERVER),--server $(SERVER),)
+
 chat:            ## 终端交互式 AI 对话
 	cd backend && uv run python -m wealthpilot chat
 
