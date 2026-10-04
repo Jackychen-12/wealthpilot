@@ -190,7 +190,8 @@ def _conclusion(answer: str) -> str:
     """取回答里「结论」一节的正文，去掉证据标记和 Markdown 符号，给判断卡用。"""
     match = re.search(r"^#{1,3}[^\n]*结论[^\n]*\n(.*?)(?=^#{1,3} |\Z)", answer, re.DOTALL | re.MULTILINE)
     text = match.group(1) if match else answer
-    text = re.sub(r"\[E-[a-f0-9]+\]|[*`#>|]", "", text)
+    # 去掉证据标记和 Markdown 符号；">" 只在行首是引用符号，句子里的"茅台 > 五粮液"要留着
+    text = re.sub(r"\[E-[a-f0-9]+\]|[*`#|]|^\s*>\s?", "", text, flags=re.MULTILINE)
     text = re.sub(r"\s+", " ", text).strip()
     return re.sub(r" ([，。；：、）])", r"\1", text)[:320]
 

@@ -58,19 +58,26 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
     symbol = market_symbol(code)
     days = max(2, int(days))
     rows: list = []
-    try:
-        if _is_down("tencent"):
-            raise RuntimeError("skip")
-        async with httpx.AsyncClient(timeout=6.0, headers=_HEADERS) as client:
-            resp = await client.get(
-                "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-                # 多取一根，用来算第一天的涨跌幅
-                params={"param": f"{symbol},day,,,{days + 1},qfq"},
-            )
-        node = resp.json()["data"][symbol]
-        rows = node.get("qfqday") or node.get("day") or []
-    except Exception:
-        rows = []
+    # 主源偶尔单次失败：先原地重试一次，再考虑换源
+    for attempt in range(1 if _is_down("tencent") else 2):
+        try:
+            if _is_down("tencent"):
+                break
+            async with httpx.AsyncClient(timeout=6.0, headers=_HEADERS) as client:
+                resp = await client.get(
+                    "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+                    # 多取一根，用来算第一天的涨跌幅
+                    params={"param": f"{symbol},day,,,{days + 1},qfq"},
+                )
+            node = resp.json()["data"][symbol]
+            rows = node.get("qfqday") or node.get("day") or []
+        except Exception:
+            rows = []
+        if rows:
+            _failures.pop("tencent", None)
+            break
+        if attempt == 0:
+            await asyncio.sleep(0.4)
     if not rows:
         # 主行情源对突发请求会临时限流；换东方财富的前复权日线，字段顺序整理成一致的
         _mark_down("tencent")
@@ -101,14 +108,19 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
 
 # 某个行情源刚失败过，就先跳过它几分钟 —— 否则每次请求都要把超时等一遍，页面会慢到像是坏了
 _down_until: dict[str, float] = {}
+_failures: dict[str, int] = {}
 
 
 def _is_down(source: str) -> bool:
     return time.monotonic() < _down_until.get(source, 0)
 
 
-def _mark_down(source: str, seconds: float = 300) -> None:
-    _down_until[source] = time.monotonic() + seconds
+def _mark_down(source: str, seconds: float = 120) -> None:
+    """连续失败两次才跳过它：单次抖动就切换，会让同一张图一会儿前复权一会儿不复权。"""
+    _failures[source] = _failures.get(source, 0) + 1
+    if _failures[source] >= 2:
+        _down_until[source] = time.monotonic() + seconds
+        _failures[source] = 0
 
 
 async def _sina_kline(symbol: str, count: int) -> list[list]:
