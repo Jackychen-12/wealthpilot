@@ -112,7 +112,7 @@ class CriticAgent:
 
         try:
             out = self.client.create(
-                model=self.model, max_tokens=400, system=system,
+                model=self.model, max_tokens=4000, system=system,
                 messages=[{"role": "user", "content": user}],
             )
             match = re.search(r"\{.*\}", out.text.strip(), re.DOTALL)
@@ -135,11 +135,15 @@ class CriticAgent:
         )
 
     # ── 闸门 B：输出是否可信、是否越过画像约束 ─────────────────
-    def review_answer(self, answer: str, results: list[AgentResult]) -> Verdict:
-        """纯代码判定，不消耗 token。"""
+    def review_answer(self, answer: str, results: list[AgentResult], question: str = "") -> Verdict:
+        """纯代码判定，不消耗 token。question 用于识别"用户自己提出的规则参数"。"""
         issues: list[str] = []
 
         grounding = check_numeric_grounding(answer, results)
+        # 用户在问题里自己给出的数字（规则参数、金额）复述出来不算编造
+        asked = {float(m.group()) for m in re.finditer(r"\d+(?:\.\d+)?", question)}
+        if asked and grounding["ungrounded"]:
+            grounding["ungrounded"] = [n for n in grounding["ungrounded"] if abs(float(n)) not in asked]
         # 画像存在时，动作幅度是用户提出的目标而非行情事实；其是否可执行由
         # check_profile_constraint 的结构化结果校验，避免把动作数字误当成行情数字。
         if self.profile is not None and _ACTION_NUMBER_RE.search(answer):
@@ -151,11 +155,13 @@ class CriticAgent:
             nums = "、".join(grounding["ungrounded"][:6])
             issues.append(f"以下数字未出现在工具返回中，可能是编造的：{nums}")
 
-        issues.extend(self._check_profile_constraints(answer))
+        issues.extend(self._check_profile_constraints(answer, question, results))
         available = {e["id"] for r in results for e in r.evidence if e.get("id") and e.get("status", "ok") == "ok"}
+        # 引用一条"没取到数据"的证据来说明缺口是正当的；只有凭空捏造的 ID 才算违规
+        known = {e["id"] for r in results for e in r.evidence if e.get("id")}
         cited = set(re.findall(r"\[(E-[a-f0-9]+)\]", answer))
-        if cited - available:
-            issues.append("回答引用了不存在或不可用的证据")
+        if cited - known:
+            issues.append("回答引用了不存在的证据 ID：" + "、".join(sorted(cited - known)))
         if available and not cited:
             issues.append("回答必须引用具体证据 ID")
 
@@ -166,11 +172,21 @@ class CriticAgent:
             grounding_rate=grounding["rate"],
         )
 
-    def _check_profile_constraints(self, answer: str) -> list[str]:
+    def _check_profile_constraints(
+        self, answer: str, question: str = "", results: list[AgentResult] | None = None
+    ) -> list[str]:
         issues: list[str] = []
 
         if self.profile is None:
-            hits = _ACTION_NUMBER_RE.findall(answer)
+            # 复述用户自己提出的规则参数、或转述回测工具算出的结果，不是在给仓位建议
+            described = {m.group() for m in re.finditer(r"\d+(?:\.\d+)?", question)}
+            for r in results or []:
+                for e in r.evidence:
+                    if e.get("tool") == "backtest_rule" and e.get("status", "ok") == "ok":
+                        described |= {str(abs(float(m.group()))).rstrip("0").rstrip(".") for m in
+                                      re.finditer(r"\d+(?:\.\d+)?", f"{e.get('input')} {e['output']}")}
+            hits = [h for h in _ACTION_NUMBER_RE.findall(answer)
+                    if h[1] not in described and h[1].rstrip("0").rstrip(".") not in described]
             if hits:
                 sample = "、".join(f"{a}{n}{u}" for a, n, u in hits[:3])
                 issues.append(

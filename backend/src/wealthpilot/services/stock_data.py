@@ -39,7 +39,7 @@ async def fetch_crypto_price(symbol: str = "bitcoin") -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
-                f"https://api.coingecko.com/api/v3/simple/price",
+                "https://api.coingecko.com/api/v3/simple/price",
                 params={"ids": symbol, "vs_currencies": "usd,cny", "include_24hr_change": "true"},
             )
             data = resp.json()

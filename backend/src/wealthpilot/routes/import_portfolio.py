@@ -9,8 +9,8 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlmodel import Session
 
-from wealthpilot.services.deps import current_user_id
 from wealthpilot.models.portfolio import PortfolioHolding
+from wealthpilot.services.deps import current_user_id
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_session
 
@@ -50,7 +50,7 @@ async def import_csv(
             ws = wb.active
             headers = [str(cell.value or "").strip() for cell in next(ws.iter_rows(max_row=1))]
             for row in ws.iter_rows(min_row=2, values_only=True):
-                rows.append(dict(zip(headers, [str(v or "") for v in row])))
+                rows.append(dict(zip(headers, [str(v or "") for v in row], strict=False)))
         except Exception as e:
             raise HTTPException(400, f"Excel 解析失败: {e}") from e
     else:

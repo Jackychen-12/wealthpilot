@@ -115,3 +115,4 @@ class TestInsufficientDataPaths:
         assert body.get("excess_return_pct") is None
         assert body.get("benchmark_status") == "insufficient_data"
         assert "数据不足" in body["description"]
+

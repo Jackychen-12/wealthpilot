@@ -1,0 +1,202 @@
+@import "tailwindcss";
+
+/*
+ * Notion 风格设计系统（依据 DESIGN.md）。
+ * 白色画布 + 暖灰侧栏与表面 + 细线边框；紫色只用于主操作，蓝色只用于链接；
+ * 按钮 8px 圆角（不用胶囊），卡片 12px；平面卡片不加重阴影；标签用柔和的色块。
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, "Segoe UI", Helvetica, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-hover: var(--hover);
+  --color-hairline: var(--hairline);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ink: var(--ink);
+  --color-charcoal: var(--charcoal);
+  --color-slate: var(--slate);
+  --color-steel: var(--steel);
+  --color-stone: var(--stone);
+  --color-primary: var(--primary);
+  --color-primary-pressed: var(--primary-pressed);
+  --color-link: var(--link);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-warning: var(--warning);
+
+  --color-tint-peach: var(--tint-peach);
+  --color-tint-rose: var(--tint-rose);
+  --color-tint-mint: var(--tint-mint);
+  --color-tint-lavender: var(--tint-lavender);
+  --color-tint-sky: var(--tint-sky);
+  --color-tint-yellow: var(--tint-yellow);
+  --color-tint-gray: var(--tint-gray);
+  --color-on-peach: var(--on-peach);
+  --color-on-rose: var(--on-rose);
+  --color-on-mint: var(--on-mint);
+  --color-on-lavender: var(--on-lavender);
+  --color-on-sky: var(--on-sky);
+  --color-on-yellow: var(--on-yellow);
+  --color-on-gray: var(--on-gray);
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-subtle: rgba(15, 15, 15, 0.04) 0px 1px 2px 0px;
+  --shadow-card: rgba(15, 15, 15, 0.08) 0px 4px 12px 0px;
+  --shadow-modal: rgba(15, 15, 15, 0.16) 0px 16px 48px -8px;
+}
+
+:root {
+  --canvas: #ffffff;
+  --surface: #f6f5f4;
+  --surface-soft: #fafaf9;
+  --hover: #efeeec;
+  --hairline: #e5e3df;
+  --hairline-soft: #ede9e4;
+  --hairline-strong: #c8c4be;
+  --ink: #1a1a1a;
+  --charcoal: #37352f;
+  --slate: #5d5b54;
+  --steel: #787671;
+  --stone: #a4a097;
+  --primary: #5645d4;
+  --primary-pressed: #4534b3;
+  --link: #0075de;
+  /* A 股习惯：红涨绿跌 */
+  --up: #e03131;
+  --down: #12893a;
+  --warning: #dd5b00;
+
+  --tint-peach: #ffe8d4;
+  --tint-rose: #fde0ec;
+  --tint-mint: #d9f3e1;
+  --tint-lavender: #e6e0f5;
+  --tint-sky: #dcecfa;
+  --tint-yellow: #fef7d6;
+  --tint-gray: #f0eeec;
+  --on-peach: #793400;
+  --on-rose: #a02e6d;
+  --on-mint: #0f6b2a;
+  --on-lavender: #391c57;
+  --on-sky: #0b4f8a;
+  --on-yellow: #6b5300;
+  --on-gray: #5d5b54;
+  color-scheme: light;
+}
+
+.dark {
+  --canvas: #191919;
+  --surface: #202020;
+  --surface-soft: #1e1e1e;
+  --hover: #2c2c2c;
+  --hairline: #2f2f2f;
+  --hairline-soft: #282828;
+  --hairline-strong: #474747;
+  --ink: #ececea;
+  --charcoal: #d6d4cf;
+  --slate: #b0aea8;
+  --steel: #9b9a97;
+  --stone: #6f6e69;
+  --primary: #8b7cf0;
+  --primary-pressed: #7667e0;
+  --link: #5aa9f2;
+  --up: #ff6b6b;
+  --down: #4cc978;
+  --warning: #f08a3c;
+
+  --tint-peach: #4a2f1a;
+  --tint-rose: #4a2238;
+  --tint-mint: #1e3b29;
+  --tint-lavender: #33294f;
+  --tint-sky: #1c3348;
+  --tint-yellow: #413a17;
+  --tint-gray: #2c2c2c;
+  --on-peach: #ffc79a;
+  --on-rose: #ffb0d6;
+  --on-mint: #9be3b3;
+  --on-lavender: #d6c8ff;
+  --on-sky: #a9d4fb;
+  --on-yellow: #f5df8a;
+  --on-gray: #b0aea8;
+  color-scheme: dark;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  ::selection { background: color-mix(in srgb, var(--primary) 22%, transparent); }
+}
+
+@layer components {
+  /* 小节标签：11px 大写字距，Notion 的 micro-uppercase */
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--steel);
+  }
+
+  /* 数据表：细线分行，无斑马纹，像 Notion 的数据库视图 */
+  .db-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .db-table th {
+    text-align: left;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--steel);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--hairline);
+    white-space: nowrap;
+  }
+  .db-table td { padding: 10px 12px; border-bottom: 1px solid var(--hairline-soft); vertical-align: middle; }
+  .db-table tbody tr:last-child td { border-bottom: 0; }
+  .db-table tbody tr:hover td { background: var(--surface-soft); }
+  .db-table .r { text-align: right; }
+
+  /* 回答正文 */
+  .prose-answer { color: var(--charcoal); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+  .prose-answer > :first-child { margin-top: 0; }
+  .prose-answer > :last-child { margin-bottom: 0; }
+  .prose-answer p { margin: 0 0 10px; }
+  .prose-answer h1, .prose-answer h2 { font-size: 18px; font-weight: 600; color: var(--ink); margin: 22px 0 8px; letter-spacing: -0.01em; }
+  .prose-answer h3, .prose-answer h4 { font-size: 15px; font-weight: 600; color: var(--ink); margin: 16px 0 6px; }
+  .prose-answer strong { color: var(--ink); font-weight: 600; }
+  .prose-answer ul, .prose-answer ol { margin: 0 0 10px; padding-left: 22px; }
+  .prose-answer ul { list-style: disc; }
+  .prose-answer ol { list-style: decimal; }
+  .prose-answer li { margin: 3px 0; }
+  .prose-answer a { color: var(--link); }
+  .prose-answer a:hover { text-decoration: underline; }
+  .prose-answer hr { border: 0; border-top: 1px solid var(--hairline); margin: 18px 0; }
+  .prose-answer blockquote { margin: 0 0 10px; padding: 2px 0 2px 14px; border-left: 3px solid var(--ink); color: var(--slate); }
+  .prose-answer code { font-family: var(--font-mono); font-size: 13px; background: var(--surface); color: #c4314b; border-radius: 4px; padding: 1px 5px; }
+  .dark .prose-answer code { color: #ff8fa3; }
+  .prose-answer table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 0 0 12px; }
+  .prose-answer th { text-align: left; font-weight: 500; font-size: 12px; color: var(--steel); background: var(--surface-soft); }
+  .prose-answer th, .prose-answer td { padding: 7px 12px; border: 1px solid var(--hairline); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

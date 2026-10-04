@@ -1,5 +1,6 @@
 """Agent 工具定义 + 统一执行器。"""
 
+import asyncio
 import json
 
 from wealthpilot.models.portfolio import PortfolioHolding
@@ -20,18 +21,18 @@ from wealthpilot.services.lookthrough import (
     overlap_between,
     summarize_overlap,
 )
+from wealthpilot.services.market_data import (
+    fetch_fund_info,
+    fetch_fund_nav,
+    fetch_market_news,
+    get_comprehensive_fund_info,
+)
 from wealthpilot.services.simulation import (
     check_constraints,
     concentration_metrics,
     max_position_within_drawdown,
     portfolio_weights,
     simulate_change,
-)
-from wealthpilot.services.market_data import (
-    fetch_fund_info,
-    fetch_fund_nav,
-    fetch_market_news,
-    get_comprehensive_fund_info,
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -55,12 +56,12 @@ MARKET_TOOLS = [
     },
     {
         "name": "get_nav_history",
-        "description": "查询某只基金近 N 天的净值历史数据（日期、净值、日涨跌幅）。用于分析走势和计算收益。",
+        "description": "查询某只基金近 N 个交易日的净值历史数据（日期、净值、日涨跌幅）。用于分析走势和计算收益。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "fund_code": {"type": "string", "description": "基金代码"},
-                "days": {"type": "integer", "description": "查询天数，默认30", "default": 30},
+                "days": {"type": "integer", "description": "交易日数，默认30", "default": 30},
             },
             "required": ["fund_code"],
         },
@@ -123,12 +124,12 @@ PORTFOLIO_TOOLS = [
 RISK_TOOLS = [
     {
         "name": "calculate_return",
-        "description": "计算某只基金在指定天数内的累计收益率。用于回答'近1周/1月/3月表现如何'。",
+        "description": "计算某只基金在最近 N 个交易日内的累计收益率。用于回答'近1周/1月/3月表现如何'。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "fund_code": {"type": "string", "description": "基金代码"},
-                "days": {"type": "integer", "description": "计算区间天数（7=近1周, 30=近1月, 90=近3月）"},
+                "days": {"type": "integer", "description": "区间交易日数（5≈近1周, 21≈近1月, 63≈近3月）"},
             },
             "required": ["fund_code", "days"],
         },
@@ -318,7 +319,7 @@ QUANT_TOOLS = [
                     },
                 },
                 "stop_loss_pct": {"type": "number", "description": "可选。相对持仓成本跌破该比例则清仓"},
-                "days": {"type": "integer", "description": "回测使用的历史天数，默认 250"},
+                "days": {"type": "integer", "description": "回测使用的历史交易日数，默认 250"},
             },
             "required": ["fund_code", "triggers"],
         },
@@ -339,16 +340,18 @@ async def execute_tool(
     if name == "lookthrough_portfolio":
         if not holdings:
             return "当前没有持仓，无法穿透。"
-        fund_holdings = {}
-        for h in holdings:
-            fund_holdings[h.fund_code] = await fetch_fund_holdings(h.fund_code)
+        codes = list(dict.fromkeys(h.fund_code for h in holdings))
+        fetched = await asyncio.gather(*[fetch_fund_holdings(c) for c in codes])
+        fund_holdings = dict(zip(codes, fetched, strict=True))
         result = aggregate_exposure(holdings, nav_data, fund_holdings)
         result["summary"] = summarize_overlap(result)
         return json.dumps(result, ensure_ascii=False)
 
     if name == "compute_stock_overlap":
-        a = await fetch_fund_holdings(input_data["fund_code_a"])
-        b = await fetch_fund_holdings(input_data["fund_code_b"])
+        a, b = await asyncio.gather(
+            fetch_fund_holdings(input_data["fund_code_a"]),
+            fetch_fund_holdings(input_data["fund_code_b"]),
+        )
         if not a["stocks"] or not b["stocks"]:
             missing = [c for c, d in ((a["fund_code"], a), (b["fund_code"], b)) if not d["stocks"]]
             return f"未取到以下基金的季报持仓：{'、'.join(missing)}（可能是新基金或非股票型）"
@@ -463,7 +466,7 @@ async def execute_tool(
             last_nav = nav_list[0]["nav"]
             ret = (last_nav - first_nav) / first_nav * 100
             return (
-                f"基金 {input_data['fund_code']} 近 {input_data['days']} 天收益率: {ret:+.2f}%\n"
+                f"基金 {input_data['fund_code']} 近 {len(nav_list)} 个交易日收益率: {ret:+.2f}%\n"
                 f"起始净值: {first_nav}（{nav_list[-1]['nav_date']}）\n"
                 f"最新净值: {last_nav}（{nav_list[0]['nav_date']}）"
             )
@@ -472,8 +475,8 @@ async def execute_tool(
     if name == "compare_funds":
         codes = input_data["fund_codes"][:5]
         results = []
-        for code in codes:
-            info = await fetch_fund_info(code)
+        infos = await asyncio.gather(*[fetch_fund_info(c) for c in codes])
+        for code, info in zip(codes, infos, strict=True):
             if info:
                 results.append(f"  {info['name']}（{code}）: 净值{info['nav']}, 估值涨跌{info.get('estimated_change', 'N/A')}%")
             else:

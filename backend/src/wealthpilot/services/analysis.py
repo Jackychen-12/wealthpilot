@@ -1,7 +1,6 @@
 """分析引擎 — 高级版：Sharpe/最大回撤/相关性/风格漂移/归因。"""
 
 import math
-from collections import defaultdict
 
 from wealthpilot.models.portfolio import PortfolioHolding
 
@@ -319,10 +318,7 @@ def calculate_health(
 
     # 5. 风险收益比（简化 Sharpe）
     sharpe = _calculate_sharpe(holdings, nav_history)
-    if sharpe is not None:
-        risk_reward_score = min(100, max(0, 50 + sharpe * 20))
-    else:
-        risk_reward_score = 50
+    risk_reward_score = min(100, max(0, 50 + sharpe * 20)) if sharpe is not None else 50
 
     def severity(score: float) -> str:
         if score >= 70:
@@ -391,7 +387,7 @@ def _pearson(x: list[float], y: list[float]) -> float:
         return 0
     mx = sum(x) / n
     my = sum(y) / n
-    cov = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+    cov = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y, strict=False))
     sx = math.sqrt(sum((xi - mx) ** 2 for xi in x))
     sy = math.sqrt(sum((yi - my) ** 2 for yi in y))
     if sx == 0 or sy == 0:

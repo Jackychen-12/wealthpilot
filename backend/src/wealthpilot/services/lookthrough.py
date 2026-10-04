@@ -178,7 +178,7 @@ def aggregate_exposure(
         "coverage_by_fund": coverage_by_fund,
         "note": (
             "季报仅披露前十大重仓股且滞后 1-3 个月，以上为部分持仓的旧快照，"
-            "不代表当前真实暴露。coverage_by_fund 表示各基金前十大合计占其净值的比例。"
+            "不代表当前真实暴露。覆盖度（coverage_by_fund）指各基金前十大重仓合计占其净值的比例。"
         ),
     }
 

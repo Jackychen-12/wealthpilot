@@ -2,9 +2,9 @@
 
 import json
 
+from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.planner_agent import Plan, PlannerAgent, Task
 from wealthpilot.services.agents.synthesizer_agent import check_numeric_grounding
-from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.tools import MARKET_TOOLS, PORTFOLIO_TOOLS, RISK_TOOLS
 
 

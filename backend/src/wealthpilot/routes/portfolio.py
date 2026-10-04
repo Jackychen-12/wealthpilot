@@ -3,12 +3,12 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import PortfolioCreate, PortfolioResponse, PortfolioUpdate
+from wealthpilot.services.assets import fetch_prices_by_type
 from wealthpilot.services.deps import current_user_id, owned_holding, user_holdings
-from wealthpilot.services.assets import fetch_asset_price, fetch_prices_by_type
 from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])

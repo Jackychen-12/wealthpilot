@@ -87,10 +87,11 @@ def _convert_messages_to_openai(messages: list[dict]) -> list[dict]:
                         converted.append({
                             "role": "tool",
                             "tool_call_id": block["tool_use_id"],
-                            "content": block.get("content", ""),
+                            "content": str(block.get("content", "")),
                         })
             else:
-                converted.append({"role": "user", "content": str(content)})
+                converted.append({"role": "user", "content": "\n".join(
+                    b.get("text", "") if isinstance(b, dict) else str(b) for b in content)})
 
     return converted
 
@@ -98,9 +99,14 @@ def _convert_messages_to_openai(messages: list[dict]) -> list[dict]:
 def _extract_system_text(system) -> str:
     if isinstance(system, str):
         return system
-    if isinstance(system, list) and system:
-        return system[0].get("text", "")
+    if isinstance(system, list):
+        return "\n\n".join(b.get("text", "") for b in system if isinstance(b, dict))
     return ""
+
+
+# 调用方需要区分的停止原因；其余一律视作正常结束
+_STOP_REASONS = ("tool_use", "max_tokens", "refusal")
+_OPENAI_FINISH = {"tool_calls": "tool_use", "length": "max_tokens", "content_filter": "refusal"}
 
 
 def _anthropic_response_to_result(response) -> CompletionResult:
@@ -120,8 +126,11 @@ def _anthropic_response_to_result(response) -> CompletionResult:
                 "name": block.name,
                 "input": block.input,
             })
+        elif block.type in ("thinking", "redacted_thinking"):
+            # 开启思考的模型在工具轮次回放 assistant 消息时，思考块必须原样带回
+            raw_content.append(block.model_dump(exclude_none=True))
 
-    stop_reason = "tool_use" if response.stop_reason == "tool_use" else "end_turn"
+    stop_reason = response.stop_reason if response.stop_reason in _STOP_REASONS else "end_turn"
     return CompletionResult(
         text=text, stop_reason=stop_reason,
         tool_calls=tool_calls, raw_content=raw_content,
@@ -155,31 +164,30 @@ class AnthropicStreamContext:
 
 
 class AnthropicAIClient:
-    def __init__(self, api_key: str):
-        self._client = Anthropic(api_key=api_key)
+    def __init__(self, api_key: str, timeout: float | None = None):
+        self._client = Anthropic(api_key=api_key, **({"timeout": timeout} if timeout else {}))
 
-    def create(self, *, model: str, max_tokens: int, system, messages: list[dict],
-               tools: list[dict] | None = None) -> CompletionResult:
+    @staticmethod
+    def _kwargs(model, max_tokens, system, messages, tools, tool_choice) -> dict:
         kwargs: dict = dict(model=model, max_tokens=max_tokens, messages=messages)
-        if isinstance(system, list):
-            kwargs["system"] = system
-        elif system:
+        if system:
             kwargs["system"] = system
         if tools:
             kwargs["tools"] = tools
-        response = self._client.messages.create(**kwargs)
+            if tool_choice:
+                kwargs["tool_choice"] = {"type": tool_choice}
+        return kwargs
+
+    def create(self, *, model: str, max_tokens: int, system, messages: list[dict],
+               tools: list[dict] | None = None, tool_choice: str | None = None) -> CompletionResult:
+        response = self._client.messages.create(
+            **self._kwargs(model, max_tokens, system, messages, tools, tool_choice))
         return _anthropic_response_to_result(response)
 
     def stream(self, *, model: str, max_tokens: int, system, messages: list[dict],
-               tools: list[dict] | None = None) -> AnthropicStreamContext:
-        kwargs: dict = dict(model=model, max_tokens=max_tokens, messages=messages)
-        if isinstance(system, list):
-            kwargs["system"] = system
-        elif system:
-            kwargs["system"] = system
-        if tools:
-            kwargs["tools"] = tools
-        return AnthropicStreamContext(self._client, **kwargs)
+               tools: list[dict] | None = None, tool_choice: str | None = None) -> AnthropicStreamContext:
+        return AnthropicStreamContext(
+            self._client, **self._kwargs(model, max_tokens, system, messages, tools, tool_choice))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -198,6 +206,7 @@ class DeepSeekStreamContext:
     def __enter__(self):
         system = self._kwargs.pop("system", None)
         tools = self._kwargs.pop("tools", None)
+        tool_choice = self._kwargs.pop("tool_choice", None)
         messages = list(self._kwargs.pop("messages", []))
 
         sys_text = _extract_system_text(system)
@@ -208,6 +217,8 @@ class DeepSeekStreamContext:
         call_kwargs = dict(self._kwargs, messages=messages, stream=True)
         if tools:
             call_kwargs["tools"] = _convert_tools_to_openai(tools)
+            if tool_choice:
+                call_kwargs["tool_choice"] = tool_choice
         self._stream = self._client.chat.completions.create(**call_kwargs)
         return self
 
@@ -265,7 +276,7 @@ class DeepSeekStreamContext:
                 "input": tc.input,
             })
 
-        stop_reason = "tool_use" if self._finish_reason == "tool_calls" else "end_turn"
+        stop_reason = _OPENAI_FINISH.get(self._finish_reason or "", "end_turn")
         return CompletionResult(
             text=self._accumulated_text,
             stop_reason=stop_reason,
@@ -274,31 +285,40 @@ class DeepSeekStreamContext:
         )
 
 
+# deepseek-chat 的输出上限；超过会直接 400，而 AGENT_MAX_TOKENS 的默认值是按 Claude 定的
+_DEEPSEEK_MAX_OUTPUT = 8192
+
+
 class DeepSeekAIClient:
-    def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com"):
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+    def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com",
+                 timeout: float | None = None):
+        self._client = OpenAI(api_key=api_key, base_url=base_url,
+                              **({"timeout": timeout} if timeout else {}))
 
     def create(self, *, model: str, max_tokens: int, system, messages: list[dict],
-               tools: list[dict] | None = None) -> CompletionResult:
+               tools: list[dict] | None = None, tool_choice: str | None = None) -> CompletionResult:
         oai_messages = list(messages)
         sys_text = _extract_system_text(system)
         if sys_text:
             oai_messages = [{"role": "system", "content": sys_text}] + oai_messages
         oai_messages = _convert_messages_to_openai(oai_messages)
 
-        kwargs: dict = dict(model=model, max_tokens=max_tokens, messages=oai_messages)
+        kwargs: dict = dict(model=model, max_tokens=min(max_tokens, _DEEPSEEK_MAX_OUTPUT),
+                            messages=oai_messages)
         if tools:
             kwargs["tools"] = _convert_tools_to_openai(tools)
+            if tool_choice:
+                kwargs["tool_choice"] = tool_choice
 
         response = self._client.chat.completions.create(**kwargs)
         return self._to_result(response)
 
     def stream(self, *, model: str, max_tokens: int, system, messages: list[dict],
-               tools: list[dict] | None = None) -> DeepSeekStreamContext:
+               tools: list[dict] | None = None, tool_choice: str | None = None) -> DeepSeekStreamContext:
         return DeepSeekStreamContext(
             self._client,
-            model=model, max_tokens=max_tokens,
-            system=system, messages=messages, tools=tools,
+            model=model, max_tokens=min(max_tokens, _DEEPSEEK_MAX_OUTPUT),
+            system=system, messages=messages, tools=tools, tool_choice=tool_choice,
         )
 
     @staticmethod
@@ -326,7 +346,7 @@ class DeepSeekAIClient:
                     "input": parsed,
                 })
 
-        stop_reason = "tool_use" if choice.finish_reason == "tool_calls" else "end_turn"
+        stop_reason = _OPENAI_FINISH.get(choice.finish_reason or "", "end_turn")
         return CompletionResult(
             text=text, stop_reason=stop_reason,
             tool_calls=tool_calls, raw_content=raw_content,
@@ -340,12 +360,17 @@ class DeepSeekAIClient:
 AIClient = AnthropicAIClient | DeepSeekAIClient
 
 
+# .env.example 里的占位值 —— 原样留着等于没配，早点报清楚比让每个 Agent 各吃一次 401 强
+_PLACEHOLDER_KEYS = ("", "sk-ant-xxx", "sk-xxx")
+
+
 def create_ai_client(settings) -> AIClient:
+    timeout = getattr(settings, "ai_timeout_seconds", None)
     if settings.ai_provider == "deepseek":
-        if not settings.deepseek_api_key:
+        if settings.deepseek_api_key.strip() in _PLACEHOLDER_KEYS:
             raise ValueError("未配置 DEEPSEEK_API_KEY，请在 backend/.env 中设置")
-        return DeepSeekAIClient(settings.deepseek_api_key, settings.deepseek_base_url)
+        return DeepSeekAIClient(settings.deepseek_api_key, settings.deepseek_base_url, timeout)
     else:
-        if not settings.anthropic_api_key:
+        if settings.anthropic_api_key.strip() in _PLACEHOLDER_KEYS:
             raise ValueError("未配置 ANTHROPIC_API_KEY，请在 backend/.env 中设置")
-        return AnthropicAIClient(settings.anthropic_api_key)
+        return AnthropicAIClient(settings.anthropic_api_key, timeout)

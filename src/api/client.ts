@@ -95,9 +95,17 @@ export interface SSEEvent {
   reason?: string
   gate?: string
   passed?: boolean
-  meta?: { status?: string; evidence?: unknown[]; grounding_rate?: number }
-  evidence?: { id?: string; tool?: string; status?: string }
+  meta?: { status?: string; evidence?: unknown[]; grounding_rate?: number; missing_evidence?: string[] }
+  evidence?: { id?: string; tool?: string; status?: string; input?: unknown; output?: unknown }
   tasks?: { id: string; agent: string; goal: string; label?: string }[]
+  id?: string
+  goal?: string
+  status?: string
+  intent?: string
+  source?: string
+  success_criteria?: string[]
+  issues?: string[]
+  attempt?: number
 }
 
 export async function* fetchSSE(path: string, body: unknown): AsyncGenerator<SSEEvent> {

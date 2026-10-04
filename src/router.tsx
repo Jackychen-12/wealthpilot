@@ -38,8 +38,8 @@ export const ROUTE_META: Record<string, { icon: string; iconBg: string; title: s
     title: 'WealthPilot',
     subtitle: 'AI-Powered Investment Advisory Agent\n多智能体 Agent · 支持 Claude & DeepSeek',
     points: [
-      '🤖 多智能体 AI — Router + 市场/持仓/风险 3 大专业 Agent',
-      '🔧 12 个工具 — 基金查询、净值分析、回撤计算、相关性评估...',
+      '🤖 多智能体 AI — Planner 拆任务，市场/持仓/风险/量化 4 个 Agent 并行取证',
+      '🔧 19 个工具 — 行情、归因、回撤、持仓穿透、规则回测...',
       '🌐 多模型支持 — Claude & DeepSeek，.env 一行切换',
       '📋 自动化周报 — LLM 生成结构化复盘报告',
     ],
@@ -65,8 +65,8 @@ export const ROUTE_META: Record<string, { icon: string; iconBg: string; title: s
     icon: '🤖',
     iconBg: 'rgba(124,58,237,0.15)',
     title: '多智能体 AI 对话',
-    subtitle: 'Router 智能分流 → 3 个专业 Agent',
-    points: ['🧠 Router Agent', '📊 市场 Agent', '💼 持仓 Agent', '🛡️ 风险 Agent'],
+    subtitle: '规划 → 并行取证 → 校验 → 发布，全程可见',
+    points: ['🧭 Planner 拆解任务', '📊 市场 · 💼 持仓 · 🛡️ 风险 · 🔬 量化 并行取证', '🧐 Critic 双闸门：证据审核 + 回答校验', '🔎 点回答里的标签查看每个数字的出处'],
     tech: ['Multi-Agent', 'tool_use', 'SSE Streaming'],
   },
 }

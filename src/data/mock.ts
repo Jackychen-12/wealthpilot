@@ -236,8 +236,8 @@ export const aiResponses: Record<string, { text: string; followUps: string[]; ag
 }
 
 export const defaultResponse: { text: string; followUps: string[]; agent?: string; tools?: string[] } = {
-  text: '感谢您的提问。WealthPilot 多智能体系统已为您分析。目前我配备了 12 个实时工具，覆盖市场查询、持仓分析和风险评估三大领域。您可以尝试：\n\n1. 查看市场动态（如"最新财经新闻"）\n2. 分析持仓表现（如"我的收益归因"）\n3. 评估风险状况（如"分析回撤风险"）\n\n我会智能路由到最合适的专业 Agent 为您服务。',
+  text: '感谢您的提问。WealthPilot 多智能体系统已为您分析。目前我配备了 19 个实时工具，覆盖市场查询、持仓分析、风险评估和量化验证。您可以尝试：\n\n1. 查看市场动态（如"最新财经新闻"）\n2. 分析持仓表现（如"我的收益归因"）\n3. 评估风险状况（如"分析回撤风险"）\n\n我会把问题拆成任务，交给最合适的专业 Agent 取证。',
   followUps: ['📊 查看市场动态', '💼 分析持仓结构', '🛡️ 评估持仓风险'],
-  agent: '🤖 Router — 智能路由',
+  agent: '🧭 Planner — 任务规划',
   tools: ['classify_intent'],
 }

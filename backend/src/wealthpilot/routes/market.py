@@ -1,10 +1,11 @@
 """行情数据路由 — 多源聚合。"""
 
+import asyncio
+
 from fastapi import APIRouter
 
 from wealthpilot.models.schemas import IndexInfo, NewsItem
 from wealthpilot.services.market_data import (
-    fetch_fund_info,
     fetch_fund_nav,
     fetch_indices,
     fetch_market_news,
@@ -47,7 +48,7 @@ async def get_fund_nav_endpoint(fund_code: str, days: int = 30):
 @router.get("/fund/{fund_code}/rank")
 async def get_fund_rank(fund_code: str):
     """基金排名信息（近1周/1月/3月/1年收益率）。"""
-    rank = get_fund_rank_akshare(fund_code)
+    rank = await asyncio.to_thread(get_fund_rank_akshare, fund_code)
     if not rank:
         return {"error": f"基金 {fund_code} 排名数据获取失败"}
     return rank
@@ -56,7 +57,7 @@ async def get_fund_rank(fund_code: str):
 @router.get("/macro")
 async def get_macro():
     """宏观经济指标（PMI/CPI 等）。"""
-    return get_macro_data_akshare()
+    return await asyncio.to_thread(get_macro_data_akshare)
 
 
 @router.get("/stock/{code}")

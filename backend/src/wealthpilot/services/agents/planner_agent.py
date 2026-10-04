@@ -80,14 +80,17 @@ class PlannerAgent:
         self.model = model
         self.profile = profile
 
-    def plan(self, message: str) -> Plan:
+    def plan(self, message: str, context: str = "") -> Plan:
+        """context 是此前几轮对话，只喂给 LLM；关键词兜底只看当前问题，免得被历史带偏。"""
         max_tasks = get_settings().planner_max_tasks
+        prompt = f"此前对话：\n{context}\n\n当前问题：{message}" if context else message
         try:
             result = self.client.create(
                 model=self.model,
-                max_tokens=600,
+                # 默认开启思考的模型，思考 token 也计入 max_tokens，给太少 JSON 会被截断
+                max_tokens=4000,
                 system=build_planner_prompt(self.profile),
-                messages=[{"role": "user", "content": message}],
+                messages=[{"role": "user", "content": prompt}],
             )
             parsed = self._parse(result.text, max_tasks)
             if parsed:

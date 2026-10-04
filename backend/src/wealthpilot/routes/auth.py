@@ -1,6 +1,6 @@
 """认证路由 — 注册/登录/获取当前用户。"""
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 

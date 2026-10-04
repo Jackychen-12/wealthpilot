@@ -1,0 +1,108 @@
+/**
+ * 研究会话的状态放在模块级 store 里，而不是页面组件里 ——
+ * 切到别的页面再回来，对话和正在跑的研究都还在。
+ */
+import { useSyncExternalStore } from 'react'
+import { streamChat, type StreamEvent } from '../api'
+
+export interface Evidence { id: string; tool: string; agent: string; taskId: string; ok: boolean; input: string; output: string; asOf: string; source: string }
+export interface Task { id: string; agent: string; goal: string; state: 'pending' | 'running' | 'done' | 'failed' }
+export interface Check { tone: 'ok' | 'bad' | 'warn' | 'info'; text: string }
+export interface Turn {
+  id: number; question: string; answer: string; status: string; running: boolean
+  intent: string; fallbackPlan: boolean; tasks: Task[]; criteria: string[]; evidence: Evidence[]; checks: Check[]
+  missing: string[]; followUps: string[]; seconds: number; error: string
+}
+
+interface State { turns: Turn[]; selected: number | null; focusEvidence: string }
+
+let state: State = { turns: [], selected: null, focusEvidence: '' }
+const listeners = new Set<() => void>()
+let controller: AbortController | null = null
+let nextId = 1
+
+const emit = (next: State) => { state = next; listeners.forEach(l => l()) }
+const patch = (id: number, fn: (t: Turn) => Turn) => emit({ ...state, turns: state.turns.map(t => (t.id === id ? fn(t) : t)) })
+const clip = (v: unknown, max: number) => {
+  const s = typeof v === 'string' ? v : JSON.stringify(v, null, 1)
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
+function apply(turn: Turn, e: StreamEvent): Turn {
+  const setTask = (state: Task['state']): Task[] =>
+    turn.tasks.some(t => t.id === e.id)
+      ? turn.tasks.map(t => (t.id === e.id ? { ...t, state } : t))
+      : [...turn.tasks, { id: e.id || String(turn.tasks.length), agent: e.agent || '', goal: e.goal || '', state }]
+  switch (e.type) {
+    case 'plan':
+      return { ...turn, intent: e.intent || '', fallbackPlan: e.source === 'fallback', criteria: e.success_criteria || [],
+        tasks: (e.tasks || []).map(t => ({ ...t, state: 'pending' as const })) }
+    case 'task_start': return { ...turn, tasks: setTask('running') }
+    case 'task_done': return { ...turn, tasks: setTask(e.status === 'completed' ? 'done' : 'failed') }
+    case 'evidence': {
+      const v = e.evidence
+      if (!v) return turn
+      const asOf = Object.values(v.provenance?.as_of || {}).filter(Boolean).sort().pop() || ''
+      // 同一个 Agent 可能先后跑两个任务（补查），证据归到当时正在跑的那个
+      const owner = [...turn.tasks].reverse().find(t => t.agent === e.agent && t.state === 'running')
+      return { ...turn, evidence: [...turn.evidence, {
+        id: v.id, tool: v.tool, agent: e.agent || '', taskId: owner?.id || '', ok: v.status === 'ok',
+        input: clip(v.input ?? {}, 300), output: clip(v.output ?? '', 4000),
+        asOf: asOf as string, source: v.provenance?.sources?.[0]?.url || '',
+      }] }
+    }
+    case 'critic': {
+      const name = e.gate === 'evidence' ? '证据审核' : `回答校验（第 ${e.attempt ?? 1} 稿）`
+      return { ...turn, checks: [...turn.checks, e.passed
+        ? { tone: 'ok', text: `${name}通过` }
+        : { tone: 'bad', text: `${name}打回：${(e.issues || []).join('；')}` }] }
+    }
+    case 'replan':
+      return { ...turn, checks: [...turn.checks, { tone: 'warn', text: `补充查证：${(e.tasks || []).map(t => t.goal.replace(/^补充查证：/, '')).join('；')}` }] }
+    case 'synthesizing': return { ...turn, checks: [...turn.checks, { tone: 'info', text: `整合 ${e.agents?.length ?? 0} 个任务的证据，撰写回答` }] }
+    case 'grounding_warning': return { ...turn, checks: [...turn.checks, { tone: 'warn', text: `数字未能溯源：${(e.ungrounded || []).join('、')}` }] }
+    case 'error': return { ...turn, checks: [...turn.checks, { tone: 'bad', text: e.content || '出错' }] }
+    case 'delta': return { ...turn, answer: turn.answer + (e.content || '') }
+    case 'done':
+      return { ...turn, answer: e.content || turn.answer, status: e.meta?.status || 'passed', running: false,
+        missing: e.meta?.missing_evidence || [], followUps: e.follow_ups || [] }
+    default: return turn
+  }
+}
+
+export const research = {
+  select: (id: number) => emit({ ...state, selected: id, focusEvidence: '' }),
+  focus: (turnId: number, evidenceId: string) => emit({ ...state, selected: turnId, focusEvidence: evidenceId }),
+  stop: () => controller?.abort(),
+  clear: () => { controller?.abort(); emit({ turns: [], selected: null, focusEvidence: '' }) },
+  get busy() { return state.turns.some(t => t.running) },
+
+  async ask(question: string) {
+    if (research.busy || !question.trim()) return
+    const id = nextId++
+    const history = state.turns.filter(t => t.status && t.answer).slice(-5)
+      .flatMap(t => [{ role: 'user', content: t.question }, { role: 'assistant', content: t.answer }])
+    const turn: Turn = { id, question: question.trim(), answer: '', status: '', running: true, intent: '', fallbackPlan: false,
+      tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '' }
+    emit({ turns: [...state.turns, turn], selected: id, focusEvidence: '' })
+
+    const started = Date.now()
+    const clock = setInterval(() => patch(id, t => ({ ...t, seconds: (Date.now() - started) / 1000 })), 500)
+    controller = new AbortController()
+    try {
+      for await (const event of streamChat(turn.question, history, controller.signal)) patch(id, t => apply(t, event))
+      patch(id, t => (t.running ? { ...t, running: false, status: 'failed', error: '连接中断，没有收到完整回答' } : t))
+    } catch (err) {
+      const aborted = err instanceof DOMException && err.name === 'AbortError'
+      patch(id, t => ({ ...t, running: false, status: aborted ? 'stopped' : 'failed', error: aborted ? '已停止' : err instanceof Error ? err.message : '请求失败' }))
+    } finally {
+      clearInterval(clock)
+      controller = null
+      patch(id, t => ({ ...t, seconds: (Date.now() - started) / 1000 }))
+    }
+  },
+}
+
+export function useResearch(): State {
+  return useSyncExternalStore(cb => { listeners.add(cb); return () => listeners.delete(cb) }, () => state)
+}

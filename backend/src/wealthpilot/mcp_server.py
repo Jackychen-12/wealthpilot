@@ -1,19 +1,16 @@
-"""WealthPilot MCP Server — 12 investment tools for Claude Code / Cursor."""
+"""WealthPilot MCP Server — 19 investment tools for Claude Code / Cursor."""
 
 from __future__ import annotations
 
 # mcp 2.x 把 FastMCP 改名为 MCPServer；构造器、.tool() 与 .run() 签名保持兼容
 from mcp.server.mcpserver import MCPServer
-from sqlmodel import Session, select
 
-from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.agents.tools import execute_tool
-from wealthpilot.storage.db import get_engine
 
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：12 个实时投资分析工具，覆盖基金查询、持仓分析、风险评估。"
+        "WealthPilot 智能投顾工具集：19 个实时投资分析工具，覆盖基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -26,23 +23,12 @@ async def _ensure_context() -> tuple[list, dict, dict, object]:
     if _ctx["holdings"] is not None:
         return _ctx["holdings"], _ctx["nav_data"], _ctx["nav_history"], _ctx["profile"]
 
-    from wealthpilot.routes.profile import load_profile
-    from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
+    from wealthpilot.services.context import load_local_user, load_market_context
+    from wealthpilot.settings import get_settings
 
-    engine = get_engine()
-    with Session(engine) as session:
-        _ctx["holdings"] = list(session.exec(select(PortfolioHolding)).all())
-        # MCP 是本机单用户场景，取匿名档；Web 侧才按登录用户隔离
-        _ctx["profile"] = load_profile(session)
-
-    nav_data: dict[str, float] = {}
-    nav_history: dict[str, list[dict]] = {}
-    for h in _ctx["holdings"]:
-        info = await fetch_fund_info(h.fund_code)
-        nav_data[h.fund_code] = info["nav"] if info else h.cost_price
-        hist = await fetch_fund_nav(h.fund_code, 60)
-        if hist:
-            nav_history[h.fund_code] = hist
+    # MCP 是本机单用户场景，默认取匿名档；Web 侧才按登录用户隔离
+    _ctx["holdings"], _ctx["profile"] = load_local_user(get_settings().local_user_id)
+    nav_data, nav_history = await load_market_context(_ctx["holdings"])
 
     _ctx["nav_data"] = nav_data
     _ctx["nav_history"] = nav_history
@@ -116,7 +102,7 @@ async def get_investment_suggestions() -> str:
 
 @mcp.tool()
 async def calculate_return(fund_code: str, days: int) -> str:
-    """Calculate cumulative return over N days. days: 7=1week, 30=1month, 90=3months.
+    """Calculate cumulative return over N trading days. days: 5≈1week, 21≈1month, 63≈3months.
     计算基金指定天数内的累计收益率。"""
     h, nd, nh, _ = await _ensure_context()
     return await execute_tool("calculate_return", {"fund_code": fund_code, "days": days}, h, nd, nh)

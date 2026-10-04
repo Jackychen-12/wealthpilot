@@ -9,6 +9,8 @@ import { colors } from '../utils/theme'
 import { streamChat, type ChatMsg } from '../api/chat'
 import { chatMessages, aiResponses, defaultResponse } from '../data/mock'
 import { useAppNavigate } from '../hooks/useAppNavigate'
+import { Markdown } from '../components/Markdown'
+import { ResearchTrace, agentMeta, emptyTrace, type Trace } from '../components/ResearchTrace'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -17,6 +19,12 @@ interface Message {
   role: 'user' | 'ai'
   content: string
   streaming?: boolean
+  trace?: Trace
+}
+
+const clip = (v: unknown, max = 1200) => {
+  const text = typeof v === 'string' ? v : JSON.stringify(v)
+  return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
 let nextId = 100
@@ -39,7 +47,7 @@ export function Chat() {
       id: i,
       role: msg.role,
       content: msg.role === 'ai'
-        ? '你好！我是 WealthPilot 多智能体 AI。我由 Router 智能分流到 3 个专业 Agent（市场/持仓/风险），配备 12 个实时工具，为你提供深度投资分析。试着问我任何问题吧！'
+        ? '你好！我是 WealthPilot 多智能体 AI。每个问题我会先拆成任务，交给市场、持仓、风险、量化 4 个专业 Agent 并行取证，回答通过校验后才会发布——每个数字都能点开看到出处。'
         : msg.content,
     }))
   )
@@ -52,8 +60,8 @@ export function Chat() {
   const [streamingText, setStreamingText] = useState('')
   const [activeAgent, setActiveAgent] = useState('')
   const [toolCalls, setToolCalls] = useState<string[]>([])
-  const [researchStatus, setResearchStatus] = useState('')
-  const [evidenceIds, setEvidenceIds] = useState<string[]>([])
+  const [liveTrace, setLiveTrace] = useState<Trace | null>(null)
+  const [focus, setFocus] = useState<{ msg: number; id: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [apiStatus, setApiStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
   const [errorMsg, setErrorMsg] = useState('')
@@ -90,7 +98,7 @@ export function Chat() {
     }
   }, [])
 
-  useEffect(() => { scrollToBottom() }, [messages, streamingText, scrollToBottom])
+  useEffect(() => { scrollToBottom() }, [messages, streamingText, liveTrace, scrollToBottom])
 
   const handleSend = useCallback(async (text: string) => {
     if (streaming) return
@@ -102,55 +110,83 @@ export function Chat() {
     setStreamingText('')
     setActiveAgent('')
     setToolCalls([])
-    setResearchStatus('')
-    setEvidenceIds([])
+    setLiveTrace(null)
     setErrorMsg('')
 
     if (apiStatus === 'connected') {
       try {
         const history: ChatMsg[] = messages.map(m => ({ role: m.role, content: m.content }))
+        const started = Date.now()
+        let trace = emptyTrace()
         let fullContent = ''
+        let finished = false
+        const update = (fn: (t: Trace) => Trace) => {
+          trace = { ...fn(trace), seconds: (Date.now() - started) / 1000 }
+          setLiveTrace(trace)
+        }
+        const setTask = (id: string | undefined, agent: string | undefined, goal: string | undefined, state: Trace['tasks'][number]['state']) =>
+          update(t => {
+            const known = t.tasks.some(x => x.id === id)
+            const tasks = known
+              ? t.tasks.map(x => (x.id === id ? { ...x, state } : x))
+              : [...t.tasks, { id: id || String(t.tasks.length), agent: agent || '', goal: goal || '', state }]
+            return { ...t, tasks }
+          })
+        setLiveTrace(trace)
 
         for await (const event of streamChat(text, history, conversationId)) {
-          if (event.type === 'agent_route') {
-            setActiveAgent(event.label || event.agent || '')
+          if (event.type === 'plan') {
+            update(t => ({
+              ...t,
+              intent: event.intent || '',
+              fallbackPlan: event.source === 'fallback',
+              criteria: event.success_criteria || [],
+              tasks: (event.tasks || []).map(x => ({ id: x.id, agent: x.agent, goal: x.goal, state: 'pending' as const })),
+            }))
+          } else if (event.type === 'task_start') {
+            setTask(event.id, event.agent, event.goal, 'running')
+          } else if (event.type === 'task_done') {
+            setTask(event.id, event.agent, event.goal, event.status === 'completed' ? 'done' : 'failed')
+          } else if (event.type === 'evidence' && event.evidence?.id) {
+            const ev = event.evidence
+            update(t => ({
+              ...t,
+              evidence: [...t.evidence, {
+                id: ev.id || '', tool: ev.tool || '', agent: event.agent || '', ok: ev.status === 'ok',
+                input: clip(ev.input ?? {}, 200), output: clip(ev.output ?? ''),
+              }],
+            }))
+          } else if (event.type === 'critic') {
+            const name = event.gate === 'evidence' ? '证据审核' : `回答校验 · 第 ${event.attempt ?? 1} 稿`
+            const issues = (event.issues || []).join('；')
+            update(t => ({
+              ...t,
+              steps: [...t.steps, { kind: 'critic', passed: event.passed, text: `${name}${event.passed ? '通过' : `打回：${issues}`}` }],
+            }))
+          } else if (event.type === 'replan') {
+            update(t => ({ ...t, steps: [...t.steps, { kind: 'replan', text: `补充查证：${(event.tasks || []).map(x => x.goal.replace(/^补充查证：/, '')).join('；')}` }] }))
+          } else if (event.type === 'synthesizing') {
+            update(t => ({ ...t, steps: [...t.steps, { kind: 'synth', text: '整合各任务证据，撰写回答' }] }))
+          } else if (event.type === 'error') {
+            // Agent 级别的错误不等于整轮失败 —— 记进过程里，最终以 done 的状态为准
+            update(t => ({ ...t, steps: [...t.steps, { kind: 'error', passed: false, text: event.content }] }))
           } else if (event.type === 'delta') {
             fullContent += event.content
             setStreamingText(fullContent)
           } else if (event.type === 'done') {
+            finished = true
             fullContent = event.content
-            setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: fullContent }])
+            update(t => ({ ...t, status: event.meta?.status || 'passed', running: false }))
+            setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: fullContent, trace }])
             setStreamingText('')
-            if (event.follow_ups) {
-              setFollowUps(event.follow_ups)
-            }
-            if (event.meta?.status) {
-              const labels: Record<string, string> = { passed: '研究完成', insufficient_data: '证据不足，未发布完整结论', rejected: '回答未通过校验', failed: '研究任务失败' }
-              setResearchStatus(labels[event.meta.status] || event.meta.status)
-            }
-          } else if (event.type === 'tool_call') {
-            setToolCalls(prev => [...prev, event.tool || ''])
-          } else if (event.type === 'plan') {
-            setResearchStatus(`已拆解 ${event.tasks?.length ?? 0} 个研究任务`)
-          } else if (event.type === 'evidence' && event.evidence?.id) {
-            setEvidenceIds(prev => prev.includes(event.evidence?.id || '') ? prev : [...prev, event.evidence?.id || ''])
-          } else if (event.type === 'critic') {
-            setResearchStatus(event.passed ? '证据校验通过' : '校验未通过，正在处理')
-          } else if (event.type === 'replan') {
-            setResearchStatus(`正在补充 ${event.tasks?.length ?? 0} 项证据`)
-          } else if (event.type === 'error') {
-            setApiStatus('disconnected')
-            setErrorMsg(`AI 服务返回错误: ${event.content}`)
-            const response = findMockResponse(text)
-            if (response.agent) setActiveAgent(response.agent)
-            if (response.tools) setToolCalls(response.tools)
-            setMessages(prev => [...prev, { id: nextId++, role: 'ai', content: response.text }])
-            setStreamingText('')
-            setFollowUps(response.followUps)
+            setLiveTrace(null)
+            if (event.follow_ups) setFollowUps(event.follow_ups)
           }
         }
+        if (!finished) throw new Error('连接中断，未收到完整回答')
       } catch (e) {
         setApiStatus('disconnected')
+        setLiveTrace(null)
         setErrorMsg(`连接失败: ${e instanceof Error ? e.message : '网络错误'}，已切换到演示模式`)
         const response = findMockResponse(text)
         if (response.agent) setActiveAgent(response.agent)
@@ -257,66 +293,33 @@ export function Chat() {
             return <StreamingBubble key={msg.id} text={msg.content} />
           }
           return (
-            <AiBubble key={msg.id}>
-              <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+            <AiBubble key={msg.id} wide={!!msg.trace}>
+              {msg.trace && <ResearchTrace trace={msg.trace} focusId={focus?.msg === msg.id ? focus.id : undefined} />}
+              <Markdown text={msg.content} onCite={id => setFocus({ msg: msg.id, id })} />
             </AiBubble>
           )
         })}
 
-        {streaming && streamingText && (
-          <div className="chat-ai">
-            <div className="chat-avatar">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L2 7l10 5 10-5-10-5z" fill="#fff" opacity="0.9"/>
-                <path d="M2 17l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.6"/>
-                <path d="M2 12l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.8"/>
-              </svg>
-            </div>
-            <div className="chat-bubble-ai" style={{ whiteSpace: 'pre-wrap' }}>
-              {(researchStatus || evidenceIds.length > 0) && (
-                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6 }} aria-live="polite">
-                  {researchStatus || '已收集'}{evidenceIds.length > 0 ? ` · ${evidenceIds.length} 条证据` : ''}
-                </div>
-              )}
-              {activeAgent && (
-                <div className="agent-badge">{activeAgent}</div>
-              )}
-              {toolCalls.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                  {toolCalls.map((tool, i) => (
-                    <span key={i} className="tool-chip">🔧 {tool}</span>
-                  ))}
-                </div>
-              )}
-              {streamingText}
-              <span className="typing-cursor" />
-            </div>
-          </div>
+        {streaming && (liveTrace || streamingText) && (
+          <AiBubble wide={!!liveTrace}>
+            {liveTrace && <ResearchTrace trace={liveTrace} />}
+            {streamingText && <Markdown text={streamingText} />}
+            {streamingText && <span className="typing-cursor" />}
+          </AiBubble>
         )}
 
-        {streaming && !streamingText && (
-          <div className="chat-ai">
-            <div className="chat-avatar">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L2 7l10 5 10-5-10-5z" fill="#fff" opacity="0.9"/>
-                <path d="M2 17l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.6"/>
-                <path d="M2 12l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.8"/>
-              </svg>
-            </div>
-            <div className="chat-bubble-ai">
-              {activeAgent && (
-                <div className="agent-badge">{activeAgent}</div>
-              )}
-              {toolCalls.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                  {toolCalls.map((tool, i) => (
-                    <span key={i} className="tool-chip">🔧 {tool}</span>
-                  ))}
-                </div>
-              )}
-              <span className="typing-dots"><span /><span /><span /></span>
-            </div>
-          </div>
+        {streaming && !liveTrace && !streamingText && (
+          <AiBubble>
+            {activeAgent && <div className="agent-badge">{agentMeta(activeAgent).label}</div>}
+            {toolCalls.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                {toolCalls.map((tool, i) => (
+                  <span key={i} className="tool-chip">{tool}</span>
+                ))}
+              </div>
+            )}
+            <span className="typing-dots"><span /><span /><span /></span>
+          </AiBubble>
         )}
 
         <div style={{ flex: 1 }} />

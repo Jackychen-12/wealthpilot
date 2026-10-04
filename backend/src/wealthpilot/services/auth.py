@@ -1,7 +1,7 @@
 """认证服务 — JWT + bcrypt 密码哈希。"""
 
 import hashlib
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -31,7 +31,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int, username: str) -> str:
-    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    expire = datetime.now(UTC) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     payload = {"sub": str(user_id), "username": username, "exp": expire}
     return jwt.encode(payload, _get_secret(), algorithm=ALGORITHM)
 
