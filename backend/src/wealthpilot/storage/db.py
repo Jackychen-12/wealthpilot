@@ -13,6 +13,7 @@ from wealthpilot.models.market import FundNavCache, IndexSnapshot  # noqa: F401
 from wealthpilot.models.portfolio import PortfolioHolding  # noqa: F401
 from wealthpilot.models.profile import InvestorProfile  # noqa: F401 — register table
 from wealthpilot.models.research import DataCache, WatchItem  # noqa: F401
+from wealthpilot.models.review import Checkpoint, TradeProposal  # noqa: F401
 from wealthpilot.models.user import User  # noqa: F401
 from wealthpilot.settings import get_settings
 

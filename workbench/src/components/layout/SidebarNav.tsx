@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, FileText, History, Home, Layers, LayoutDashboard, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, ShieldCheck, Star, Sun, UserRoundCog, Zap } from 'lucide-react'
+import { BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, LayoutDashboard, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, ShieldCheck, Star, Sun, UserRoundCog, Zap } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
@@ -27,6 +27,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { to: '/stock', label: '个股', icon: CandlestickChart },
     { to: '/screener', label: '选股器', icon: ListFilter },
     { to: '/watchlist', label: '自选股', icon: Star },
+    { to: '/review', label: '验证与复盘', icon: ClipboardCheck },
   ] },
   { label: '组合', items: [
     { to: '/holdings', label: '持仓', icon: BriefcaseBusiness },

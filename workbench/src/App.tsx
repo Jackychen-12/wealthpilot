@@ -22,6 +22,7 @@ import TodayPage from './pages/TodayPage'
 import WatchlistPage from './pages/WatchlistPage'
 import ScreenerPage from './pages/ScreenerPage'
 import HistoryPage from './pages/HistoryPage'
+import ReviewPage from './pages/ReviewPage'
 
 const App: React.FC = () => {
   // 登录状态变化后换 key，让所有页面重新取数
@@ -50,6 +51,7 @@ const App: React.FC = () => {
           <Route path="/research" element={<ResearchPage key={epoch} />} />
           <Route path="/screener" element={<ScreenerPage key={epoch} />} />
           <Route path="/watchlist" element={<WatchlistPage key={epoch} />} />
+          <Route path="/review" element={<ReviewPage key={epoch} />} />
           <Route path="/history/:id?" element={<HistoryPage key={epoch} />} />
           <Route path="/overview" element={<OverviewPage key={epoch} />} />
           <Route path="/holdings" element={<HoldingsPage key={epoch} />} />

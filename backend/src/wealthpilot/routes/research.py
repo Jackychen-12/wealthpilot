@@ -8,7 +8,8 @@ from sqlmodel import Session, func, select
 
 from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.research import WatchItem
-from wealthpilot.services import screener
+from wealthpilot.models.review import TradeProposal
+from wealthpilot.services import checkpoints, screener
 from wealthpilot.services.assets import fetch_sina_quotes
 from wealthpilot.services.deps import current_user_id
 from wealthpilot.services.securities import search
@@ -153,7 +154,10 @@ def research_detail(message_id: int, db: Session = Depends(get_session), user_id
     except ValueError:
         meta = {}
     return {"id": answer.id, "created_at": answer.created_at.isoformat(), "question": question.content if question else "",
-            "answer": answer.content, "meta": meta}
+            "answer": answer.content, "meta": meta,
+            "checkpoints": [checkpoints.serialize(c) for c in checkpoints.list_checkpoints(db, user_id, message_id=answer.id)],
+            "proposals": [checkpoints.serialize_proposal(p) for p in db.exec(
+                select(TradeProposal).where(TradeProposal.user_id == user_id, TradeProposal.message_id == answer.id)).all()]}
 
 
 @router.get("/research/stats")

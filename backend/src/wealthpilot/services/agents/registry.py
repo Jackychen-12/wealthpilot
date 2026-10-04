@@ -1,4 +1,4 @@
-"""Agent 注册表 —— 按研究维度划分的 7 个专业 Agent。
+"""Agent 注册表 —— 按研究维度划分的 7 个专业 Agent，外加 1 个复盘 Agent。
 
 此前按资产类型分（market 管基金、stock 管个股），一个 Agent 要在几轮工具调用里包揽一只股票的
 所有维度。现在按"研究维度"分：基本面、估值、走势、行业互不依赖，可以并行取证，
@@ -35,7 +35,7 @@ _COMMON_RULES = (
     "每个数字都必须来自工具返回，不得凭记忆或自行心算；你记得的行情和财务数据都是过期的",
     "只使用任务上下文里给出的证券代码；上下文没有给代码的证券，先调用 resolve_security，不得自己写代码",
     "工具没取到的数据直接说“未取到”，不要用常识补",
-    "不预测股价、不给目标价、不说“必涨”“稳赚”；陈述事实，并指出哪些是推断",
+    "{stance}",
     "用中文回答，专业但通俗；先给结论，再给依据",
 )
 
@@ -114,6 +114,22 @@ AGENTS: dict[str, AgentSpec] = {
     ),
 }
 
+AGENTS["review"] = AgentSpec(
+    label="🧾 复盘",
+    summary="事后复盘：此前研究设下的验证点哪些成立、哪些被证伪，这个 Agent 的历史成立率，以及操作建议单的去向",
+    role="你是复盘分析师，回答“之前的研究说得对不对”。你不做新的研究，只核对旧结论。",
+    rules=(
+        "先调用 get_research_track_record 拿成绩单，再用 list_checkpoints 看具体条目；成立率只能用工具返回的数，不得自己算",
+        "被证伪的验证点要逐条说明：当时设的条件、实际值、差在哪里；不要替原判断找借口",
+        "样本少（已核对不足 10 条）时必须明说“样本太少，成立率不具统计意义”",
+        "尚未到期的验证点只能说“待核对”，不得提前下结论",
+    ),
+)
+
+_STANCE_NEUTRAL = "不预测股价、不给目标价、不说“必涨”“稳赚”；陈述事实，并指出哪些是推断"
+_STANCE_ADVICE = ("可以给出明确的立场（看多 / 中性 / 看空）和操作建议（买入 / 加仓 / 持有 / 减仓 / 卖出），但必须基于已取得的证据，"
+                  "同时写明失效条件；不得说“必涨”“稳赚”“保证收益”这类承诺")
+
 AGENT_LABELS = {name: spec.label for name, spec in AGENTS.items()}
 VALID_AGENTS = tuple(AGENTS)
 
@@ -121,7 +137,10 @@ VALID_AGENTS = tuple(AGENTS)
 def build_prompt(name: str, holdings: list[PortfolioHolding], nav_data: dict[str, float],
                  profile: InvestorProfile | None) -> str:
     spec = AGENTS[name]
-    rules = "\n".join(f"{i}. {r}" for i, r in enumerate((*spec.rules, *_COMMON_RULES), 1))
+    from wealthpilot.settings import get_settings
+    stance = _STANCE_ADVICE if get_settings().advice_mode else _STANCE_NEUTRAL
+    rules = "\n".join(f"{i}. {r.format(stance=stance) if r == '{stance}' else r}"
+                      for i, r in enumerate((*spec.rules, *_COMMON_RULES), 1))
     holdings_block = (f"\n## 用户当前持仓\n{_build_holdings_context(holdings, nav_data)}\n"
                       if spec.needs_holdings or holdings else "")
     return f"""{spec.role}

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncGenerator
 
 from sqlmodel import Session, select
@@ -25,6 +26,7 @@ from sqlmodel import Session, select
 from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
+from wealthpilot.services import checkpoints
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.critic_agent import CriticAgent, Verdict, rewrite_instruction
 from wealthpilot.services.agents.planner_agent import (
@@ -40,6 +42,7 @@ from wealthpilot.services.agents.synthesizer_agent import (
     check_numeric_grounding,
 )
 from wealthpilot.services.ai_client import create_ai_client
+from wealthpilot.services.checkpoints import ACTIVE_USER
 from wealthpilot.services.connectors import agent_tools
 from wealthpilot.services.evidence import ToolSession
 from wealthpilot.services.securities import resolve_names, resolve_text
@@ -128,11 +131,24 @@ async def _run_pipeline(
         securities = []
     if securities:
         await emit({"type": "resolved", "securities": securities})
+    # 此前给这些股票设过的验证点（先核对一遍到期的），带进本轮：被证伪的旧判断必须正面回应
+    ACTIVE_USER.set(user_id or 0)
+    prior = ""
+    if db_session and securities and getattr(settings, "checkpoints_enabled", False):
+        try:
+            await checkpoints.verify_pending(db_session, user_id or 0)
+            prior = checkpoints.prior_note(db_session, user_id or 0, [s["code"] for s in securities])
+        except Exception:  # noqa: BLE001 — 复盘信息取不到，不影响本轮研究
+            prior = ""
 
     plan = await asyncio.to_thread(planner.plan, message, context, securities, holdings, nav_data)
     resolved_note = ("已解析出的证券（只使用这里的代码）：\n"
                      + "\n".join(f"- {s['name']}：{s['code']}（{s['asset_type']}）" for s in securities) + "\n\n"
                      ) if securities else ""
+    # 旧验证点只带进完整的研究；问个价格这类窄问题不该被它带跑
+    if plan.playbook not in ("stock_deep", "stock_compare", "holding_review"):
+        prior = ""
+    resolved_note += prior
     await emit({"type": "plan", "intent": plan.intent, "source": plan.source, "playbook": plan.playbook,
                 "tasks": [{"id": t.id, "agent": t.agent, "goal": t.goal, "deps": t.deps,
                            "label": AGENT_LABELS.get(t.agent, t.agent)} for t in plan.tasks],
@@ -151,7 +167,8 @@ async def _run_pipeline(
     results = []
     completed = {}
     critic = CriticAgent(client, model, profile)
-    holdings_context = _build_holdings_context(holdings, nav_data) if holdings else ""
+    # 交给模型的上下文里出现过的数字（持仓快照、旧验证点），模型转述不算编造
+    holdings_context = (_build_holdings_context(holdings, nav_data) if holdings else "") + prior
 
     async def run_task(task):
         async with semaphore:
@@ -222,7 +239,7 @@ async def _run_pipeline(
                 draft = results[0].text
             else:
                 draft = await synthesizer.run(message, results, plan.success_criteria, emit,
-                                               stream_output=False, extra_instruction=instruction,
+                                               stream_output=False, extra_instruction="\n\n".join(filter(None, [prior.strip(), instruction])),
                                                sections=plan.sections)
             if not critic_on:
                 final_text = draft or "本轮未能生成回答，请换个问法再试。"
@@ -256,12 +273,14 @@ async def _run_pipeline(
     await _finish(emit, final_text, grounding, plan, message, holdings,
                   conversation_id, db_session, user_id, [r.agent for r in results],
                   status=status, results=results,
-                  missing=evidence_verdict.missing_evidence if status == "partial" else None)
+                  missing=evidence_verdict.missing_evidence if status == "partial" else None,
+                  client=client, model=model)
 
 
 async def _finish(
     emit, final_text, grounding, plan, message, holdings,
     conversation_id, db_session, user_id, agents, status="passed", results=None, missing=None,
+    client=None, model="",
 ) -> None:
     if grounding["ungrounded"]:
         # 不拦截输出，但把问题暴露出来 —— 这是可以进 CI 的可观测指标
@@ -273,7 +292,7 @@ async def _finish(
 
     if conversation_id and db_session:
         _save_message(db_session, conversation_id, user_id, "user", message)
-        _save_message(
+        message_id = _save_message(
             db_session, conversation_id, user_id, "assistant", final_text,
             metadata={
                 "status": status,
@@ -288,6 +307,7 @@ async def _finish(
                 "grounding_rate": round(grounding["rate"], 3),
             },
         )
+        await _emit_checkpoints(emit, db_session, client, model, user_id, message_id, message, plan, final_text, holdings, status)
 
     await emit({
         "type": "done",
@@ -353,7 +373,7 @@ def _save_message(
     role: str,
     content: str,
     metadata: dict | None = None,
-) -> None:
+) -> int | None:
     msg = ChatMessage(
         user_id=user_id,
         conversation_id=conversation_id,
@@ -363,6 +383,30 @@ def _save_message(
     )
     db_session.add(msg)
     db_session.commit()
+    return msg.id
+
+
+async def _emit_checkpoints(emit, db_session, client, model, user_id, message_id, message, plan, final_text, holdings, status) -> None:
+    """研究发布后，为涉及的股票提出可事后核对的验证点（建议模式下还有操作建议单）。失败只是没有验证点，不影响回答。"""
+    if (client is None or status not in ("passed", "partial") or plan.playbook in ("review", "screen")
+            or not getattr(get_settings(), "checkpoints_enabled", False)):
+        return
+    # 持仓诊断的重点个股不在解析结果里，从任务目标里取
+    targets = {s["code"]: s for s in plan.securities if s.get("asset_type") in ("stock", "etf")}
+    for task in plan.tasks:
+        for name, code in re.findall(r"研究(.+?)（(\d{6})）", task.goal):
+            targets.setdefault(code, {"code": code, "name": name, "asset_type": "stock"})
+    if not targets:
+        return
+    try:
+        points, proposals = await checkpoints.create_from_research(
+            db_session, client, model, user_id=user_id or 0, message_id=message_id, question=message,
+            playbook=plan.playbook, answer=final_text, securities=list(targets.values()), holdings=holdings)
+    except Exception:  # noqa: BLE001
+        return
+    if points or proposals:
+        await emit({"type": "checkpoints", "items": [checkpoints.serialize(c) for c in points],
+                    "proposals": [checkpoints.serialize_proposal(p) for p in proposals]})
 
 
 def _generate_follow_ups(

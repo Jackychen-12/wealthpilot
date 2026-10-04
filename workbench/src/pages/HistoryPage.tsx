@@ -4,6 +4,7 @@ import { ChevronRight } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, useApi } from '../api'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
+import { CheckpointTable, ProposalList } from '../components/Checkpoints'
 import { securityPath } from '../components/SecuritySearch'
 import { Drawer, Tag } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
@@ -36,6 +37,18 @@ const Detail: React.FC<{ id: number }> = ({ id }) => {
             </p>
           </div>
           <AnswerMarkdown content={d.answer} onCite={cite} />
+          {d.checkpoints?.length ? (
+            <section>
+              <p className="eyebrow mb-2">这次研究设下的验证点</p>
+              <CheckpointTable items={d.checkpoints} showStock={new Set(d.checkpoints.map((c) => c.code)).size > 1} />
+            </section>
+          ) : null}
+          {d.proposals?.length ? (
+            <section>
+              <p className="eyebrow mb-2">操作建议单</p>
+              <ProposalList items={d.proposals} />
+            </section>
+          ) : null}
           {evidence.length ? (
             <section>
               <p className="eyebrow mb-2">当时取得的证据 · {evidence.length} 条</p>

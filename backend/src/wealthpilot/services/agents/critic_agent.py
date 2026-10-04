@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.synthesizer_agent import check_numeric_grounding
+from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
     from wealthpilot.services.ai_client import AIClient
@@ -39,6 +40,8 @@ _ACTION_NUMBER_RE = re.compile(
 
 # 确定性的涨跌预测与目标价 —— 研究只陈述事实和推断，不做这类承诺
 _FORECAST_RE = re.compile(r"目标价|必涨|必然上涨|一定会涨|肯定会涨|稳赚|保证收益|将涨到|会涨到|翻倍在即")
+# 建议模式下允许给目标价和方向判断，但"保证"类承诺任何时候都不行
+_GUARANTEE_RE = re.compile(r"必涨|必然上涨|一定会涨|肯定会涨|稳赚|保证收益|翻倍在即")
 _NEGATION_RE = re.compile(r"(不|无|没有|未|非|避免|拒绝|不会|不得|不应)[^，。；\n]{0,8}$")
 _FINANCIAL_RE = re.compile(r"营收|营业收入|净利润|ROE|毛利率|净利率|每股收益")
 _PERIOD_RE = re.compile(r"\d{4}[-/年]\d{1,2}|年报|中报|半年报|季报|一季|三季|前三季|上半年|报告期")
@@ -241,11 +244,15 @@ class CriticAgent:
         if _FINANCIAL_RE.search(answer) and re.search(r"\d", answer) and not _PERIOD_RE.search(answer):
             issues.append("引用了财务数据但没有写明报告期，读者无法判断数据的时点")
 
-        for match in _FORECAST_RE.finditer(answer):
+        advice = getattr(get_settings(), "advice_mode", False)
+        for match in (_GUARANTEE_RE if advice else _FORECAST_RE).finditer(answer):
             before = answer[max(0, match.start() - 12):match.start()]
             if not _NEGATION_RE.search(before):
-                issues.append(f"出现了目标价或确定性的涨跌预测（“{match.group()}”），研究只能陈述事实与推断")
+                issues.append(f"出现了对收益的承诺（“{match.group()}”），建议可以给，但不能保证结果" if advice else
+                              f"出现了目标价或确定性的涨跌预测（“{match.group()}”），研究只能陈述事实与推断")
                 break
+        if advice and "建议" in (sections or []) and "失效" not in answer:
+            issues.append("给出了建议但没有写明失效条件（什么情况下这条建议不再成立）")
         return issues
 
     # ── 由未覆盖项生成补充任务 ────────────────────────────────

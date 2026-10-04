@@ -12,6 +12,7 @@ from sqlmodel import Session
 
 from wealthpilot.routes.profile import load_profile
 from wealthpilot.services.agents.tools import AGENT_TOOLS, execute_tool
+from wealthpilot.services.checkpoints import ACTIVE_USER
 from wealthpilot.services.context import load_market_context
 from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.services.evidence import record_evidence
@@ -52,6 +53,7 @@ async def run_tool(
     if missing:
         raise HTTPException(422, f"缺少参数：{'、'.join(missing)}")
 
+    ACTIVE_USER.set(user_id)
     holdings = user_holdings(db, user_id) if name in _NEEDS_HOLDINGS else []
     nav_data, nav_history = await load_market_context(holdings) if holdings else ({}, {})
     try:

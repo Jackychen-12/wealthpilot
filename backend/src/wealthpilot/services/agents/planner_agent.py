@@ -23,7 +23,9 @@ if TYPE_CHECKING:
     from wealthpilot.services.ai_client import AIClient
 
 VALID_AGENTS = ("fundamental", "valuation", "price", "industry", "screener", "portfolio", "fund")
-INTENTS = ("stock_deep", "stock_compare", "holding_review", "screen", "free")
+INTENTS = ("stock_deep", "stock_compare", "holding_review", "screen", "review", "free")
+# 有固定流程、不需要模型拆任务的意图
+_PLAYBOOK_INTENTS = INTENTS[:5]
 
 # 关键词兜底：LLM 不可用时仍能路由
 KEYWORD_RULES: list[tuple[list[str], str]] = [
@@ -41,6 +43,7 @@ KEYWORD_RULES: list[tuple[list[str], str]] = [
 ACTION_KEYWORDS = ("加仓", "减仓", "买入", "卖出", "调仓", "止损", "仓位", "该不该", "值得")
 
 _HOLDING_WORDS = ("我的持仓", "我的组合", "我的仓位", "我持有", "我的股票", "我的基金", "持仓诊断")
+_REVIEW_WORDS = ("复盘", "验证点", "成绩单", "之前的研究", "之前的判断", "说得对不对", "准不准", "回头看")
 _SCREEN_WORDS = ("筛选", "选股", "找出", "有哪些股票", "哪些股票", "帮我找")
 # 只问一个具体数字的窄问题，不值得跑四个维度
 _NARROW_WORDS = ("多少钱", "股价多少", "现价", "最新价", "市盈率多少", "PE多少", "涨了多少", "跌了多少", "净值多少")
@@ -110,9 +113,13 @@ class PlannerAgent:
             tasks = build_tasks(intent, securities, holdings or [], nav_data or {}, message)
             if tasks:
                 book = PLAYBOOKS[intent]
+                sections = list(book.sections)
+                # 建议模式：个股研究多一节明确的立场与操作建议
+                if getattr(get_settings(), "advice_mode", False) and intent in ("stock_deep", "stock_compare"):
+                    sections.append("建议")
                 return Plan(intent=book.label, tasks=tasks, success_criteria=list(book.criteria),
                             source="llm" if decision else "fallback", playbook=book.key,
-                            sections=list(book.sections), securities=securities)
+                            sections=sections, securities=securities)
 
         plan = decision if decision and decision.tasks else self._keyword_fallback(message)
         plan.securities = securities
@@ -153,6 +160,8 @@ class PlannerAgent:
     def classify_by_rules(message: str, securities: list[dict], has_holdings: bool) -> str:
         """模型不可用时的意图识别。"""
         stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
+        if any(w in message for w in _REVIEW_WORDS):
+            return "review"
         if any(w in message for w in _SCREEN_WORDS) and not stocks:
             return "screen"
         if len(stocks) >= 2:
@@ -189,7 +198,7 @@ class PlannerAgent:
             )
 
         intent = str(data.get("intent") or "free")
-        if not tasks and intent not in INTENTS[:4]:
+        if not tasks and intent not in _PLAYBOOK_INTENTS:
             return None
 
         known = {t.id for t in tasks}
@@ -247,9 +256,10 @@ def build_planner_prompt(profile: InvestorProfile | None = None) -> str:
 - stock_compare: 对比两到三只股票
 - holding_review: 诊断用户自己的整体持仓 / 组合
 - screen: 按条件找股票（"找出 ROE 高于 15 的白酒股"）
+- review: 复盘此前的研究——之前的判断对不对、验证点成立了多少、成绩单（"复盘一下之前的研究""上次对茅台的判断准不准"）
 - free: 以上都不是，或者只是问一个具体的点或单一维度（"茅台现在多少钱""比亚迪最近业绩怎么样""招商银行最近走势如何""今天大盘怎么样"），只派对应的一两个专家
 
-前四种意图有固定的研究流程，**不需要你拆任务**，tasks 留空即可。只有 free 需要你拆。
+前五种意图有固定的研究流程，**不需要你拆任务**，tasks 留空即可。只有 free 需要你拆。
 
 ## 可用专家（仅 free 时使用）
 {experts}

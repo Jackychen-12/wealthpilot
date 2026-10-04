@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     run_max_tool_calls: int = Field(default=24, ge=1)
     ai_timeout_seconds: float = Field(default=60, gt=0)
 
+    checkpoints_enabled: bool = Field(default=True, description="研究发布后提出可事后核对的验证点")
+    advice_mode: bool = Field(
+        default=False,
+        description="个人模式：允许给出明确的买卖立场与操作建议（仍须逐条授权才执行），并用涨跌类验证点事后打分")
+
     local_user_id: int = Field(default=0, description="CLI / MCP 使用哪个用户的持仓与画像，0=匿名档")
 
     connectors_file: Path = Field(default=Path("./connectors.json"), description="外部 MCP 连接器配置文件")

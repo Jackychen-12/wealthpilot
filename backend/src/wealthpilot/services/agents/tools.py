@@ -498,8 +498,24 @@ RESEARCH_TOOLS = [
     },
 ]
 
+REVIEW_TOOLS = [
+    {
+        "name": "get_research_track_record",
+        "description": "查询此前研究的事后验证成绩单：验证点总数、已成立 / 被证伪 / 待核对的数量、成立率，按类别（财务 / 估值 / 涨跌）和按股票的分布，以及最近核对出结果的条目。",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_checkpoints",
+        "description": "列出此前研究设下的验证点及核对结果。每条包含：股票、指标、条件、设定时的值与日期、状态（pending 待核对 / held 成立 / broken 被证伪）、实际值与日期、出自哪个问题。",
+        "input_schema": {"type": "object", "properties": {
+            "code": {"type": "string", "description": "只看某只股票，如 600519；不填看全部"},
+            "status": {"type": "string", "enum": ["pending", "held", "broken"], "description": "只看某种状态；不填看全部"},
+        }},
+    },
+]
+
 _ALL_TOOLS = {t["name"]: t for t in [*MARKET_TOOLS, *PORTFOLIO_TOOLS, *RISK_TOOLS, *COMPUTE_TOOLS,
-                                     *QUANT_TOOLS, *STOCK_TOOLS, *RESEARCH_TOOLS]}
+                                     *QUANT_TOOLS, *STOCK_TOOLS, *RESEARCH_TOOLS, *REVIEW_TOOLS]}
 
 
 def _pick(*names: str) -> list[dict]:
@@ -520,6 +536,7 @@ AGENT_TOOLS: dict[str, list[dict]] = {
                        "get_drawdown_analysis", "get_correlation_matrix", "lookthrough_portfolio",
                        "compute_concentration", "simulate_portfolio_change", "check_profile_constraint",
                        "compute_position_sizing"),
+    "review": REVIEW_TOOLS,
     "fund": _pick("resolve_security", "get_fund_info", "get_nav_history", "compare_funds",
                   "compute_stock_overlap", "calculate_return", "get_max_drawdown", "backtest_rule"),
 }
@@ -542,6 +559,24 @@ async def execute_tool(
     profile: InvestorProfile | None = None,
 ) -> str:
     """统一工具执行器。"""
+    # === 事后复盘 ===
+    if name in ("get_research_track_record", "list_checkpoints"):
+        from sqlmodel import Session
+
+        from wealthpilot.services import checkpoints
+        from wealthpilot.storage.db import get_engine
+        with Session(get_engine()) as db:
+            uid = checkpoints.active_user()
+            if name == "get_research_track_record":
+                card = checkpoints.scorecard(db, uid)
+                if not card["total"]:
+                    return "还没有任何验证点：做过带具体股票的研究之后才会有"
+                return json.dumps(card, ensure_ascii=False)
+            rows = checkpoints.list_checkpoints(db, uid, code=str(input_data.get("code") or ""),
+                                                status=str(input_data.get("status") or ""), limit=40)
+            if not rows:
+                return "没有符合条件的验证点"
+            return json.dumps({"count": len(rows), "checkpoints": [checkpoints.serialize(c) for c in rows]}, ensure_ascii=False)
     # === 证券解析 / 研究工具 ===
     if name == "resolve_security":
         hits = await search_securities(str(input_data["query"]), 5)

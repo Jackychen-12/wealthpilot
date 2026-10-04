@@ -87,7 +87,11 @@ QUESTIONS = [
     "帮我诊断一下我的持仓",
     "帮我筛选市盈率低于15、ROE高于15%的大市值股票",
     "110011 最新净值多少，近一个月表现如何",
+    # 放在最后：复盘的是前面几次研究设下的验证点
+    "复盘一下之前的研究：验证点成立了多少，哪些判断被证伪了",
 ]
+# 研究录完之后才有内容的接口
+AFTER_CHATS = ["/api/checkpoints", "/api/checkpoints?code=600519", "/api/checkpoints/scorecard", "/api/proposals"]
 HISTORY = "/api/research/history"
 
 
@@ -147,6 +151,8 @@ def main() -> None:
             sys.exit(f"这个问题没有跑出可发布的回答（{status}），不写入快照；请重试")
         fixtures["chats"][question] = events
 
+    for path in AFTER_CHATS:
+        fixtures["get"][path] = client.get(path).json()
     # 研究记录：本次新录的由后端存下；沿用旧录制时，把旧快照里对应的记录带过来
     records = client.get(HISTORY).json()
     fixtures["get"][HISTORY] = records

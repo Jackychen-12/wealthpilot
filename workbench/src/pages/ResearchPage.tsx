@@ -6,6 +6,7 @@ import { DEMO } from '../api'
 import { research, useResearch, type Evidence, type Turn } from '../api/researchStore'
 import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
+import { CheckpointTable, ProposalList } from '../components/Checkpoints'
 import { securityPath } from '../components/SecuritySearch'
 import { Button, Callout, Dot, Drawer, Tag, type Tone } from '../components/kit'
 import { cn } from '../utils/cn'
@@ -18,8 +19,9 @@ const AGENT: Record<string, { label: string; tone: Tone }> = {
   screener: { label: '选股', tone: 'orange' },
   portfolio: { label: '组合与风险', tone: 'green' },
   fund: { label: '基金', tone: 'gray' },
+  review: { label: '复盘', tone: 'green' },
 }
-export const PLAYBOOK: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股' }
+export const PLAYBOOK: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '事后复盘' }
 export const STATUS: Record<string, { tone: Tone; label: string }> = {
   passed: { tone: 'green', label: '已通过校验' },
   partial: { tone: 'yellow', label: '部分证据缺失' },
@@ -39,7 +41,7 @@ const TEMPLATES = [
   { key: 'screen', agents: ['screener', 'valuation'], desc: '代码按条件筛出候选，AI 解读',
     qs: ['帮我筛选市盈率低于15、ROE高于15%的大市值股票', '找出营收和净利润增速都超过30%的公司'] },
 ]
-const FREE_QUESTIONS = ['今天哪些行业领涨，大盘情绪如何', '把我的组合穿透到个股，真实暴露集中在哪里？', '110011 最新净值多少，近一个月表现如何']
+const FREE_QUESTIONS = ['复盘一下之前的研究：验证点成立了多少，哪些判断被证伪了', '今天哪些行业领涨，大盘情绪如何', '把我的组合穿透到个股，真实暴露集中在哪里？', '110011 最新净值多少，近一个月表现如何']
 
 function phase(t: Turn) {
   if (!t.tasks.length) return '规划任务中'
@@ -151,6 +153,18 @@ const ResearchPage: React.FC = () => {
                         ? <AnswerMarkdown content={t.answer} onCite={(id) => { research.focus(t.id, id); if (!matchMedia('(min-width: 1280px)').matches) setProcessOpen(true) }} />
                         : <p className="text-[15px] text-steel">{t.running ? '回答会在通过校验后出现，未过审的草稿不会显示。' : t.error || '没有生成回答。'}</p>}
                     </div>
+                    {t.checkpoints.length > 0 ? (
+                      <div className="mt-6" onClick={(e) => e.stopPropagation()}>
+                        <p className="eyebrow mb-2">验证点 · 到期后自动核对这次的判断对不对</p>
+                        <CheckpointTable items={t.checkpoints} showStock={new Set(t.checkpoints.map((c) => c.code)).size > 1} />
+                      </div>
+                    ) : null}
+                    {t.proposals.length > 0 ? (
+                      <div className="mt-6" onClick={(e) => e.stopPropagation()}>
+                        <p className="eyebrow mb-2">操作建议单 · 需要你逐条授权</p>
+                        <ProposalList items={t.proposals} />
+                      </div>
+                    ) : null}
                     {t.missing.length > 0 ? <Callout tone="warning" className="mt-4">未能取得的证据：{t.missing.join('；')}</Callout> : null}
                     {!t.running && t.followUps.length > 0 && t.id === turns[turns.length - 1].id ? (
                       <div className="mt-5 flex flex-col items-start gap-1">

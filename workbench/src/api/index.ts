@@ -129,6 +129,13 @@ export const api = {
   industries: () => request<{ industry: string; count: number }[]>('/api/screener/industries'),
   researchHistory: () => request<ResearchRecord[]>('/api/research/history'),
   researchDetail: (id: number) => request<ResearchDetail>(`/api/research/history/${id}`),
+  checkpoints: (code = '') => request<Checkpoint[]>(`/api/checkpoints${code ? `?code=${code}` : ''}`),
+  verifyCheckpoints: () => request<{ checked: number; held: number; broken: number }>('/api/checkpoints/verify', { method: 'POST' }),
+  scorecard: () => request<Scorecard>('/api/checkpoints/scorecard'),
+  removeCheckpoint: (id: number) => request<unknown>(`/api/checkpoints/${id}`, { method: 'DELETE' }),
+  proposals: () => request<Proposal[]>('/api/proposals'),
+  authorizeProposal: (id: number, shares: number, price: number) => request<Proposal>(`/api/proposals/${id}/authorize`, json('POST', { shares, price })),
+  rejectProposal: (id: number) => request<Proposal>(`/api/proposals/${id}/reject`, { method: 'POST' }),
   connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
   testConnector: (name: string) => request<ConnectorTest>(`/api/connectors/${name}/test`, { method: 'POST' }),
   fundNav: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/fund/${code}/nav?days=${days}`),
@@ -195,7 +202,19 @@ export interface SectorRanking { trade_date: string; top: Sector[]; bottom: Sect
 export interface MarketOverview { indices: IndexQuote[]; breadth: { trade_date: string; up: number; down: number; flat: number; median_change_pct: number; limit_up_like: number; limit_down_like: number } }
 export interface ResearchRecord { id: number; created_at: string; question: string; status: string; playbook: string; intent: string; securities: Security[]; evidence_count: number }
 export interface ResearchDetail { id: number; created_at: string; question: string; answer: string
+  checkpoints?: Checkpoint[]; proposals?: Proposal[]
   meta: { status?: string; evidence?: { id: string; tool: string; input: unknown; output: unknown; status: string }[]; tasks?: { agent: string; goal: string }[] } }
+export interface Checkpoint { id: number; message_id: number | null; question: string; playbook: string; code: string; name: string
+  metric: string; metric_label: string; group: 'financial' | 'valuation' | 'market'; op: '>=' | '<='; threshold: number; statement: string
+  baseline_value: number | null; baseline_as_of: string; due: string; due_date: string; status: 'pending' | 'held' | 'broken' | 'unverifiable'
+  actual_value: number | null; actual_as_of: string; checked_at: string | null; created_at: string }
+export interface Proposal { id: number; message_id: number | null; code: string; name: string; asset_type: string; action: string; action_label: string
+  shares: number | null; price_ref: number | null; reason: string; invalidation: string; status: 'proposed' | 'executed' | 'rejected'
+  exec_shares: number | null; exec_price: number | null; decided_at: string | null; created_at: string }
+export interface ScoreRow { total: number; held: number; broken: number; pending: number }
+export interface Scorecard extends ScoreRow { unverifiable: number; hold_rate_pct: number | null; note: string; advice_mode: boolean
+  by_group: (ScoreRow & { group: string; label: string; hold_rate_pct: number | null })[]
+  by_stock: (ScoreRow & { code: string; name: string })[]; recent_verified: Checkpoint[] }
 export interface ConnectorInfo { name: string; label: string; kind: string; transport: string; endpoint: string; enabled: boolean; description: string; auth: string }
 export interface ConnectorTest { ok: boolean; error?: string; allowed_count?: number; blocked_count?: number
   tools: { name: string; description: string; allowed: boolean; reason: string }[] }
@@ -225,7 +244,7 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
 export interface StreamEvent {
   type: string; content?: string; agent?: string; tool?: string; input?: unknown
   id?: string; goal?: string; status?: string; tools?: string[]
-  playbook?: string; securities?: Security[]
+  playbook?: string; securities?: Security[]; items?: Checkpoint[]; proposals?: Proposal[]
   intent?: string; source?: string; success_criteria?: string[]
   tasks?: { id: string; agent: string; goal: string }[]
   evidence?: { id: string; tool: string; status: string; input: unknown; output: unknown; provenance?: { as_of?: Record<string, string | null>; sources?: { url?: string }[] } }

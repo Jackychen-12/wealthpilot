@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：35 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：37 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -349,6 +349,20 @@ async def screen_stocks(
         "sort_by": sort_by, "descending": descending, "limit": limit,
     }.items() if v not in (None, "")}
     return await execute_tool("screen_stocks", criteria, [], {}, None)
+
+
+@mcp.tool()
+async def get_research_track_record() -> str:
+    """Track record of past research: checkpoints held / broken / pending and the hold rate.
+    此前研究的事后验证成绩单：验证点成立 / 被证伪 / 待核对的数量与成立率。"""
+    return await execute_tool("get_research_track_record", {}, [], {}, None)
+
+
+@mcp.tool()
+async def list_checkpoints(code: str = "", status: str = "") -> str:
+    """List checkpoints set by past research with their verification results.
+    列出此前研究设下的验证点及核对结果。code 可选（如 600519），status 可选（pending / held / broken）。"""
+    return await execute_tool("list_checkpoints", {"code": code, "status": status}, [], {}, None)
 
 
 def main() -> None:

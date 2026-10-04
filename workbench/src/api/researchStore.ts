@@ -3,7 +3,7 @@
  * 切到别的页面再回来，对话和正在跑的研究都还在。
  */
 import { useSyncExternalStore } from 'react'
-import { streamChat, type Security, type StreamEvent } from '../api'
+import { streamChat, type Checkpoint, type Proposal, type Security, type StreamEvent } from '../api'
 
 export interface Evidence { id: string; tool: string; agent: string; taskId: string; ok: boolean; input: string; output: string; asOf: string; source: string }
 export interface Task { id: string; agent: string; goal: string; state: 'pending' | 'running' | 'done' | 'failed' }
@@ -12,7 +12,7 @@ export interface Turn {
   id: number; question: string; answer: string; status: string; running: boolean
   intent: string; fallbackPlan: boolean; tasks: Task[]; criteria: string[]; evidence: Evidence[]; checks: Check[]
   missing: string[]; followUps: string[]; seconds: number; error: string
-  playbook: string; securities: Security[]
+  playbook: string; securities: Security[]; checkpoints: Checkpoint[]; proposals: Proposal[]
 }
 
 interface State { turns: Turn[]; selected: number | null; focusEvidence: string }
@@ -38,6 +38,7 @@ function apply(turn: Turn, e: StreamEvent): Turn {
       : [...turn.tasks, { id: e.id || String(turn.tasks.length), agent: e.agent || '', goal: e.goal || '', state }]
   switch (e.type) {
     case 'resolved': return { ...turn, securities: e.securities || [] }
+    case 'checkpoints': return { ...turn, checkpoints: e.items || [], proposals: e.proposals || [] }
     case 'plan':
       return { ...turn, playbook: e.playbook || '', intent: e.intent || '', fallbackPlan: e.source === 'fallback', criteria: e.success_criteria || [],
         tasks: (e.tasks || []).map(t => ({ ...t, state: 'pending' as const })) }
@@ -87,7 +88,7 @@ export const research = {
     const history = state.turns.filter(t => t.status && t.answer).slice(-5)
       .flatMap(t => [{ role: 'user', content: t.question }, { role: 'assistant', content: t.answer }])
     const turn: Turn = { id, question: question.trim(), answer: '', status: '', running: true, intent: '', fallbackPlan: false,
-      tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '', playbook: '', securities: [] }
+      tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '', playbook: '', securities: [], checkpoints: [], proposals: [] }
     emit({ turns: [...state.turns, turn], selected: id, focusEvidence: '' })
 
     const started = Date.now()

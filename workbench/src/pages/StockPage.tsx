@@ -8,6 +8,7 @@ import {
   type StockProfile, type StockQuote, type StockValuation, type Technicals, type ValuationBand, type ValuationHistory,
 } from '../api'
 import { AskAi } from '../components/AskAi'
+import { CheckpointTable } from '../components/Checkpoints'
 import { SecuritySearch, securityPath } from '../components/SecuritySearch'
 import { DEMO_DEFAULTS } from '../demo/defaults'
 import { Button, Callout, Segmented, Tag } from '../components/kit'
@@ -96,6 +97,7 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
             <p className="mt-2 text-[13px] text-steel">行情时间 {q.quote_time}</p>
           </div>
 
+          <StockCheckpoints code={code} />
           <div className="border-b border-hairline"><Segmented value={tab} onChange={setTab} options={TABS} /></div>
           {tab === 'overview' ? <OverviewTab code={code} /> : null}
           {tab === 'financials' ? <FinancialsTab code={code} /> : null}
@@ -105,6 +107,21 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
         </>
       ) : null}
     </DataState>
+  )
+}
+
+/** 此前的研究给这只股票设过的验证点：当初的判断现在还成立几条。没有就不占地方。 */
+const StockCheckpoints: React.FC<{ code: string }> = ({ code }) => {
+  const list = useApi(() => api.checkpoints(code), [code])
+  const items = list.data ?? []
+  if (!items.length) return null
+  const held = items.filter((c) => c.status === 'held').length
+  const broken = items.filter((c) => c.status === 'broken').length
+  return (
+    <Section title="此前研究的验证点" hint={`共 ${items.length} 条 · 成立 ${held} · 被证伪 ${broken} · 待核对 ${items.length - held - broken}`}
+      actions={<Link to="/review" className="text-[13px] text-steel hover:text-ink">验证与复盘</Link>}>
+      <CheckpointTable items={items.slice(0, 6)} showStock={false} />
+    </Section>
   )
 }
 

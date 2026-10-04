@@ -39,6 +39,11 @@ PLAYBOOKS: dict[str, Playbook] = {
         sections=("组合概况", "集中度", "重点持仓", "约束", "关注"),
         criteria=("组合市值、收益与各持仓占比", "回撤与相关性", "按风险画像的约束校验结果"),
     ),
+    "review": Playbook(
+        "review", "事后复盘",
+        sections=("成绩", "成立", "证伪", "启示"),
+        criteria=("验证点的总体成立率与各状态数量", "已核对出结果的验证点明细"),
+    ),
     "screen": Playbook(
         "screen", "选股",
         sections=("筛选条件", "候选", "局限"),
@@ -93,6 +98,13 @@ def build_tasks(playbook: str, securities: list[dict], holdings: list[PortfolioH
                 security = {"code": h.fund_code, "name": h.fund_name}
                 tasks += _stock_tasks(security, ("fundamental", "valuation"), f"h{i + 1}_")
         return tasks
+
+    if playbook == "review":
+        scope = f"，重点看{stocks[0]['name']}（{stocks[0]['code']}）" if stocks else ""
+        headings = "、".join(PLAYBOOKS["review"].sections)
+        return [Task(id="review", agent="review",
+                     goal=f"复盘此前的研究{scope}：成绩单、哪些验证点成立、哪些被证伪及原因、从中得到的启示。"
+                          f"回答用二级标题（## ）依次写出这些章节：{headings}")]
 
     if playbook == "screen":
         return [
