@@ -247,11 +247,25 @@ class TestRewriteLoop:
         assert verdicts[-1].passed is False, "最终仍不通过，但已停止重试"
 
     def test_good_draft_is_not_rewritten(self):
+        class _Honest:
+            calls: list[str] = []
+
+            def run(self, instruction: str = "") -> str:
+                self.calls.append(instruction)
+                return "该基金最新净值 1.5983，前期高点 1.8500。"
+
         critic = CriticAgent(_StubClient(), "m", profile())
-        synth = self._FakeSynthesizer()
-        # 证据里直接含 1.8500，第一版即合规
+        synth = _Honest()
         text, verdicts = self._loop(
-            critic, synth, [result("最新净值 1.5983，目标位 1.8500")], max_rewrites=2
+            critic, synth, [result("最新净值 1.5983，前期高点 1.8500")], max_rewrites=2
         )
         assert len(synth.calls) == 1, "合规的草稿不该触发重写"
         assert verdicts[0].passed
+
+    def test_forecast_is_rejected_even_when_the_number_is_grounded(self):
+        """数字能溯源不等于可以预测：证据里有 1.8500，也不能说"将涨到 1.8500"。"""
+        critic = CriticAgent(_StubClient(), "m", profile())
+        verdict = critic.review_answer("最新净值 1.5983，预计将涨到 1.8500。", [result("最新净值 1.5983，前高 1.8500")])
+        assert not verdict.passed and any("预测" in i for i in verdict.issues)
+        # 否定句不算
+        assert critic.review_answer("最新净值 1.5983，本回答不给目标价。", [result("最新净值 1.5983")]).passed

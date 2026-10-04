@@ -31,7 +31,8 @@ _NUMBER_RE = re.compile(r"(?<![\d.])[+-]?\d+(?:\.\d+)?")
 _DATE_RE = re.compile(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|(?<!\d)\d{1,2}[-/]\d{1,2}(?![\d.%])|\d{1,2}月\d{1,2}日|(?<!\d)\d{1,2}[日号](?!均)")
 # 指数名里的数字是名字的一部分（沪深300、中证500）
 _INDEX_NAME_RE = re.compile(r"(沪深|中证|上证|深证|国证|标普|纳指|纳斯达克|恒生|科创|创业板|MSCI\s?)\d+")
-_LOSS_RE = re.compile(r"回撤|跌|亏|损|回落|下滑|降|减|缩|负")
+# 表示"方向为负"的字：正文说"低于均线 8.59%""下挫 18.82%"时数值不带符号，对应源数据里的负数
+_LOSS_RE = re.compile(r"回撤|[低下跌亏损落滑降减缩负挫弱少]")
 
 
 def _evidence_text(e: dict) -> str:
@@ -54,6 +55,7 @@ class SynthesizerAgent:
         *,
         stream_output: bool = True,
         extra_instruction: str = "",
+        sections: list[str] | None = None,
     ) -> str:
         """整合各 Agent 结果。
 
@@ -63,7 +65,7 @@ class SynthesizerAgent:
             extra_instruction: Critic 的重写要求，追加在证据之后。
         """
         settings = get_settings()
-        system = build_synthesizer_prompt(self.profile, success_criteria)
+        system = build_synthesizer_prompt(self.profile, success_criteria, sections)
         user_content = self._build_evidence_block(question, results)
         if extra_instruction:
             user_content += f"\n\n{extra_instruction}"

@@ -11,15 +11,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlmodel import Session
 
 from wealthpilot.routes.profile import load_profile
-from wealthpilot.services.agents.tools import (
-    COMPUTE_TOOLS,
-    MARKET_TOOLS,
-    PORTFOLIO_TOOLS,
-    QUANT_TOOLS,
-    RISK_TOOLS,
-    STOCK_TOOLS,
-    execute_tool,
-)
+from wealthpilot.services.agents.tools import AGENT_TOOLS, execute_tool
 from wealthpilot.services.context import load_market_context
 from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.services.evidence import record_evidence
@@ -27,14 +19,13 @@ from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
-TOOL_GROUPS = {
-    "market": MARKET_TOOLS, "portfolio": PORTFOLIO_TOOLS, "risk": RISK_TOOLS,
-    "compute": COMPUTE_TOOLS, "quant": QUANT_TOOLS, "stock": STOCK_TOOLS,
-}
-_TOOLS = {t["name"]: (group, t) for group, tools in TOOL_GROUPS.items() for t in tools}
-# 只查公开行情、不需要用户持仓的工具 —— 不必为它们去拉整个组合的行情
-_STATELESS = {"get_fund_info", "get_nav_history", "search_market_news", "compare_funds",
-              "compute_stock_overlap", *(t["name"] for t in STOCK_TOOLS)}
+# 一个工具可能被多个 Agent 共用；清单里按它首次出现的 Agent 归组
+_TOOLS: dict[str, tuple[str, dict]] = {}
+for _group, _tools in AGENT_TOOLS.items():
+    for _tool in _tools:
+        _TOOLS.setdefault(_tool["name"], (_group, _tool))
+# 需要用户持仓才能算的工具；其余只查公开数据，不必为它们去拉整个组合的行情
+_NEEDS_HOLDINGS = {t["name"] for t in AGENT_TOOLS["portfolio"]} | {"calculate_return", "get_max_drawdown", "backtest_rule"}
 
 
 @router.get("")
@@ -61,7 +52,7 @@ async def run_tool(
     if missing:
         raise HTTPException(422, f"缺少参数：{'、'.join(missing)}")
 
-    holdings = [] if name in _STATELESS else user_holdings(db, user_id)
+    holdings = user_holdings(db, user_id) if name in _NEEDS_HOLDINGS else []
     nav_data, nav_history = await load_market_context(holdings) if holdings else ({}, {})
     try:
         output = await execute_tool(name, inputs, holdings, nav_data, nav_history, load_profile(db, user_id))

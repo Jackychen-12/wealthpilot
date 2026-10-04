@@ -5,6 +5,7 @@ import json
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
+from wealthpilot.services import screener
 from wealthpilot.services.analysis import (
     calculate_attribution_by_fund,
     calculate_correlation,
@@ -25,9 +26,11 @@ from wealthpilot.services.lookthrough import (
 from wealthpilot.services.market_data import (
     fetch_fund_info,
     fetch_fund_nav,
+    fetch_indices,
     fetch_market_news,
     get_comprehensive_fund_info,
 )
+from wealthpilot.services.securities import search as search_securities
 from wealthpilot.services.simulation import (
     check_constraints,
     concentration_metrics,
@@ -36,11 +39,18 @@ from wealthpilot.services.simulation import (
     simulate_change,
 )
 from wealthpilot.services.stocks import (
+    fetch_announcements,
+    fetch_dividends,
+    fetch_financial_indicators,
+    fetch_industry_peers,
     fetch_stock_financials,
     fetch_stock_kline,
     fetch_stock_profile,
     fetch_stock_quote,
+    fetch_valuation_history,
     summarize_kline,
+    summarize_technicals,
+    summarize_valuation,
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -401,6 +411,120 @@ STOCK_TOOLS = [
 ]
 
 
+RESEARCH_TOOLS = [
+    {
+        "name": "resolve_security",
+        "description": (
+            "把证券名称、简称或代码解析成确定的代码与类型（股票 / ETF / 基金）。"
+            "**遇到任务上下文里没有给出代码的证券，必须先调用本工具，不得凭记忆写代码。**"
+        ),
+        "input_schema": {"type": "object", "properties": {"query": {"type": "string", "description": "名称、简称或代码，如 茅台、宁德时代、510300"}}, "required": ["query"]},
+    },
+    {
+        "name": "get_financial_indicators",
+        "description": (
+            "查询个股多期主要财务指标：营收与净利润及同比、扣非净利润、ROE、毛利率、净利率、资产负债率、"
+            "每股经营现金流。用于判断盈利质量、成长性与杠杆。每条带 report_date，引用时必须转述报告期。"
+        ),
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE, "periods": {"type": "integer", "description": "取最近几期，默认 8"}}, "required": ["code"]},
+    },
+    {
+        "name": "get_dividend_history",
+        "description": "查询个股历史分红：每 10 股派现、股息率、除权除息日。",
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE}, "required": ["code"]},
+    },
+    {
+        "name": "get_valuation_history",
+        "description": (
+            "查询个股 PE(TTM) / PB / PS 的**历史分位**：当前值处在过去 N 年自身估值区间的什么位置，"
+            "以及区间的最低、中位、最高。这是判断'相对自己历史贵不贵'的依据。"
+        ),
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE, "years": {"type": "integer", "description": "回看年数，默认 5，最多 8"}}, "required": ["code"]},
+    },
+    {
+        "name": "compare_peers_valuation",
+        "description": "把个股的 PE / PB 与同行业公司对比：行业 PE 中位数、该股在行业内的估值排位、主要同行的估值。",
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE}, "required": ["code"]},
+    },
+    {
+        "name": "get_technical_indicators",
+        "description": "计算个股的均线（MA5/20/60）、现价相对均线的偏离、均线排列、20 日年化波动率。只描述已发生的走势。",
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE}, "required": ["code"]},
+    },
+    {
+        "name": "get_industry_peers",
+        "description": "查询个股所属行业、行业内公司数量、该股的市值排名，以及按市值排序的主要同行（含当日涨跌幅）。",
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE}, "required": ["code"]},
+    },
+    {
+        "name": "get_stock_announcements",
+        "description": "查询个股最近的公告标题与日期（财报、分红、重大事项等）。只有标题，没有正文。",
+        "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE, "limit": {"type": "integer", "description": "条数，默认 10"}}, "required": ["code"]},
+    },
+    {
+        "name": "get_sector_ranking",
+        "description": "查询当日各行业涨跌排行（按成分股涨跌幅中位数），返回领涨与领跌的行业及各自的领涨股。",
+        "input_schema": {"type": "object", "properties": {"top": {"type": "integer", "description": "领涨、领跌各取几个，默认 8"}}},
+    },
+    {
+        "name": "get_market_overview",
+        "description": "查询 A 股当日市场概况：主要指数、上涨 / 下跌家数、涨跌幅中位数、涨停跌停家数。",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "screen_stocks",
+        "description": (
+            "按条件在全部 A 股里筛选。条件都是可选的，按需填写；结果由程序确定性地筛出，"
+            "不要自己凭印象列股票。返回匹配总数与排序后的前若干只。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "industry": {"type": "string", "description": "行业名称关键词，如 白酒、银行、半导体"},
+                "mv_min_yi": {"type": "number", "description": "总市值下限（亿元）"},
+                "mv_max_yi": {"type": "number", "description": "总市值上限（亿元）"},
+                "pe_min": {"type": "number"}, "pe_max": {"type": "number", "description": "PE(TTM) 上限；设置后自动排除亏损股"},
+                "pb_max": {"type": "number"},
+                "roe_min": {"type": "number", "description": "ROE 下限（%），取自最近一期业绩"},
+                "revenue_yoy_min": {"type": "number", "description": "营收同比下限（%）"},
+                "profit_yoy_min": {"type": "number", "description": "净利润同比下限（%）"},
+                "change_min": {"type": "number", "description": "当日涨跌幅下限（%）"},
+                "change_max": {"type": "number", "description": "当日涨跌幅上限（%）"},
+                "sort_by": {"type": "string", "enum": list(screener.SORT_KEYS), "description": "排序字段，默认按总市值"},
+                "descending": {"type": "boolean", "description": "是否降序，默认 true"},
+                "limit": {"type": "integer", "description": "返回条数，默认 20，最多 100"},
+            },
+        },
+    },
+]
+
+_ALL_TOOLS = {t["name"]: t for t in [*MARKET_TOOLS, *PORTFOLIO_TOOLS, *RISK_TOOLS, *COMPUTE_TOOLS,
+                                     *QUANT_TOOLS, *STOCK_TOOLS, *RESEARCH_TOOLS]}
+
+
+def _pick(*names: str) -> list[dict]:
+    return [_ALL_TOOLS[n] for n in names]
+
+
+# 按研究维度分组 —— 每个 Agent 拿到的就是这里的一组。同一个工具可以出现在多个组里。
+AGENT_TOOLS: dict[str, list[dict]] = {
+    "fundamental": _pick("resolve_security", "get_stock_profile", "get_stock_financials",
+                         "get_financial_indicators", "get_dividend_history"),
+    "valuation": _pick("resolve_security", "get_stock_valuation", "get_valuation_history", "compare_peers_valuation"),
+    "price": _pick("resolve_security", "get_stock_quote", "get_stock_kline", "get_technical_indicators",
+                   "calculate_return", "get_max_drawdown", "backtest_rule"),
+    "industry": _pick("resolve_security", "get_industry_peers", "get_sector_ranking", "get_stock_announcements",
+                      "search_market_news", "get_market_overview"),
+    "screener": _pick("screen_stocks", "get_sector_ranking"),
+    "portfolio": _pick("get_portfolio_overview", "get_attribution", "get_health_score", "get_investment_suggestions",
+                       "get_drawdown_analysis", "get_correlation_matrix", "lookthrough_portfolio",
+                       "compute_concentration", "simulate_portfolio_change", "check_profile_constraint",
+                       "compute_position_sizing"),
+    "fund": _pick("resolve_security", "get_fund_info", "get_nav_history", "compare_funds",
+                  "compute_stock_overlap", "calculate_return", "get_max_drawdown", "backtest_rule"),
+}
+
+
 def _asset_type_of(code: str, input_data: dict, holdings: list[PortfolioHolding]) -> str:
     """工具入参没指明类型时：持仓里有就按持仓记录，否则按基金。"""
     explicit = input_data.get("asset_type")
@@ -418,6 +542,79 @@ async def execute_tool(
     profile: InvestorProfile | None = None,
 ) -> str:
     """统一工具执行器。"""
+    # === 证券解析 / 研究工具 ===
+    if name == "resolve_security":
+        hits = await search_securities(str(input_data["query"]), 5)
+        if not hits:
+            return f"未找到与「{input_data['query']}」匹配的 A 股、ETF 或基金"
+        return json.dumps({"query": input_data["query"], "matches": hits,
+                           "note": "matches 按相关度排序；asset_type 为 stock / etf / fund"}, ensure_ascii=False)
+
+    if name == "get_financial_indicators":
+        rows = await fetch_financial_indicators(input_data["code"], int(input_data.get("periods", 8)))
+        if not rows:
+            return f"未获取到 {input_data['code']} 的财务指标"
+        return json.dumps({"code": input_data["code"], "reports": rows,
+                           "note": "金额单位亿元；非年报的各期为年初至该期末的累计值；同比为相对上年同期"},
+                          ensure_ascii=False)
+
+    if name == "get_dividend_history":
+        rows = await fetch_dividends(input_data["code"])
+        if not rows:
+            return f"未获取到 {input_data['code']} 的分红记录"
+        return json.dumps({"code": input_data["code"], "dividends": rows}, ensure_ascii=False)
+
+    if name == "get_valuation_history":
+        years = max(1, min(int(input_data.get("years", 5)), 8))
+        history = await fetch_valuation_history(input_data["code"], years)
+        if not history:
+            return f"未获取到 {input_data['code']} 的历史估值"
+        return json.dumps({"code": input_data["code"], "name": history[0]["name"], **summarize_valuation(history),
+                           "note": "percentile 为当前值在窗口内自身历史中的分位（0 最便宜，100 最贵）；"
+                                   "只和自己的历史比，不代表绝对便宜或贵"}, ensure_ascii=False)
+
+    if name in ("compare_peers_valuation", "get_industry_peers"):
+        data = await fetch_industry_peers(input_data["code"])
+        if not data:
+            return f"未获取到 {input_data['code']} 的同行业数据"
+        if name == "get_industry_peers":
+            return json.dumps({k: data[k] for k in ("industry", "as_of", "peer_count", "mv_rank", "target")}
+                              | {"peers": data["peers"][:15]}, ensure_ascii=False)
+        ranked = sorted((p for p in data["peers"] if p["pe_ttm"] and p["pe_ttm"] > 0), key=lambda p: p["pe_ttm"])
+        target = data["target"] or {}
+        return json.dumps({
+            "industry": data["industry"], "as_of": data["as_of"], "peer_count": data["peer_count"],
+            "target": target, "industry_median_pe": data["industry_median_pe"],
+            "pe_rank_low_to_high": next((i + 1 for i, p in enumerate(ranked) if p["code"] == target.get("code")), None),
+            "positive_pe_peer_count": len(ranked),
+            "largest_peers": [{k: p[k] for k in ("code", "name", "pe_ttm", "pb", "total_mv_yi")} for p in data["peers"][:10]],
+            "note": "pe_rank_low_to_high 为该股 PE 在同行业盈利公司中由低到高的名次；亏损公司不参与排名",
+        }, ensure_ascii=False)
+
+    if name == "get_technical_indicators":
+        kline = await fetch_stock_kline(input_data["code"], 120)
+        if len(kline) < 20:
+            return f"未获取到 {input_data['code']} 足够的日线数据"
+        return json.dumps({"code": input_data["code"], **summarize_technicals(kline)}, ensure_ascii=False)
+
+    if name == "get_stock_announcements":
+        rows = await fetch_announcements(input_data["code"], int(input_data.get("limit", 10)))
+        if not rows:
+            return f"未获取到 {input_data['code']} 的公告"
+        return json.dumps({"code": input_data["code"], "announcements": rows,
+                           "note": "仅标题与日期，未读取公告正文"}, ensure_ascii=False)
+
+    if name in ("get_sector_ranking", "get_market_overview", "screen_stocks"):
+        snap = await screener.snapshot()
+        if not snap:
+            return "未获取到全市场快照，暂时无法筛选或统计"
+        if name == "get_sector_ranking":
+            return json.dumps(screener.sector_ranking(snap, int(input_data.get("top", 8))), ensure_ascii=False)
+        if name == "screen_stocks":
+            return json.dumps(screener.screen(snap, input_data), ensure_ascii=False)
+        return json.dumps({"indices": await fetch_indices(), "breadth": screener.market_breadth(snap)},
+                          ensure_ascii=False)
+
     # === 个股工具 ===
     if name in ("get_stock_quote", "get_stock_valuation"):
         code = input_data["code"]

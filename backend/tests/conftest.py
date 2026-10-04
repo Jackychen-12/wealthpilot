@@ -25,6 +25,24 @@ os.environ["CONNECTORS_FILE"] = str(_TMP_DIR / "connectors.json")
 import pytest  # noqa: E402 — 必须在设置 DB_PATH 之后
 
 
+@pytest.fixture(autouse=True)
+def _no_network_security_resolution(monkeypatch):
+    """编排器在规划前会解析证券（要拉全市场快照、打搜索接口）。测试里一律不联网：
+    默认解析不出任何证券；需要解析结果的测试自己再覆盖这几个桩。"""
+    from wealthpilot.services.agents import orchestrator
+    from wealthpilot.services.agents.planner_agent import PlannerAgent
+
+    async def nothing(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(orchestrator, "resolve_text", nothing)
+    monkeypatch.setattr(orchestrator, "resolve_names", nothing)
+    monkeypatch.setattr(PlannerAgent, "extract_names", lambda self, *a, **k: [])
+    # 全市场快照同理：冒烟测试会扫到选股相关的接口，不能让它们去拉真实数据
+    from wealthpilot.services import screener
+    monkeypatch.setattr(screener, "_load_snapshot", nothing)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _cleanup_temp_db():
     yield

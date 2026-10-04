@@ -1,4 +1,4 @@
-"""WealthPilot MCP Server — 24 investment tools for Claude Code / Cursor."""
+"""WealthPilot MCP Server — 35 investment tools for Claude Code / Cursor."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：24 个实时投资分析工具，覆盖基金与 A 股个股查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：35 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -258,6 +258,97 @@ async def get_stock_profile(code: str) -> str:
     """Company profile: industry, region, market cap.
     个股所属行业、地域板块与市值。"""
     return await execute_tool("get_stock_profile", {"code": code}, [], {}, None)
+
+
+# ═══════════════════════════════════════════════════════════
+# Research Tools（证券解析、估值分位、财务指标、同行、选股）
+# ═══════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def resolve_security(query: str) -> str:
+    """Resolve a security name or code to its exact code and type (stock / etf / fund).
+    把证券名称、简称或代码解析成确定的代码与类型。不确定代码时先调用它。"""
+    return await execute_tool("resolve_security", {"query": query}, [], {}, None)
+
+
+@mcp.tool()
+async def get_financial_indicators(code: str, periods: int = 8) -> str:
+    """Multi-period financial indicators: revenue, profit, ROE, margins, debt ratio, cash flow.
+    个股多期主要财务指标：营收与净利润及同比、ROE、毛利率、净利率、负债率、每股经营现金流。"""
+    return await execute_tool("get_financial_indicators", {"code": code, "periods": periods}, [], {}, None)
+
+
+@mcp.tool()
+async def get_dividend_history(code: str) -> str:
+    """Dividend history: cash per 10 shares, yield, ex-dividend date.
+    个股历史分红：每 10 股派现、股息率、除权除息日。"""
+    return await execute_tool("get_dividend_history", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_valuation_history(code: str, years: int = 5) -> str:
+    """Historical percentile of PE(TTM) / PB / PS over the past N years.
+    个股 PE / PB / PS 的历史分位：当前值处在过去 N 年自身估值区间的什么位置。"""
+    return await execute_tool("get_valuation_history", {"code": code, "years": years}, [], {}, None)
+
+
+@mcp.tool()
+async def compare_peers_valuation(code: str) -> str:
+    """Compare a stock's PE / PB with its industry peers.
+    个股估值与同行业公司对比：行业 PE 中位数、行业内估值排位、主要同行估值。"""
+    return await execute_tool("compare_peers_valuation", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_technical_indicators(code: str) -> str:
+    """Moving averages (MA5/20/60), deviation, alignment, 20-day annualized volatility.
+    个股均线、现价相对均线的偏离、均线排列、20 日年化波动率。"""
+    return await execute_tool("get_technical_indicators", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_industry_peers(code: str) -> str:
+    """Industry, market-cap rank, and main peers of a stock.
+    个股所属行业、行业内市值排名与主要同行。"""
+    return await execute_tool("get_industry_peers", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_stock_announcements(code: str, limit: int = 10) -> str:
+    """Recent company announcement titles and dates.
+    个股最近的公告标题与日期（不含正文）。"""
+    return await execute_tool("get_stock_announcements", {"code": code, "limit": limit}, [], {}, None)
+
+
+@mcp.tool()
+async def get_sector_ranking(top: int = 8) -> str:
+    """Today's industry ranking by median change of constituents.
+    当日各行业涨跌排行（按成分股涨跌幅中位数）。"""
+    return await execute_tool("get_sector_ranking", {"top": top}, [], {}, None)
+
+
+@mcp.tool()
+async def get_market_overview() -> str:
+    """A-share market overview: indices, advancers / decliners, median change.
+    A 股当日市场概况：主要指数、涨跌家数、涨跌幅中位数、涨停跌停家数。"""
+    return await execute_tool("get_market_overview", {}, [], {}, None)
+
+
+@mcp.tool()
+async def screen_stocks(
+    industry: str = "", mv_min_yi: float | None = None, mv_max_yi: float | None = None,
+    pe_max: float | None = None, pb_max: float | None = None, roe_min: float | None = None,
+    revenue_yoy_min: float | None = None, profit_yoy_min: float | None = None,
+    sort_by: str = "total_mv_yi", descending: bool = True, limit: int = 20,
+) -> str:
+    """Screen all A-shares by industry, market cap, PE/PB, ROE and growth.
+    按条件在全部 A 股里筛选：行业、市值、PE/PB、ROE、营收与净利增速。结果由程序确定性地筛出。"""
+    criteria = {k: v for k, v in {
+        "industry": industry, "mv_min_yi": mv_min_yi, "mv_max_yi": mv_max_yi, "pe_max": pe_max, "pb_max": pb_max,
+        "roe_min": roe_min, "revenue_yoy_min": revenue_yoy_min, "profit_yoy_min": profit_yoy_min,
+        "sort_by": sort_by, "descending": descending, "limit": limit,
+    }.items() if v not in (None, "")}
+    return await execute_tool("screen_stocks", criteria, [], {}, None)
 
 
 def main() -> None:
