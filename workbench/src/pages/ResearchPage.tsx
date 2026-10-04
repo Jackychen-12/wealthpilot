@@ -1,7 +1,9 @@
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, ChevronRight, ListTree, Square, SquarePen } from 'lucide-react'
+import { DEMO } from '../api'
 import { research, useResearch, type Evidence, type Turn } from '../api/researchStore'
+import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
 import { Button, Callout, Dot, Drawer, Tag, type Tone } from '../components/kit'
 import { cn } from '../utils/cn'
@@ -61,7 +63,18 @@ const ResearchPage: React.FC = () => {
               <>
                 <h1 className="text-[32px] font-semibold leading-tight tracking-[-0.5px] text-ink">想研究什么？</h1>
                 <p className="mt-2 text-base text-steel">每个问题会被拆成任务，交给专业 Agent 并行取证；回答通过校验后才发布，右侧能看到每一步。</p>
-                <div className="mt-8 grid gap-3 sm:grid-cols-2">
+                {DEMO ? (
+                  <div className="mt-8 rounded-lg border border-hairline p-4">
+                    <p className="mb-2 text-[13px] text-steel">在线演示没有连接模型，可以回放下面这几次真实的研究过程：</p>
+                    {demoFixtures.map((q) => (
+                      <button key={q} type="button" onClick={() => send(q)}
+                        className="-mx-1.5 block w-[calc(100%+0.75rem)] rounded-sm px-1.5 py-1.5 text-left text-sm text-charcoal transition-colors hover:bg-hover">
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <div className={cn('mt-8 grid gap-3 sm:grid-cols-2', DEMO && 'hidden')}>
                   {STARTERS.map((s) => (
                     <div key={s.agent} className="rounded-lg border border-hairline p-4">
                       <div className="mb-2 flex items-center gap-2">
@@ -135,7 +148,7 @@ const ResearchPage: React.FC = () => {
             className="flex items-end gap-2 rounded-xl border border-hairline-strong bg-canvas p-2 shadow-subtle transition-shadow focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
             <textarea
               id="research-input" rows={1} value={draft} disabled={busy}
-              placeholder={busy ? '研究进行中…' : '输入问题，Enter 发送，Shift+Enter 换行'}
+              placeholder={busy ? '研究进行中…' : DEMO ? '在线演示只能回放上面的示例问题' : '输入问题，Enter 发送，Shift+Enter 换行'}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(draft) } }}
               className="max-h-36 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-[15px] text-ink outline-none placeholder:text-stone disabled:opacity-60"

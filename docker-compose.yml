@@ -1,6 +1,6 @@
 # WealthPilot — 一键启动前后端
 # 用法: docker compose up --build
-# 前端: http://localhost:5173
+# 工作台: http://localhost:5180
 # 后端: http://localhost:8000/docs
 
 services:
@@ -23,14 +23,14 @@ services:
       retries: 3
       start_period: 10s
 
-  frontend:
+  workbench:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    container_name: wealthpilot-frontend
+    container_name: wealthpilot-workbench
     restart: unless-stopped
     ports:
-      - "5173:80"
+      - "5180:80"
     depends_on:
       backend:
         condition: service_healthy

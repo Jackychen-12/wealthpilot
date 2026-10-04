@@ -2,7 +2,8 @@ import type React from 'react'
 import { useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { api, runTool, useApi, type ConstraintCheck, type Simulation } from '../api'
+import { DEMO, api, runTool, useApi, type ConstraintCheck, type Simulation } from '../api'
+import { DEMO_DEFAULTS } from '../demo/defaults'
 import { AskAi } from '../components/AskAi'
 import { Button, Callout, Input, Select, Tag } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed, yuan } from '../components/ui'
@@ -17,7 +18,7 @@ const RebalancePage: React.FC = () => {
   const nameOf = (code: string) => rows.find((h) => h.fund_code === code)?.fund_name ?? code
   const [changes, setChanges] = useState<Change[]>([])
   const firstCode = rows[0]?.fund_code
-  useEffect(() => { if (changes.length === 0 && firstCode) setChanges([{ fund_code: firstCode, mode: 'target_pct', value: '' }]) }, [changes.length, firstCode])
+  useEffect(() => { if (changes.length === 0 && firstCode) setChanges([DEMO ? DEMO_DEFAULTS.rebalance : { fund_code: firstCode, mode: 'target_pct', value: '' }]) }, [changes.length, firstCode])
   const [result, setResult] = useState<{ loading: boolean; error: string; sim: Simulation | null; check: ConstraintCheck | null }>({ loading: false, error: '', sim: null, check: null })
 
   const update = (i: number, patch: Partial<Change>) => setChanges((cs) => cs.map((c, k) => (k === i ? { ...c, ...patch } : c)))

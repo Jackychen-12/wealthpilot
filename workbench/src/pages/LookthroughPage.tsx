@@ -1,6 +1,7 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import { api, runTool, useApi, type Lookthrough, type Overlap } from '../api'
+import { DEMO, api, runTool, useApi, type Lookthrough, type Overlap } from '../api'
+import { DEMO_DEFAULTS } from '../demo/defaults'
 import { AskAi } from '../components/AskAi'
 import { Button, Callout, Select, Tag } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td } from '../components/ui'
@@ -11,8 +12,8 @@ const LookthroughPage: React.FC = () => {
   const funds = (holdings.data ?? []).filter((h) => h.asset_type === 'fund')
   const nameOf = (code: string) => funds.find((f) => f.fund_code === code)?.fund_name ?? code
 
-  const [a, setA] = useState('')
-  const [b, setB] = useState('')
+  const [a, setA] = useState(DEMO ? DEMO_DEFAULTS.overlap.a : '')
+  const [b, setB] = useState(DEMO ? DEMO_DEFAULTS.overlap.b : '')
   const firstCode = funds[0]?.fund_code
   const secondCode = funds[1]?.fund_code
   useEffect(() => { if (!a && firstCode) setA(firstCode); if (!b && secondCode) setB(secondCode) }, [a, b, firstCode, secondCode])

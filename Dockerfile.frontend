@@ -1,9 +1,9 @@
-FROM node:20-alpine AS builder
+# 工作台：构建静态文件，由 nginx 托管并把 /api 反代到后端（同源，无需 CORS）
+FROM node:22-alpine AS builder
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY workbench/package.json workbench/package-lock.json ./
 RUN npm ci
-COPY . .
-ENV VITE_API_URL=http://localhost:8000
+COPY workbench/ .
 RUN npm run build
 
 FROM nginx:alpine

@@ -1,7 +1,8 @@
 import type React from 'react'
 import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { runTool, type Backtest } from '../api'
+import { DEMO, runTool, type Backtest } from '../api'
+import { DEMO_DEFAULTS } from '../demo/defaults'
 import { AskAi } from '../components/AskAi'
 import { Button, Callout, Input, Tag } from '../components/kit'
 import { DataState, Page, Section, Table, Td, signClass, signed, yuan } from '../components/ui'
@@ -10,7 +11,7 @@ import { cn } from '../utils/cn'
 type Trigger = { drawdown_pct: string; add_pct: string }
 
 const BacktestPage: React.FC = () => {
-  const [code, setCode] = useState('')
+  const [code, setCode] = useState(DEMO ? DEMO_DEFAULTS.fund : '')
   const [days, setDays] = useState('250')
   const [stopLoss, setStopLoss] = useState('')
   const [triggers, setTriggers] = useState<Trigger[]>([{ drawdown_pct: '5', add_pct: '30' }, { drawdown_pct: '10', add_pct: '70' }])

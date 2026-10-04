@@ -317,3 +317,13 @@ async def test_mostly_grounded_draft_is_published_with_named_gaps(monkeypatch):
     done = _done(events)
     assert done["meta"]["status"] == "partial"
     assert "未能核对的数字" in done["content"] and "999.9" in done["content"]
+
+
+def test_restating_profile_constraints_and_day_of_month_is_grounded():
+    from wealthpilot.models.profile import InvestorProfile
+    from wealthpilot.services.agents.critic_agent import CriticAgent
+    profile = InvestorProfile(user_id=1, risk_level=3, horizon_months=36, max_drawdown_tolerance=0.2,
+                              liquidity_reserve=20000, experience_years=4)
+    results = [_ev("E-aaaaaaaaaaaa", "净值 4.0054")]
+    answer = "净值 4.0054 [E-aaaaaaaaaaaa]，23日至28日小幅回落。按你的画像（36 个月、最大回撤 20%、储备金 20000 元）核对。"
+    assert CriticAgent(None, "m", profile).review_answer(answer, results).ungrounded_numbers == []

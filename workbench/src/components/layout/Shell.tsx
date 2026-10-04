@@ -2,6 +2,7 @@ import type React from 'react'
 import { useState } from 'react'
 import { Menu } from 'lucide-react'
 import { Outlet } from 'react-router-dom'
+import { DEMO } from '../../api'
 import { Drawer } from '../kit'
 import { SidebarNav, type SidebarNavProps } from './SidebarNav'
 
@@ -21,6 +22,12 @@ export const Shell: React.FC<Omit<SidebarNavProps, 'onNavigate'>> = (navProps) =
           </button>
           <span className="text-sm font-semibold">WealthPilot</span>
         </div>
+        {DEMO ? (
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline bg-tint-yellow px-4 py-2 text-[13px] text-on-yellow">
+            <span><b>在线演示</b> · 一份示例组合在真实行情和真实模型上跑出的结果，录制后回放，只读、非实时</span>
+            <a className="font-medium underline underline-offset-2" href="https://github.com/Jackychen-12/wealthpilot#quick-start" target="_blank" rel="noreferrer">在本地运行完整版</a>
+          </div>
+        ) : null}
         <main className="min-h-0 flex-1 overflow-y-auto"><Outlet /></main>
       </div>
       <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} title="导航" side="left" width="max-w-[280px]">

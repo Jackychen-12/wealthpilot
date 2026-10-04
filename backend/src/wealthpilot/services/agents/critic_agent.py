@@ -142,6 +142,13 @@ class CriticAgent:
         grounding = check_numeric_grounding(answer, results)
         # 用户在问题里自己给出的数字（规则参数、金额）复述出来不算编造
         asked = {float(m.group()) for m in re.finditer(r"\d+(?:\.\d+)?", question)}
+        if self.profile is not None:
+            # 画像里的约束值（期限、回撤容忍度、储备金）是系统给模型的前提，转述它们不算编造
+            p = self.profile
+            asked |= {float(v) for v in (
+                p.risk_level, p.horizon_months, round(p.max_drawdown_tolerance * 100, 2),
+                p.liquidity_reserve, p.experience_years, getattr(p, "available_cash", None),
+            ) if v is not None}
         if asked and grounding["ungrounded"]:
             grounding["ungrounded"] = [n for n in grounding["ungrounded"] if abs(float(n)) not in asked]
         # 画像存在时，动作幅度是用户提出的目标而非行情事实；其是否可执行由

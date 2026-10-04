@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
-    frontend_url: str = "http://localhost:5173"
+    frontend_url: str = "http://localhost:5180"
 
     @property
     def active_model(self) -> str:
