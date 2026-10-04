@@ -104,7 +104,7 @@ HISTORY = "/api/research/history"
 def record_chat(client: TestClient, question: str) -> list[dict]:
     events, started = [], time.time()
     # 带上会话 ID，后端才会把这一轮存进研究记录
-    with client.stream("POST", "/api/chat", json={"message": question, "history": [], "conversation_id": f"demo-{QUESTIONS.index(question)}"}) as resp:
+    with client.stream("POST", "/api/chat", json={"message": question, "history": [], "conversation_id": f"demo-{QUESTIONS.index(question)}-{time.time_ns()}"}) as resp:
         for line in resp.iter_lines():
             if not line.startswith("data: "):
                 continue
@@ -157,9 +157,13 @@ def main() -> None:
             fixtures["chats"][question] = previous[question]
             print("CHAT", question, "-> 沿用已有录制")
             continue
-        events = record_chat(client, question)
-        status = events[-1].get("meta", {}).get("status")
-        print("CHAT", question, "->", status)
+        # 模型和行情接口偶尔抖一下：没跑出可发布的回答就再试，最多三次
+        for attempt in range(3):
+            events = record_chat(client, question)
+            status = events[-1].get("meta", {}).get("status")
+            print("CHAT", question, "->", status, f"（第 {attempt + 1} 次）" if attempt else "")
+            if status in ("passed", "partial"):
+                break
         if status not in ("passed", "partial"):
             sys.exit(f"这个问题没有跑出可发布的回答（{status}），不写入快照；请重试")
         fixtures["chats"][question] = events
@@ -171,7 +175,7 @@ def main() -> None:
     first = fixtures["tools"]["get_stock_announcements"]["result"]["data"]["announcements"][0]["art_code"]
     fixtures["get"][f"/api/filings/{first}?page=1"] = client.get(f"/api/filings/{first}?page=1").json()
     # 研究记录：本次新录的由后端存下；沿用旧录制时，把旧快照里对应的记录带过来
-    records = client.get(HISTORY).json()
+    records = [r for r in client.get(HISTORY).json() if r["status"] in ("passed", "partial")]   # 重试前失败的那几次不进演示
     fixtures["get"][HISTORY] = records
     for r in records:
         fixtures["get"][f"{HISTORY}/{r['id']}"] = client.get(f"{HISTORY}/{r['id']}").json()

@@ -42,7 +42,7 @@ PLAYBOOKS: dict[str, Playbook] = {
     "review": Playbook(
         "review", "事后复盘",
         sections=("成绩", "成立", "证伪", "启示"),
-        criteria=("验证点的总体成立率与各状态数量", "已核对出结果的验证点明细"),
+        criteria=("验证点的总数与各状态（成立 / 被证伪 / 待核对）的数量",),
     ),
     "screen": Playbook(
         "screen", "选股",
