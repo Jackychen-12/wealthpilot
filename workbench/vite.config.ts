@@ -6,6 +6,8 @@ import tailwindcss from '@tailwindcss/vite'
 const backend = process.env.WP_BACKEND || 'http://127.0.0.1:8000'
 
 export default defineConfig({
+  // 部署到子路径（如 GitHub Pages 的 /wealthpilot/）时用 WP_BASE 指定
+  base: process.env.WP_BASE || '/',
   plugins: [tailwindcss(), react()],
   server: {
     port: Number(process.env.WP_PORT) || 5180,

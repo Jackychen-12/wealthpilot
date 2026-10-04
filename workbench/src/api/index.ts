@@ -8,6 +8,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 // 默认走同源：开发时由 Vite 代理到后端，部署时由后端直接托管页面
 export const API_BASE: string = import.meta.env.VITE_API_URL || ''
+/** 在线演示构建：没有后端，回放录好的真实结果（见 src/demo）。 */
+export const DEMO = import.meta.env.VITE_DEMO === '1'
 const TOKEN_KEY = 'wp_token'
 const USER_KEY = 'wp_user'
 
@@ -23,6 +25,14 @@ const authHeaders = (): Record<string, string> => (session.token ? { Authorizati
 export class ApiError extends Error {}
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (DEMO) {
+    const { demoRequest } = await import('../demo')
+    try {
+      return (await demoRequest(path, init)) as T
+    } catch (e) {
+      throw new ApiError(e instanceof Error ? e.message : '演示数据不可用')
+    }
+  }
   let resp: Response
   try {
     resp = await fetch(`${API_BASE}${path}`, { ...init, headers: { ...authHeaders(), ...(init.headers || {}) } })
@@ -182,6 +192,11 @@ export interface StreamEvent {
 export async function* streamChat(
   message: string, history: { role: string; content: string }[], signal: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
+  if (DEMO) {
+    const { demoChat } = await import('../demo')
+    yield* demoChat(message, signal)
+    return
+  }
   const resp = await fetch(`${API_BASE}/api/chat`, { ...json('POST', { message, history }), headers: { 'Content-Type': 'application/json', ...authHeaders() }, signal })
   if (!resp.ok || !resp.body) throw new ApiError(`对话请求失败（${resp.status}）`)
   const reader = resp.body.getReader()

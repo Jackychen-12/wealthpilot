@@ -1,7 +1,8 @@
 import type React from 'react'
 import { useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { api, runTool, type FundInfo, type NavPoint } from '../api'
+import { DEMO, api, runTool, type FundInfo, type NavPoint } from '../api'
+import { DEMO_DEFAULTS } from '../demo/defaults'
 import { AskAi } from '../components/AskAi'
 import { Button, Input, Segmented } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, signClass, signed } from '../components/ui'
@@ -9,7 +10,7 @@ import { DataState, Metric, Metrics, Page, Section, signClass, signed } from '..
 const RANGES = [['21', '近 1 月'], ['63', '近 3 月'], ['125', '近半年'], ['250', '近 1 年']] as const
 
 const FundPage: React.FC = () => {
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(DEMO ? DEMO_DEFAULTS.fund : '')
   const [code, setCode] = useState('')
   const [days, setDays] = useState('63')
   const [state, setState] = useState<{ loading: boolean; error: string; info: FundInfo | null; nav: NavPoint[] }>({ loading: false, error: '', info: null, nav: [] })

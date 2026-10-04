@@ -2,6 +2,7 @@ import type React from 'react'
 import { useState } from 'react'
 import { BriefcaseBusiness, FileText, History, Layers, LayoutDashboard, LogIn, LogOut, MessageSquareText, Moon, Scale, Search, ShieldCheck, Sun, UserRoundCog, Zap } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
+import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
 import { Dot } from '../kit'
 
@@ -78,13 +79,13 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ onNavigate, backend, use
       <div className="mt-3 flex flex-col gap-0.5 border-t border-hairline pt-3">
         <div className="flex items-center gap-2.5 px-2.5 py-1 text-[13px] text-steel">
           <Dot tone={backend === 'ok' ? 'green' : backend === 'down' ? 'red' : 'gray'} pulse={backend === 'checking'} />
-          {backend === 'ok' ? '后端已连接' : backend === 'down' ? '后端未连接' : '连接中'}
+          {DEMO ? '演示数据（回放）' : backend === 'ok' ? '后端已连接' : backend === 'down' ? '后端未连接' : '连接中'}
         </div>
         <button type="button" onClick={toggleTheme} className={ITEM}>
           {dark ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
           <span>{dark ? '浅色模式' : '深色模式'}</span>
         </button>
-        {username ? (
+        {DEMO ? null : username ? (
           <button type="button" onClick={onLogout} className={ITEM}><LogOut className="h-4 w-4 shrink-0" /><span className="truncate">退出 {username}</span></button>
         ) : (
           <button type="button" onClick={onLogin} className={ITEM}><LogIn className="h-4 w-4 shrink-0" /><span className="truncate">登录</span><span className="ml-auto text-xs text-stone">匿名档</span></button>

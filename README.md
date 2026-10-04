@@ -11,14 +11,13 @@
 
 <p align="center">
   <a href="https://jackychen-12.github.io/wealthpilot/">Live Demo</a> &nbsp;|&nbsp;
-  <a href="https://jackychen-12.github.io/wealthpilot/showcase.html">Showcase</a> &nbsp;|&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;|&nbsp;
   <a href="#quick-start">Quick Start</a> &nbsp;|&nbsp;
   <a href="#api-reference">API Docs</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React 18" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/Claude_AI-Multi--Agent-7C3AED?logo=anthropic&logoColor=white" alt="Claude AI" />
@@ -85,7 +84,7 @@ git clone https://github.com/Jackychen-12/wealthpilot.git && cd wealthpilot
 cp backend/.env.example backend/.env
 # 编辑 backend/.env 填入 API Key
 docker compose up --build -d
-# Frontend: http://localhost:5173  |  Backend API: http://localhost:8000/docs
+# 工作台: http://localhost:5180  |  Backend API: http://localhost:8000/docs
 ```
 
 ### 配置 AI 提供商
@@ -209,8 +208,8 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                Frontend (Vite + React 18 + TypeScript)        │
-│     11 pages · API layer with mock fallback · SSE streaming   │
+│          Workbench (Vite + React 19 + TypeScript)             │
+│   11 pages · real data only · SSE research process view       │
 │     SVG icon system · Animated transitions · Smart demo mode  │
 └────────────────────────────┬─────────────────────────────────┘
                              │ HTTP / SSE
@@ -248,7 +247,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 
 | 层 | 技术 |
 |----|------|
-| Frontend | Vite 6, React 18, TypeScript 5.6, SSE Streaming, SVG Icon System |
+| Frontend | Vite 7, React 19, TypeScript 5.9, Tailwind 4, Recharts（`workbench/`） |
 | Backend | Python 3.11+, FastAPI, SQLModel, Uvicorn |
 | AI | Claude API (Anthropic SDK) + DeepSeek (OpenAI SDK)，Planner / 4 Agent / Critic / Synthesizer |
 | 数据源 | AKShare（免费）、东方财富 API、天天基金 API、新浪财经 API |
@@ -261,22 +260,6 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 ---
 
 ## Features
-
-### 11 个页面
-
-```
-Home ─────→ Portfolio（持仓管理：手动添加 / CSV导入 / 截图OCR）
-  │
-  ├──→ Overview ──→ Attribution（收益归因：按基金/行业/资产类型）
-  │         ├──→ Drawdown（回撤分析 + 恢复天数）
-  │         ├──→ Health（5 维健康度雷达图）
-  │         ├──→ Suggestions（AI 调仓建议）
-  │         └──→ Weekly Report（LLM 生成周报）
-  │
-  ├──→ Chat（多智能体 AI 对话 · Planner → 4 专业 Agent → Critic · SSE）
-  ├──→ Login（JWT 注册/登录）
-  └──→ Risk Profile（风险偏好问卷评估）
-```
 
 ### 功能矩阵
 
@@ -318,7 +301,7 @@ Home ─────→ Portfolio（持仓管理：手动添加 / CSV导入 / �
 
 工作台代码在 `workbench/`（React 19 + Vite + Tailwind 4），视觉遵循 Notion 的设计规范：白色画布、暖灰侧栏、细线边框、柔和色标签。未登录时使用本机匿名档（`user_id = 0`）的持仓，登录后切换到自己的账户。
 
-仓库根目录的 `src/` 是早期的**移动端演示页**（`make demo`，:5173），无后端时用示例数据展示交互，也是 GitHub Pages 上的在线演示；它不是日常使用的入口。
+**在线演示**（GitHub Pages）是同一个工作台的只读版本：Pages 上没有后端，所以构建成演示模式（`make demo-build`），回放一份示例组合在真实行情、真实工具、真实模型上跑出来的结果，页面顶部有明确标注。数据快照由 `make record-demo` 录制，写操作和没录过的查询会如实提示"演示模式不支持"。
 
 ---
 
@@ -440,7 +423,8 @@ make setup     # 首次配置：安装依赖 + 复制 .env
 make dev       # 启动后端 + 工作台（http://localhost:5180）
 make backend   # 仅启动后端
 make workbench # 仅启动工作台
-make demo      # 启动移动端演示页（:5173）
+make demo-build   # 构建在线演示版（只读，回放录好的结果）
+make record-demo  # 重新录制演示数据（会调用真实模型）
 make test      # 运行测试
 make config    # 查看当前配置
 make chat      # 终端 AI 对话
@@ -554,19 +538,15 @@ make clean     # 清理生成文件
 wealthpilot/
 ├── Makefile                     # 一键命令入口
 ├── docker-compose.yml           # Docker 部署
-├── showcase.html                # 项目展示页
 │
 ├── workbench/                   # ⭐ 投研工作台（桌面端，日常使用入口）
 │   └── src/
 │       ├── api/                 #   接口层（失败即报错，无示例数据兜底）+ 研究会话状态
 │       ├── components/          #   Notion 风格组件（kit）、页面积木（ui）、外壳与导航
-│       └── pages/               #   11 个功能页：研究 / 总览 / 持仓 / 穿透 / 风险 / 压测 / 调仓 / 基金 / 回测 / 周报 / 画像
+│       ├── pages/               #   11 个功能页：研究 / 总览 / 持仓 / 穿透 / 风险 / 压测 / 调仓 / 基金 / 回测 / 周报 / 画像
+│       └── demo/                #   在线演示模式：录好的真实结果 + 回放逻辑
 │
 ├── docs/stock-roadmap.md        # 股票能力规划
-│
-├── src/                         # 移动端演示页（React，GitHub Pages 在线演示）
-│   ├── pages/                   #   11 个页面组件
-│   └── data/mock.ts             #   无后端时的示例数据
 │
 └── backend/                     # Backend (Python)
     ├── .env.example             #   环境配置模板
@@ -623,10 +603,16 @@ cp backend/.env.example backend/.env
 docker compose up --build -d
 ```
 
-### Railway（后端）+ GitHub Pages（前端）
+启动后工作台在 http://localhost:5180，由 nginx 托管并把 `/api` 反代到后端容器。
 
-1. Fork 仓库 → Railway 连接，Root Directory = `backend`，设置 `ANTHROPIC_API_KEY` + `JWT_SECRET`
-2. 前端构建：`VITE_API_URL=https://your-backend.railway.app npm run build`
+### 后端与工作台分开部署
+
+1. 后端：任意能跑容器的平台（如 Railway），Root Directory = `backend`，设置模型 Key 与 `JWT_SECRET`，并把 `FRONTEND_URL` 设为工作台的域名（CORS 白名单）
+2. 工作台：`cd workbench && VITE_API_URL=https://你的后端域名 npm run build`，把 `dist/` 放到任意静态托管
+
+### GitHub Pages 在线演示
+
+推送到 `main` 后由 `.github/workflows/deploy.yml` 自动构建演示版并发布，不需要后端。
 
 ---
 
