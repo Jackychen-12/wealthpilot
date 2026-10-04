@@ -29,7 +29,7 @@ const RiskPage: React.FC = () => {
       {dd?.summary && h ? (
         <Metrics>
           <Metric label="健康度总分" value={h.overall_score} hint={h.overall_status} />
-          <Metric label="平均最大回撤" value={`${dd.summary.avg_drawdown_pct}%`} hint="近 60 个交易日" />
+          <Metric label="平均最大回撤" value={dd.summary.avg_drawdown_pct == null ? '—' : `${dd.summary.avg_drawdown_pct}%`} hint="近 60 个交易日" />
           {conc ? <Metric label="最大单一占比" value={`${(conc.max_weight * 100).toFixed(1)}%`} hint={`有效持仓 ${conc.effective_holdings.toFixed(2)} 只`} /> : null}
           <Metric label="高风险持仓" value={dd.summary.high_risk_count} tone={dd.summary.high_risk_count ? 'text-up' : undefined} hint="当前亏损较深" />
         </Metrics>
@@ -116,7 +116,7 @@ const RiskPage: React.FC = () => {
           </DataState>
         </Section>
 
-        <Section title="预警" hint={alerts.data ? `持有收益率跌破 ${alerts.data.threshold}% 时触发` : undefined}>
+        <Section title="预警" hint={alerts.data?.threshold != null ? `持有收益率跌破 ${alerts.data.threshold}% 时触发` : undefined}>
           <DataState loading={alerts.loading} error={alerts.error} onRetry={alerts.reload}
             empty={alerts.data?.alerts.length === 0 ? '当前没有触发预警' : undefined}>
             <ul className="space-y-2.5">

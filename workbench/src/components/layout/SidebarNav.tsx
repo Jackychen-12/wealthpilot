@@ -1,7 +1,7 @@
 import type React from 'react'
 import { useState } from 'react'
-import { BriefcaseBusiness, Cable, CandlestickChart, FileText, History, Home, Layers, LayoutDashboard, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, ShieldCheck, Star, Sun, UserRoundCog, Zap } from 'lucide-react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, FileText, History, Home, Layers, LayoutDashboard, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, ShieldCheck, Star, Sun, UserRoundCog, Zap } from 'lucide-react'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
 import { Dot } from '../kit'
@@ -50,11 +50,24 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   ] },
 ]
 
+const COLLAPSED_KEY = 'wp_nav_collapsed'
+const readCollapsed = (): string[] => {
+  try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]') as string[] } catch { return [] }
+}
+
 const ITEM = 'flex h-8 w-full items-center gap-2.5 rounded-sm px-2.5 text-sm text-slate transition-colors hover:bg-hover hover:text-ink'
 
 export const SidebarNav: React.FC<SidebarNavProps> = ({ onNavigate, backend, username, alertCount, researchBusy, onLogin, onLogout }) => {
   const navigate = useNavigate()
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  const { pathname } = useLocation()
+  const [collapsed, setCollapsed] = useState<string[]>(readCollapsed)
+  const toggleGroup = (label: string) => setCollapsed((prev) => {
+    const next = prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label]
+    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)) } catch { /* 存不了就只在本次生效 */ }
+    return next
+  })
+  const isCurrent = (to: string) => pathname === to || pathname.startsWith(`${to}/`)
   const toggleTheme = () => {
     const next = !dark
     document.documentElement.classList.toggle('dark', next)
@@ -71,21 +84,36 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ onNavigate, backend, use
 
       <SecuritySearch hotkey className="mx-1 mb-3" onPick={(sec) => { navigate(securityPath(sec)); onNavigate?.() }} />
 
-      <nav className="flex flex-1 flex-col gap-4 overflow-y-auto" aria-label="主导航">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label} className="flex flex-col gap-0.5">
-            {group.label ? <span className="px-2.5 pb-1 text-xs font-medium text-stone">{group.label}</span> : null}
-            {group.items.map(({ to, label, icon: Icon, exact, badge }) => (
-              <NavLink key={to} to={to} end={exact} onClick={onNavigate}
-                className={({ isActive }) => cn(ITEM, isActive && 'bg-hover font-medium text-ink')}>
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{label}</span>
-                {badge === 'alerts' && alertCount > 0 ? <span className="ml-auto rounded-xs bg-tint-rose px-1.5 text-xs font-medium tabular-nums text-on-rose">{alertCount}</span> : null}
-                {badge === 'busy' && researchBusy ? <Dot tone="purple" pulse className="ml-auto" /> : null}
-              </NavLink>
-            ))}
-          </div>
-        ))}
+      <nav className="flex flex-1 flex-col gap-3 overflow-y-auto" aria-label="主导航">
+        {NAV_GROUPS.map((group) => {
+          const folded = collapsed.includes(group.label)
+          // 收起后仍然留着当前所在的那一项，免得不知道自己在哪
+          const items = folded ? group.items.filter((i) => isCurrent(i.to)) : group.items
+          const hasAlert = folded && alertCount > 0 && group.items.some((i) => i.badge === 'alerts' && !isCurrent(i.to))
+          const hasBusy = folded && researchBusy && group.items.some((i) => i.badge === 'busy' && !isCurrent(i.to))
+          return (
+            <div key={group.label} className="flex flex-col gap-0.5">
+              {group.label ? (
+                <button type="button" onClick={() => toggleGroup(group.label)} aria-expanded={!folded}
+                  className="group flex h-6 items-center gap-1 rounded-sm px-2.5 text-left text-xs font-medium text-stone transition-colors hover:bg-hover hover:text-slate">
+                  <span>{group.label}</span>
+                  {hasAlert ? <Dot tone="red" className="h-1.5 w-1.5" /> : null}
+                  {hasBusy ? <Dot tone="purple" pulse className="h-1.5 w-1.5" /> : null}
+                  <ChevronRight className={cn('ml-auto h-3.5 w-3.5 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100', !folded && 'rotate-90', folded && 'opacity-100')} />
+                </button>
+              ) : null}
+              {items.map(({ to, label, icon: Icon, exact, badge }) => (
+                <NavLink key={to} to={to} end={exact} onClick={onNavigate}
+                  className={({ isActive }) => cn(ITEM, isActive && 'bg-hover font-medium text-ink')}>
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{label}</span>
+                  {badge === 'alerts' && alertCount > 0 ? <span className="ml-auto rounded-xs bg-tint-rose px-1.5 text-xs font-medium tabular-nums text-on-rose">{alertCount}</span> : null}
+                  {badge === 'busy' && researchBusy ? <Dot tone="purple" pulse className="ml-auto" /> : null}
+                </NavLink>
+              ))}
+            </div>
+          )
+        })}
       </nav>
 
       <div className="mt-3 flex flex-col gap-0.5 border-t border-hairline pt-3">
