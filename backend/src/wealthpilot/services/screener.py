@@ -284,6 +284,7 @@ async def backtest_screen(criteria: dict, years: float = 2, top_n: int = 20, fee
 
     codes = sorted({s["code"] for _, chosen in picks for s in chosen} | {BENCHMARK})
     series = dict(zip(codes, await asyncio.gather(*[kline(c) for c in codes]), strict=True))
+    unadjusted = any(rows and rows[0].get("price_basis") == "不复权" for rows in series.values())
     if not series[BENCHMARK]:
         return {"error": "行情源暂时取不到历史价格（可能被限流），过一会儿再试"}
     last_day = series[BENCHMARK][-1]["nav_date"]
@@ -336,5 +337,6 @@ async def backtest_screen(criteria: dict, years: float = 2, top_n: int = 20, fee
             "ST 是按当时的名称剔除；涨跌停、停牌导致买不进卖不出的情况没有处理",
             f"等权持有、每期全部换仓，单边费率 {fee_pct}%；未计冲击成本",
             "历史表现不代表未来",
+            *(["本次行情取自备用源（不复权价）：分红除权会被算成下跌，组合与基准的收益都偏低"] if unadjusted else []),
         ],
     }

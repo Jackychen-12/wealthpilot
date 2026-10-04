@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 
 import httpx
 
@@ -56,8 +57,11 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
     """
     symbol = market_symbol(code)
     days = max(2, int(days))
+    rows: list = []
     try:
-        async with httpx.AsyncClient(timeout=10.0, headers=_HEADERS) as client:
+        if _is_down("tencent"):
+            raise RuntimeError("skip")
+        async with httpx.AsyncClient(timeout=6.0, headers=_HEADERS) as client:
             resp = await client.get(
                 "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
                 # 多取一根，用来算第一天的涨跌幅
@@ -69,7 +73,10 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
         rows = []
     if not rows:
         # 主行情源对突发请求会临时限流；换东方财富的前复权日线，字段顺序整理成一致的
-        rows = await _eastmoney_kline(symbol, days + 1)
+        _mark_down("tencent")
+        rows = [] if _is_down("eastmoney") else await _eastmoney_kline(symbol, days + 1)
+        if not rows:
+            _mark_down("eastmoney")
     basis = "前复权"
     if not rows:
         # 最后的备用：新浪日线，只有不复权价。画图和看近期走势够用；跨越除权日的收益会略有偏差，所以打上标记
@@ -92,6 +99,18 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
     return list(reversed(records))[:days]
 
 
+# 某个行情源刚失败过，就先跳过它几分钟 —— 否则每次请求都要把超时等一遍，页面会慢到像是坏了
+_down_until: dict[str, float] = {}
+
+
+def _is_down(source: str) -> bool:
+    return time.monotonic() < _down_until.get(source, 0)
+
+
+def _mark_down(source: str, seconds: float = 300) -> None:
+    _down_until[source] = time.monotonic() + seconds
+
+
 async def _sina_kline(symbol: str, count: int) -> list[list]:
     """新浪日线（不复权），整理成 [日期, 开, 收, 高, 低, 量(手)]。"""
     try:
@@ -111,9 +130,9 @@ async def _eastmoney_kline(symbol: str, count: int) -> list[list]:
     params = {"secid": secid, "klt": 101, "fqt": 1, "lmt": count, "end": "20500101",
               "fields1": "f1,f2,f3", "fields2": "f51,f52,f53,f54,f55,f56"}
     # 这个接口经常直接断开连接，换节点重试几次
-    for host in ("push2his", "63.push2his", "7.push2his", "push2his"):
+    for host in ("push2his", "63.push2his"):
         try:
-            async with httpx.AsyncClient(timeout=8.0, headers=_HEADERS) as client:
+            async with httpx.AsyncClient(timeout=4.0, headers=_HEADERS) as client:
                 resp = await client.get(f"https://{host}.eastmoney.com/api/qt/stock/kline/get", params=params)
             lines = (resp.json().get("data") or {}).get("klines") or []
             if lines:

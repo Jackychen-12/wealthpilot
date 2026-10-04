@@ -190,3 +190,37 @@ async def test_screen_backtest_uses_point_in_time_picks_and_cash_when_nothing_qu
     assert (out["total_return_pct"], out["benchmark_return_pct"], out["periods_beating_benchmark"]) == (32.0, 10.0, 2)
     assert any("幸存者偏差" in x for x in out["limitations"])
     json.dumps(out)
+
+
+def test_desk_puts_what_needs_attention_first_and_thesis_card_reads_the_conclusion(db, monkeypatch):
+    from wealthpilot.models.chat import ChatMessage
+    from wealthpilot.routes import research
+
+    async def quotes(codes):
+        return {"600519": {"price": 1250.0, "change_pct": 1.0}, "300750": {"price": 290.0, "change_pct": -3.0}}
+
+    monkeypatch.setattr(research, "fetch_sina_quotes", quotes)
+    for row in db.exec(select(ChatMessage)).all():
+        db.delete(row)
+    db.add(WatchItem(user_id=0, code="600519", name="贵州茅台", asset_type="stock"))
+    db.add(PortfolioHolding(user_id=0, asset_type="stock", fund_code="300750", fund_name="宁德时代", shares=100, cost_price=250.0, buy_date=date(2025, 1, 1)))
+    db.add(Checkpoint(user_id=0, code="600519", name="贵州茅台", metric="revenue_yoy_pct", op=">=", threshold=0, status="broken", actual_value=-2.0, actual_as_of="2026-09-30"))
+    db.add(ChatMessage(user_id=0, conversation_id="c1", role="assistant",
+                       content="## 结论\n增长失速但盈利质量仍高 [E-abcd1234]。\n## 建议\n**立场：中性。**",
+                       metadata_json=json.dumps({"status": "passed", "playbook": "stock_deep", "securities": [{"code": "600519", "name": "贵州茅台"}]})))
+    db.commit()
+    with TestClient(app) as client:
+        desk = client.get("/api/desk").json()
+        assert [s["code"] for s in desk["stocks"]] == ["600519", "300750"]      # 有被证伪验证点的排在持仓前面
+        assert desk["stocks"][1]["return_pct"] == 16.0 and desk["stocks"][1]["last_research"] is None
+        assert desk["todo"] == {"proposals": 0, "broken": 1, "pending": 0, "unresearched": 1}
+        card = client.get("/api/research/latest", params={"code": "600519"}).json()
+        assert card["latest"]["conclusion"] == "增长失速但盈利质量仍高。" and card["latest"]["stance"] == "中性"
+        assert card["checkpoints"]["broken"] == 1 and len(card["research_dates"]) == 1
+        assert client.get("/api/research/latest", params={"code": "000001"}).json()["latest"] is None
+
+
+def test_stance_is_read_per_stock_in_a_comparison():
+    from wealthpilot.routes.research import _stance
+    line = "立场：贵州茅台——看多（持有，不加仓）；五粮液——中性（持有观察）。"
+    assert (_stance(line, "贵州茅台"), _stance(line, "五粮液"), _stance("**立场：看空。**"), _stance("没有写")) == ("看多", "中性", "看空", "")

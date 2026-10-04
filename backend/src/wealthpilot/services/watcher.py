@@ -78,7 +78,7 @@ async def _inspect(target: dict, state: dict, quote: dict | None, move_pct: floa
         if band and not first_time and state.get("pe_band") and band != state["pe_band"]:
             event("valuation", f"PE 历史分位 {pe}%，由{_BAND_TEXT[state['pe_band']]}进入{_BAND_TEXT[band]}", percentile=pe)
         if band:
-            new_state["pe_band"] = band
+            new_state["pe_band"], new_state["pe_percentile"] = band, pe
     if isinstance(listing, list) and listing:
         last = state.get("last_filing", "")
         if not first_time:

@@ -50,7 +50,8 @@ GETS = [
     "/api/analysis/suggestions", "/api/market/indices", "/api/market/news", "/api/alerts",
     "/api/scenario", "/api/profile", "/api/report/weekly",
     *[f"/api/market/fund/110011/nav?days={d}" for d in (21, 63, 125, 250)],
-    *[f"/api/market/stock/600519/kline?days={d}" for d in (21, 63, 125, 250)],
+    *[f"/api/market/stock/600519/kline?days={d}" for d in (63, 125, 250, 500)],
+    "/api/market/movers",
     "/api/connectors", "/api/screener/industries", "/api/market/stock/600519/valuation-history",
     *[f"/api/securities/search?q={q}" for q in ("600519", "300750", "600036", "000858", "510300", "110011", "161725")],
 ]
@@ -95,7 +96,8 @@ QUESTIONS = [
     "复盘一下之前的研究：验证点成立了多少，哪些判断被证伪了",
 ]
 # 研究录完之后才有内容的接口
-AFTER_CHATS = ["/api/checkpoints", "/api/checkpoints?code=600519", "/api/checkpoints/scorecard", "/api/proposals"]
+AFTER_CHATS = ["/api/checkpoints", "/api/checkpoints?code=600519", "/api/checkpoints/scorecard", "/api/proposals",
+               "/api/desk", "/api/research/latest?code=600519"]
 HISTORY = "/api/research/history"
 
 

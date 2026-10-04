@@ -29,8 +29,41 @@ const CandleShape = ({ x = 0, y = 0, width = 0, height = 0, payload }: ShapeProp
   )
 }
 
-/** 日 K：蜡烛 + MA5 / MA20，下方成交量。数据按日期升序。 */
-export const Candles: React.FC<{ data: Candle[] }> = ({ data }) => {
+/** 把日线合成周线或月线：开取第一天、收取最后一天、高低取极值、量求和。 */
+export function aggregate(rows: Candle[], period: 'day' | 'week' | 'month'): Candle[] {
+  if (period === 'day') return rows
+  const key = (d: string) => {
+    if (period === 'month') return d.slice(0, 7)
+    const t = new Date(`${d}T00:00:00`)
+    t.setDate(t.getDate() - ((t.getDay() + 6) % 7))   // 回到这一周的周一
+    return t.toISOString().slice(0, 10)
+  }
+  const out: Candle[] = []
+  let current = ''
+  for (const r of rows) {
+    const k = key(r.nav_date)
+    const last = out[out.length - 1]
+    if (k !== current || !last) {
+      current = k
+      out.push({ ...r })
+    } else {
+      last.nav_date = r.nav_date
+      last.nav = r.nav
+      last.high = Math.max(last.high ?? r.nav, r.high ?? r.nav)
+      last.low = Math.min(last.low ?? r.nav, r.low ?? r.nav)
+      last.volume = (last.volume ?? 0) + (r.volume ?? 0)
+    }
+  }
+  return out
+}
+
+/**
+ * K 线：蜡烛 + MA5 / MA20，下方成交量。数据按日期升序。
+ * marks 是要在图上标出来的日期（比如每次做研究的那天）——行情软件画不出这条线，因为它不知道你什么时候下过判断。
+ */
+export const Candles: React.FC<{ data: Candle[]; marks?: { date: string; label: string }[] }> = ({ data, marks = [] }) => {
+  // 标记落在非交易日或被合成进周 / 月线时，挂到它之后最近的一根上；比最后一根还晚（今天做的研究）就挂在最后一根
+  const pinned = marks.map((m) => ({ ...m, at: (data.find((r) => r.nav_date >= m.date) ?? data[data.length - 1])?.nav_date })).filter((m) => m.at)
   const rows = data.map((r, i) => ({ ...r, up: r.nav >= (r.open ?? r.nav), range: [r.low ?? r.nav, r.high ?? r.nav] as [number, number], ma5: ma(data, 5, i), ma20: ma(data, 20, i) }))
   const tick = (v: string) => v.slice(5)
   return (
@@ -38,6 +71,7 @@ export const Candles: React.FC<{ data: Candle[] }> = ({ data }) => {
       <div className="mb-1 flex gap-4 px-1 text-xs text-steel">
         <span><i className="mr-1 inline-block h-0.5 w-3 bg-[var(--primary)] align-middle" />MA5</span>
         <span><i className="mr-1 inline-block h-0.5 w-3 bg-[var(--warning)] align-middle" />MA20</span>
+        {pinned.length ? <span><i className="mr-1 inline-block h-3 w-0 border-l border-dashed border-[var(--primary)] align-middle" />做过研究的日子</span> : null}
       </div>
       <div className="h-[260px]">
         <ResponsiveContainer width="100%" height="100%">
@@ -52,6 +86,10 @@ export const Candles: React.FC<{ data: Candle[] }> = ({ data }) => {
                 return p ? `${label}  开 ${p.open}  高 ${p.high}  低 ${p.low}  收 ${p.nav}` : label
               }} />
             <Bar dataKey="range" shape={<CandleShape />} isAnimationActive={false} />
+            {pinned.map((m) => (
+              <ReferenceLine key={`${m.date}-${m.label}`} x={m.at} stroke="var(--primary)" strokeDasharray="3 3" strokeOpacity={0.7}
+                label={{ value: m.label, position: 'insideTopLeft', fill: 'var(--primary)', fontSize: 11 }} />
+            ))}
             <Line type="monotone" dataKey="ma5" name="MA5" stroke="var(--primary)" strokeWidth={1.2} dot={false} isAnimationActive={false} connectNulls />
             <Line type="monotone" dataKey="ma20" name="MA20" stroke="var(--warning)" strokeWidth={1.2} dot={false} isAnimationActive={false} connectNulls />
           </ComposedChart>
