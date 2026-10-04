@@ -97,7 +97,10 @@ class BaseAgent:
                 response = None
                 stream_error: Exception | None = None
 
-                def make_stream(msgs=messages):
+                # 轮次用尽后仍带着工具定义（历史里有 tool_use 块），但禁止再调用，逼出最终回答
+                out_of_rounds = tool_rounds >= max_rounds
+
+                def make_stream(msgs=messages, tool_choice="none" if out_of_rounds else None):
                     return self.client.stream(
                         model=self.model,
                         max_tokens=max_tokens,
@@ -110,6 +113,7 @@ class BaseAgent:
                         ],
                         tools=self.tools,
                         messages=msgs,
+                        **({"tool_choice": tool_choice} if tool_choice else {}),
                     )
 
                 async for kind, payload in stream_sync_in_thread(make_stream):
@@ -127,7 +131,7 @@ class BaseAgent:
                 if response is None:
                     break
 
-                if response.stop_reason == "tool_use" and tool_rounds < max_rounds:
+                if response.stop_reason == "tool_use" and not out_of_rounds:
                     tool_rounds += 1
 
                     for tc in response.tool_calls:
@@ -148,7 +152,8 @@ class BaseAgent:
 
                     tool_results = []
                     for tc, out in zip(response.tool_calls, outputs, strict=True):
-                        content = f"工具执行失败: {out}" if isinstance(out, Exception) else out
+                        failed = isinstance(out, Exception)
+                        content = f"工具执行失败: {out}" if failed else out
                         record = record_evidence(tc.name, tc.input, content, self.nav_history)
                         evidence.append(record)
                         await emit({"type": "evidence", "agent": self.name, "evidence": record})
@@ -156,17 +161,31 @@ class BaseAgent:
                             {
                                 "type": "tool_result",
                                 "tool_use_id": tc.id,
-                                "content": content,
+                                # 把证据 ID 一并交给模型 —— 否则它无从引用 [E-…]
+                                "content": content if failed else f"[{record['id']}]\n{content}",
+                                **({"is_error": True} if failed else {}),
                             }
                         )
+                    if tool_rounds >= max_rounds:
+                        tool_results.append({
+                            "type": "text",
+                            "text": "工具调用轮次已用完。请只依据以上已取得的证据直接作答，并说明还缺哪些数据。",
+                        })
 
                     messages.append({"role": "assistant", "content": response.raw_content})
                     messages.append({"role": "user", "content": tool_results})
-                    final_text += round_text
+                    # 工具轮次里的文字只是"我先去查一下"式的过场白，不属于回答
                 else:
+                    final_text += round_text
                     if response.stop_reason == "tool_use":
                         status = "budget_exhausted"
-                    final_text += round_text
+                    elif response.stop_reason == "max_tokens":
+                        status = "truncated"
+                        await emit({"type": "error", "content":
+                                    f"{self.name} 输出达到 AGENT_MAX_TOKENS 上限被截断，请调大该配置"})
+                    elif response.stop_reason == "refusal":
+                        status = "failed"
+                        await emit({"type": "error", "content": f"{self.name} 的请求被模型拒绝"})
                     break
 
         except Exception as e:  # noqa: BLE001

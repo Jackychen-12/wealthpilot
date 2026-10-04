@@ -1,6 +1,5 @@
 """后端 API 集成测试。"""
 
-import pytest
 from fastapi.testclient import TestClient
 
 from wealthpilot.main import app

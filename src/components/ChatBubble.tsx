@@ -1,4 +1,4 @@
-export function AiBubble({ children }: { children: React.ReactNode }) {
+export function AiBubble({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="chat-ai">
       <div className="chat-avatar">
@@ -8,7 +8,7 @@ export function AiBubble({ children }: { children: React.ReactNode }) {
           <path d="M2 12l10 5 10-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity="0.8"/>
         </svg>
       </div>
-      <div className="chat-bubble-ai">{children}</div>
+      <div className={`chat-bubble-ai${wide ? ' wide' : ''}`}>{children}</div>
     </div>
   )
 }

@@ -6,6 +6,7 @@ import sys
 
 def cmd_run(args: argparse.Namespace) -> None:
     import uvicorn
+
     from wealthpilot.settings import get_settings
 
     settings = get_settings()
@@ -97,30 +98,11 @@ def _load_context():
     """加载持仓、净值与风险画像 —— CLI 与 Web 走同一套上下文。"""
     import asyncio
 
-    from sqlmodel import Session, select
+    from wealthpilot.services.context import load_local_user, load_market_context
+    from wealthpilot.settings import get_settings
 
-    from wealthpilot.models.portfolio import PortfolioHolding
-    from wealthpilot.routes.profile import load_profile
-    from wealthpilot.services.market_data import fetch_fund_info, fetch_fund_nav
-    from wealthpilot.storage.db import get_engine
-
-    engine = get_engine()
-    with Session(engine) as session:
-        holdings = list(session.exec(select(PortfolioHolding)).all())
-        profile = load_profile(session)
-
-    async def load_nav():
-        nav_data: dict[str, float] = {}
-        nav_history: dict[str, list[dict]] = {}
-        for h in holdings:
-            info = await fetch_fund_info(h.fund_code)
-            nav_data[h.fund_code] = info["nav"] if info else h.cost_price
-            hist = await fetch_fund_nav(h.fund_code, 60)
-            if hist:
-                nav_history[h.fund_code] = hist
-        return nav_data, nav_history
-
-    nav_data, nav_history = asyncio.run(load_nav())
+    holdings, profile = load_local_user(get_settings().local_user_id)
+    nav_data, nav_history = asyncio.run(load_market_context(holdings))
     return holdings, nav_data, nav_history, profile
 
 
@@ -147,7 +129,20 @@ async def _consume_stream(stream, *, verbose_to_stderr: bool = False) -> str:
             print(f"\n{data.get('label', data['agent'])} 开始：{data.get('goal', '')}", file=info)
         elif kind == "task_done":
             tools = "、".join(data.get("tools", [])) or "无"
-            print(f"   ✓ 完成（工具：{tools}）", file=info)
+            ok = data.get("status", "completed") == "completed"
+            print(f"   {'✓ 完成' if ok else '✗ ' + data['status']}（工具：{tools}）", file=info)
+        elif kind == "replan":
+            print(f"\n🔁 证据不足，补充 {len(data.get('tasks', []))} 个任务", file=info)
+        elif kind == "critic" and not data.get("passed"):
+            issues = "；".join(data.get("issues", []))
+            print(f"\n🧐 校验未通过（{data.get('gate')}）：{issues}", file=info)
+        elif kind == "done":
+            status = data.get("meta", {}).get("status", "passed")
+            if status == "partial":
+                gaps = "；".join(data.get("meta", {}).get("missing_evidence", []))
+                print(f"\n\n⚠️  部分证据未取得，回答不完整：{gaps}", file=sys.stderr)
+            elif status != "passed":
+                print(f"\n\n⚠️  本次研究状态：{status}", file=sys.stderr)
         elif kind == "synthesizing":
             print("\n🧩 整合各方证据…\n", file=info)
         elif kind == "delta":
@@ -182,6 +177,8 @@ def cmd_chat(_args: argparse.Namespace) -> None:
         sys.exit(1)
 
     holdings, nav_data, nav_history, profile = _load_context()
+    if not holdings:
+        print(f"提示：用户 {settings.local_user_id} 没有持仓，持仓类问题无法分析（可用 LOCAL_USER_ID 切换）。")
 
     history: list[dict] = []
     provider = settings.ai_provider.upper()

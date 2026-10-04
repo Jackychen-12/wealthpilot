@@ -124,7 +124,7 @@ class TestInboxAndRead:
         db.commit()
         rows = alerting.list_alerts(db, 1)
         assert len(rows) == 3
-        assert all("别人的" != r.message for r in rows)
+        assert all(r.message != "别人的" for r in rows)
 
     def test_unread_filter(self, db):
         self._seed(db)

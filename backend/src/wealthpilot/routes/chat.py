@@ -4,14 +4,12 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
-from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.models.chat import ChatMessage
-from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.schemas import ChatRequest
-from wealthpilot.services.agents import chat_stream
 from wealthpilot.routes.profile import load_profile
-from wealthpilot.services.assets import fetch_prices_by_type
-from wealthpilot.services.market_data import fetch_fund_nav
+from wealthpilot.services.agents import chat_stream
+from wealthpilot.services.context import load_market_context
+from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -26,14 +24,7 @@ async def chat(
     """AI 对话（SSE streaming + Multi-Agent）。"""
     holdings = user_holdings(db, user_id)
 
-    nav_data: dict[str, float] = {}
-    nav_history: dict[str, list[dict]] = {}
-    _prices = await fetch_prices_by_type([(h.fund_code, h.asset_type) for h in holdings])
-    for h in holdings:
-        nav_data[h.fund_code] = _prices.get(h.fund_code, h.cost_price)
-        hist = await fetch_fund_nav(h.fund_code, 60)
-        if hist:
-            nav_history[h.fund_code] = hist
+    nav_data, nav_history = await load_market_context(holdings)
 
     return StreamingResponse(
         chat_stream(

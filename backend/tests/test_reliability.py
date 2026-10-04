@@ -1,6 +1,5 @@
 """Regression cases from the research-framework review; no live model required."""
 
-import json
 from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -48,7 +47,7 @@ def test_correlation_preserves_zero_returns():
     dates = [str(date(2025, 1, 1) + timedelta(days=i)) for i in range(6)]
     a = [0, 1, 0, 2, 0, 3]
     b = [3, 0, 2, 0, 1, 0]
-    hist = {c: [{"nav_date": d, "daily_return": r} for d, r in zip(dates, values)]
+    hist = {c: [{"nav_date": d, "daily_return": r} for d, r in zip(dates, values, strict=True)]
             for c, values in [("A", a), ("B", b)]}
     assert analysis.calculate_correlation(hist)["A"]["B"] == round(analysis._pearson(a, b), 3)
 

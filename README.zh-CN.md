@@ -35,21 +35,25 @@
 
 ---
 
+> 本页为精简版，架构细节、完整 API 与配置项以 [README.md](./README.md) 为准。
+>
+> 日常使用入口是桌面端**投研工作台**：`make dev` 后打开 http://localhost:5180。下文的页面流描述的是早期的移动端演示页。
+
 ## 这是什么？
 
 WealthPilot 是一个**全栈 AI 智能投顾 Agent**，结合实时行情数据、持仓分析和 Claude AI 对话式洞察。用户可以管理基金持仓、获取自动化风险分析，并与 AI 进行多轮投资对话。
 
 ### 核心亮点
 
-- **多智能体 AI** — 路由 Agent + 3 个专业 Agent（市场、持仓、风险），12 个 tool_use 工具，基于 Claude 驱动
+- **多智能体 AI** — Planner + 4 个专业 Agent（市场、持仓、风险、量化）+ Critic 双闸门 + Synthesizer，19 个工具，回答逐条引用证据
 - **双模型支持** — Claude & DeepSeek 一行配置切换，Provider 抽象层自动适配
 - **精致 Demo 体验** — 离线演示模式完整模拟多 Agent 流程（路由标签 → 工具调用 → 逐字流式），SVG 图标系统，页面转场动画
 - **真实行情数据** — AKShare + 东方财富 + 天天基金 + 新浪财经，市场数据无需付费 API Key
-- **完整后端** — FastAPI 24 个 REST 端点，SQLite 存储，JWT 认证
+- **完整后端** — FastAPI 37 个 REST 端点，SQLite 存储，JWT 认证
 - **多租户** — 注册/登录，每个用户数据隔离
 - **多种导入方式** — 手动录入、CSV/Excel 批量导入、截图 OCR（Claude Vision）
 - **一键部署** — Docker Compose 自托管，Railway 就绪
-- **MCP Server** — 12 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用
+- **MCP Server** — 19 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用
 - **多入口调用** — Web UI / 终端交互 / CLI 管道 / MCP，任选其一
 
 ## 功能一览
@@ -58,8 +62,8 @@ WealthPilot 是一个**全栈 AI 智能投顾 Agent**，结合实时行情数据
 |------|------|----------|
 | **持仓管理** | 添加/编辑/删除基金持仓；CSV/Excel 批量导入；截图 OCR 识别 | 用户输入 + Claude Vision |
 | **智能持仓分析** | 周收益、超额收益、Sharpe 比率、收益归因（按基金/行业/资产类型） | AKShare + 天天基金实时净值 |
-| **风险洞察引擎** | 最大回撤 + 恢复天数、组合健康度雷达（5 维）、相关性矩阵 | 基于 60 日净值历史计算 |
-| **AI 对话问答** | 多智能体路由 + 多轮对话 + SSE 流式输出；演示模式完整模拟 Agent 流程（路由 → 工具调用 → 流式） | Claude API + 实时行情 |
+| **风险洞察引擎** | 最大回撤 + 恢复天数、组合健康度雷达（5 维）、相关性矩阵 | 基于近 60 个交易日净值历史计算 |
+| **AI 对话问答** | 任务规划 + 并发取证 + Critic 校验 + 多轮对话（SSE）；演示模式模拟 Agent 流程 | Claude API + 实时行情 |
 | **自动化建议** | 规则引擎 + 数据驱动：集中度风险、亏损预警、相关性警告 | 分析引擎输出 |
 | **周报** | LLM 生成结构化复盘（摘要、要点、关注、AI 洞察） | Claude API + 分析数据 |
 | **市场追踪** | 实时指数行情（上证/深证/创业板）、财经新闻 | 东方财富 + 新浪财经 |
@@ -78,7 +82,7 @@ WealthPilot 是一个**全栈 AI 智能投顾 Agent**，结合实时行情数据
   │        ├──→ 建议（AI 个性化推荐）
   │        └──→ 周报（LLM 生成）
   │
-  ├──→ 对话（多智能体：Router → 市场 / 持仓 / 风险 Agent + SSE 流式）
+  ├──→ 对话（多智能体：Planner → 市场 / 持仓 / 风险 / 量化 Agent → Critic，SSE）
   ├──→ 登录（JWT 注册/登录）
   └──→ 风险评估（风险偏好问卷）
 ```
@@ -130,19 +134,19 @@ docker compose up --build
 └───────────────────────────┬─────────────────────────────────┘
                             │ HTTP / SSE
 ┌───────────────────────────┴─────────────────────────────────┐
-│              后端 (FastAPI · 24 个端点)                        │
+│              后端 (FastAPI · 37 个端点)                        │
 │                                                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌───────────┐  │
 │  │ 持仓管理  │ │ 行情服务  │ │ 多智能体系统  │ │  分析引擎  │  │
 │  │ CRUD+    │ │          │ │              │ │ Sharpe/回撤│  │
 │  │ 导入     │ │  多数据源  │ │  ┌────────┐  │ │ 健康度/    │  │
-│  │ CSV/OCR  │ │          │ │  │ 路由器  │  │ │ 相关性/建议│  │
+│  │ CSV/OCR  │ │          │ │  │ Planner │  │ │ 相关性/建议│  │
 │  └──────────┘ └──────────┘ │  └──┬─┬─┬─┘  │ └───────────┘  │
 │                            │     │ │ │     │       │         │
 │                            │  ┌──┘ │ └──┐  │       │         │
 │                            │  ▼    ▼    ▼  │       │         │
-│                            │ 市场 持仓 风险 │       │         │
-│                            │ 3工具 4工具 5工具│───────┘         │
+│                            │市场 持仓 风险 量化│       │         │
+│                            │  19 工具+Critic │───────┘         │
 │                            └──────────────┘                  │
 │       │             │             │              │           │
 │       └─────────────┼─────────────┼──────────────┘           │
@@ -240,16 +244,19 @@ wealthpilot/
 └── backend/                    # Python 后端
     └── src/wealthpilot/
         ├── main.py             # FastAPI 入口
-        ├── routes/             # 7 个路由模块，24 个端点
+        ├── routes/             # 10 个路由模块，37 个端点
         ├── services/
         │   ├── agents/         # 多智能体系统
         │   │   ├── base.py         # BaseAgent（共享 tool-use 循环）
-        │   │   ├── router_agent.py # 意图分类 + 关键词兜底
+        │   │   ├── planner_agent.py # 任务 DAG 拆解 + 关键词兜底
+        │   │   ├── critic_agent.py # 证据充分性 + 输出合规性双闸门
+        │   │   ├── synthesizer_agent.py # 整合 + 数值溯源
+        │   │   ├── quant_agent.py  # 持仓穿透、重叠、规则回测
         │   │   ├── market_agent.py # 基金信息、净值历史、新闻（3 个工具）
         │   │   ├── portfolio_agent.py # 总览、归因、健康度、建议（4 个工具）
         │   │   ├── risk_agent.py   # 回撤、相关性、收益率计算（5 个工具）
-        │   │   ├── orchestrator.py # 路由 → 专业 Agent 协调
-        │   │   ├── tools.py        # 12 个工具 schema + 统一执行器
+        │   │   ├── orchestrator.py # Plan → Execute → Critic → Synthesize
+        │   │   ├── tools.py        # 19 个工具 schema + 统一执行器
         │   │   └── prompts.py      # 各 Agent 专属 system prompt
         │   ├── analysis.py     # 分析引擎（Sharpe、回撤、健康度、相关性）
         │   ├── ai_client.py    # Provider 抽象层（Anthropic / DeepSeek 自动适配）
@@ -277,7 +284,7 @@ docker compose up --build -d
 
 - [x] 全栈 Agent 架构（FastAPI + React）
 - [x] 真实行情数据（AKShare + 东方财富 + 天天基金）
-- [x] 多智能体系统（路由 + 市场/持仓/风险 Agent，12 个工具）
+- [x] 多智能体系统（Planner + 市场/持仓/风险/量化 Agent + Critic，19 个工具）
 - [x] 持仓管理（CRUD + CSV 导入 + OCR）
 - [x] 高级分析（Sharpe、最大回撤、相关性）
 - [x] 用户认证（JWT + 多租户）
@@ -285,12 +292,12 @@ docker compose up --build -d
 - [x] 周报（LLM 生成）
 - [x] DeepSeek 支持（Provider 抽象层一键切换）
 - [x] CLI 工具（init/config/chat/run/ask/mcp）
-- [x] MCP Server（12 工具，Claude Code / Cursor 直接调用）
+- [x] MCP Server（19 工具，Claude Code / Cursor 直接调用）
 - [x] Demo 体验优化（SVG 图标系统、演示模式模拟多 Agent 流程、动态雷达图、页面转场动画）
-- [ ] 推送通知（回撤预警）
-- [ ] 回测与情景分析
-- [ ] 多资产类别（股票、债券、ETF、加密货币）
-- [ ] 导出报告为 PDF
+- [x] 推送通知（回撤预警）
+- [x] 回测与情景分析
+- [x] 多资产类别（基金、股票、ETF、加密货币）
+- [x] 导出报告为 PDF
 
 ## 开源协议
 

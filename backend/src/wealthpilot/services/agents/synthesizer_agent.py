@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
@@ -24,7 +25,18 @@ if TYPE_CHECKING:
 
 Emit = Callable[[dict], Awaitable[None]]
 
-_NUMBER_RE = re.compile(r"[+-]?\d+(?:\.\d+)?")
+# 符号前不能紧挨数字，否则 "09-30" 会被读成 -30
+_NUMBER_RE = re.compile(r"(?<![\d.])[+-]?\d+(?:\.\d+)?")
+# 日期不是待溯源的数值：2026-09-30 / 2026/9/30 / 09-30 / 9/30 / 9月30日
+_DATE_RE = re.compile(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|(?<!\d)\d{1,2}[-/]\d{1,2}(?![\d.%])|\d{1,2}月\d{1,2}日")
+# 指数名里的数字是名字的一部分（沪深300、中证500）
+_INDEX_NAME_RE = re.compile(r"(沪深|中证|上证|深证|国证|标普|纳指|纳斯达克|恒生|科创|创业板|MSCI\s?)\d+")
+_LOSS_RE = re.compile(r"回撤|跌|亏|损失|回落|下降|减少|缩水")
+
+
+def _evidence_text(e: dict) -> str:
+    """一条证据里可被引用的全部文本 —— 入参也算（基金代码、查询天数都来自入参）。"""
+    return f"{json.dumps(e.get('input', {}), ensure_ascii=False)} {e['output']}"
 
 
 class SynthesizerAgent:
@@ -105,44 +117,77 @@ class SynthesizerAgent:
         return "\n\n".join(chunks) if chunks else "本轮未能收集到足够信息，请换个问法再试。"
 
 
+_UNIT_RE = re.compile(r"\s*(%|％|元|天|个月|年|成|份)")
+_THOUSANDS_RE = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+
+
+def _unit_after(text: str, end: int) -> str:
+    m = _UNIT_RE.match(text, end)
+    return m.group(1).replace("％", "%") if m else ""
+
+
+def _same_value(token: str, target: float) -> bool:
+    """正文数字是否等于 target 按正文的小数位四舍五入后的值（-0.117 写成 -0.12 算同一个数）。"""
+    decimals = len(token.split(".")[1]) if "." in token else 0
+    return abs(float(token) - target) <= 0.5 * 10 ** -decimals + 1e-9
+
+
 def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
     """数值溯源检查：答案里出现的数字是否都能在工具返回中找到。
 
     纯代码检查，不消耗 token。给交易指令的系统里，"LLM 自己编了一个数字" 是最
     致命的失效模式，这个函数把它变成一个可以观测、可以进 CI 的指标。
 
+    对照范围是本轮全部可用证据（含工具入参），而不只是该行引用的那条 —— 一行里
+    常会顺带提到别的证据里的数。要防的是凭空编造，不是引用标错了行。
+    模型对数字做的三种"换写法"不算编造：四舍五入（-0.117 → -0.12）、
+    小数转百分比（权重 0.1619 → 16.19%）、千分位（8348.4 → 8,348.4）。
+
     返回 {"total": n, "grounded": n, "ungrounded": [...], "rate": 0.0-1.0}
     """
     records = [e for r in results for e in r.evidence if e.get("status", "ok") == "ok"]
-    by_id = {e["id"]: e for e in records if e.get("id")}
+    corpus = _THOUSANDS_RE.sub("", _DATE_RE.sub(" ", " ".join(_evidence_text(e) for e in records)))
+    # (数值, 单位, 前文是否提到回撤)
+    sources = [
+        (float(m.group()), _unit_after(corpus, m.end()),
+         bool(re.search(r"回撤|drawdown", corpus[max(0, m.start() - 24):m.start()])))
+        for m in _NUMBER_RE.finditer(corpus)
+    ]
+
     ungrounded = []
     total = 0
     for line in answer.splitlines():
-        refs = re.findall(r"\[(E-[a-f0-9]+)\]", line)
         clean = re.sub(r"\[E-[a-f0-9]+\]", "", line)
         clean = re.sub(r"^\s*\d+[.)、]\s*", "", clean)
-        corpus = " ".join(str(e["output"]) for e in ( [by_id[r] for r in refs if r in by_id] if by_id else records))
+        clean = _THOUSANDS_RE.sub("", _INDEX_NAME_RE.sub(" ", _DATE_RE.sub(" ", clean)))
         for match in _NUMBER_RE.finditer(clean):
             token = match.group()
-            unit = re.match(r"\s*(%|％|元|天|个月|年|成|份)", clean[match.end():])
-            unit = unit.group(1).replace("％", "%") if unit else ""
+            unit = _unit_after(clean, match.end())
             if not unit and not _is_meaningful(token):
                 continue
             if unit in ("年", "个月") or (unit == "" and 1900 <= abs(float(token)) <= 2100):
                 continue
             total += 1
-            found = False
-            for source in _NUMBER_RE.finditer(corpus):
-                source_unit = re.match(r"\s*(%|％|元|天|个月|年|成|份)", corpus[source.end():])
-                source_unit = source_unit.group(1).replace("％", "%") if source_unit else ""
-                # 回撤可以用损失幅度表述；收益率等指标必须保留符号。
-                drawdown = "回撤" in clean[max(0, match.start() - 10):match.start()] and "回撤" in corpus[max(0, source.start() - 10):source.start()]
-                same = (_normalize(token) == _normalize(source.group()) or
-                        (drawdown and abs(float(token)) == abs(float(source.group()))))
-                if same and (not unit or not source_unit or unit == source_unit):
-                    found = True
+            before = clean[max(0, match.start() - 12):match.start()]
+            unsigned = token[0] not in "+-"
+            # "下跌 4.47%" 对应源数据 -4.47：正文用文字表达了方向，数值不带符号
+            loss = unsigned and bool(_LOSS_RE.search(before))
+            for value, source_unit, source_drawdown in sources:
+                # 回撤幅度写成 11.75% 还是 -11.75% 是同一个事实；收益率等指标必须保留符号
+                if source_drawdown:
+                    targets = [value, -value]
+                elif loss and value < 0:
+                    targets = [value, abs(value)]
+                else:
+                    targets = [value]
+                if unit == "%" and not source_unit and abs(value) <= 1:
+                    # 工具用小数表示占比，正文写成百分比
+                    targets += [t * 100 for t in targets]
+                elif unit and source_unit and unit != source_unit:
+                    continue
+                if any(_same_value(token, t) for t in targets):
                     break
-            if not found:
+            else:
                 ungrounded.append(token)
     grounded = total - len(ungrounded)
 

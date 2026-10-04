@@ -31,16 +31,21 @@ class Settings(BaseSettings):
 
     # Agent configuration
     agent_max_tool_rounds: int = Field(default=3)
-    agent_max_tokens: int = Field(default=4000)
+    agent_max_tokens: int = Field(default=16000)
     agent_max_parallel: int = Field(default=3, description="同一波内并发执行的 Agent 上限")
     planner_max_tasks: int = Field(default=4, description="Planner 单次拆解的任务数上限")
     critic_enabled: bool = Field(default=True, description="是否启用 Critic 双闸门校验")
     critic_max_replans: int = Field(default=1, description="证据不足时最多补充规划几轮")
     critic_max_rewrites: int = Field(default=2, description="输出不合规时最多重写几次")
+    critic_min_grounding_rate: float = Field(
+        default=0.9, ge=0.0, le=1.0,
+        description="重写用尽后，数字溯源率不低于此值的草稿带标注发布；设为 1 则一律拒答")
     tool_timeout_seconds: float = Field(default=30, gt=0)
     run_timeout_seconds: float = Field(default=180, gt=0)
     run_max_tool_calls: int = Field(default=24, ge=1)
     ai_timeout_seconds: float = Field(default=60, gt=0)
+
+    local_user_id: int = Field(default=0, description="CLI / MCP 使用哪个用户的持仓与画像，0=匿名档")
 
     alert_webhook_url: str = Field(default="", description="预警 webhook 推送地址，留空则不推送")
 

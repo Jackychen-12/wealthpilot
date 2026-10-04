@@ -11,7 +11,8 @@
 import asyncio
 import json
 import re
-from datetime import date, datetime, timedelta
+import time
+from datetime import datetime
 
 import httpx
 
@@ -79,36 +80,28 @@ def get_fund_detail_akshare(fund_code: str) -> dict | None:
         return None
 
 
+_INDEX_NAMES = {"000001": "上证指数", "399001": "深证成指", "399006": "创业板指"}
+
+
 def get_index_data_akshare() -> list[dict]:
-    """用 AKShare 获取主要指数实时数据。"""
+    """用 AKShare 获取主要指数实时数据（同步、慢：会下载全市场指数表，只应在线程里调用）。"""
     try:
         import akshare as ak
-        # A 股主要指数
-        indices = [
-            ("sh000001", "上证指数"),
-            ("sz399001", "深证成指"),
-            ("sz399006", "创业板指"),
-        ]
+        df = ak.stock_zh_index_spot_em()
         results = []
-        for code, name in indices:
-            try:
-                market = "sh" if code.startswith("sh") else "sz"
-                symbol = code[2:]
-                df = ak.stock_zh_index_spot_em()
-                row = df[df["代码"] == symbol]
-                if not row.empty:
-                    close = float(row.iloc[0]["最新价"])
-                    change = float(row.iloc[0]["涨跌幅"])
-                    results.append({
-                        "name": name,
-                        "value": f"{close:,.2f}",
-                        "change": f"{'+' if change >= 0 else ''}{change:.2f}%",
-                        "up": change >= 0,
-                    })
-                else:
-                    results.append({"name": name, "value": "--", "change": "--", "up": False})
-            except Exception:
+        for symbol, name in _INDEX_NAMES.items():
+            row = df[df["代码"] == symbol]
+            if row.empty:
                 results.append({"name": name, "value": "--", "change": "--", "up": False})
+                continue
+            close = float(row.iloc[0]["最新价"])
+            change = float(row.iloc[0]["涨跌幅"])
+            results.append({
+                "name": name,
+                "value": f"{close:,.2f}",
+                "change": f"{'+' if change >= 0 else ''}{change:.2f}%",
+                "up": change >= 0,
+            })
         return results
     except Exception:
         return []
@@ -169,20 +162,32 @@ def get_macro_data_akshare() -> dict:
 # 天天基金 HTTP API（实时估值，适合盘中）
 # ═══════════════════════════════════════════════════════════
 
+_LSJZ_PAGE_SIZE = 20  # 接口每页上限；pageSize 传更大也只回 20 条，再大则直接返回空
+
+
 async def fetch_fund_nav(fund_code: str, days: int = 30) -> list[dict]:
-    """拉取基金近 N 天净值（天天基金 HTTP API）。"""
+    """拉取基金最近 N 个交易日的净值，最新在前（天天基金 HTTP API）。"""
+    days = max(1, int(days))
+    pages = -(-days // _LSJZ_PAGE_SIZE)
+    if pages > 5:
+        # 长区间逐页翻太慢，AKShare 一次请求拿全量历史
+        return await asyncio.to_thread(get_fund_nav_akshare, fund_code, days)
+
     url = "https://api.fund.eastmoney.com/f10/lsjz"
-    params = {"fundCode": fund_code, "pageIndex": 1, "pageSize": days}
     headers = {**EM_HEADERS, "Referer": "https://fundf10.eastmoney.com/"}
+
+    async def fetch_page(client: httpx.AsyncClient, page: int) -> list[dict]:
+        params = {"fundCode": fund_code, "pageIndex": page, "pageSize": _LSJZ_PAGE_SIZE}
+        resp = await client.get(url, params=params, headers=headers)
+        resp.raise_for_status()
+        return resp.json()["Data"]["LSJZList"]
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, params=params, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+            chunks = await asyncio.gather(*[fetch_page(client, p) for p in range(1, pages + 1)])
 
         records = []
-        for item in data.get("Data", {}).get("LSJZList", []):
+        for item in (i for chunk in chunks for i in chunk):
             try:
                 records.append({
                     "fund_code": fund_code,
@@ -193,7 +198,7 @@ async def fetch_fund_nav(fund_code: str, days: int = 30) -> list[dict]:
                 })
             except (ValueError, KeyError):
                 continue
-        return records
+        return records[:days]
     except Exception:
         # fallback 到 AKShare
         return await asyncio.to_thread(get_fund_nav_akshare, fund_code, days)
@@ -269,56 +274,66 @@ async def fetch_fund_info(fund_code: str) -> dict | None:
 # 东方财富 / 新浪 — 指数 + 资讯
 # ═══════════════════════════════════════════════════════════
 
-async def fetch_indices() -> list[dict]:
-    """拉取主要指数行情（多源 fallback）。"""
-    # 先试 AKShare
-    akshare_result = get_index_data_akshare()
-    if akshare_result and any(r["value"] != "--" for r in akshare_result):
-        return akshare_result
+_indices_cache: tuple[float, list[dict]] | None = None
+_INDICES_TTL = 30.0
 
-    # fallback：新浪财经实时接口
-    sina_codes = ["s_sh000001", "s_sz399001", "s_sz399006"]
-    names = ["上证指数", "深证成指", "创业板指"]
-    results = []
+
+async def fetch_indices() -> list[dict]:
+    """拉取主要指数行情：先走新浪实时接口（毫秒级），失败再退到 AKShare。
+
+    顺序不能反：AKShare 要下载全市场指数表，十几秒；而且它是同步的，
+    直接在协程里调用会卡住事件循环，期间所有请求都得排队。
+    """
+    global _indices_cache
+    if _indices_cache and time.monotonic() - _indices_cache[0] < _INDICES_TTL:
+        return _indices_cache[1]
+
+    names = list(_INDEX_NAMES.values())
+    results: list[dict] = []
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
-                f"https://hq.sinajs.cn/list={','.join(sina_codes)}",
+                "https://hq.sinajs.cn/list=s_sh000001,s_sz399001,s_sz399006",
                 headers={"Referer": "https://finance.sina.com.cn"},
             )
-            lines = resp.text.strip().split("\n")
-            for i, line in enumerate(lines):
-                try:
-                    parts = line.split('"')[1].split(",")
-                    name = names[i]
-                    close = float(parts[1])
-                    change_pct = float(parts[3])
-                    results.append({
-                        "name": name,
-                        "value": f"{close:,.2f}",
-                        "change": f"{'+' if change_pct >= 0 else ''}{change_pct:.2f}%",
-                        "up": change_pct >= 0,
-                    })
-                except (IndexError, ValueError):
-                    results.append({"name": names[i], "value": "--", "change": "--", "up": False})
+        for name, line in zip(names, resp.text.strip().split("\n"), strict=False):
+            parts = line.split('"')[1].split(",")
+            close, change_pct = float(parts[1]), float(parts[3])
+            results.append({
+                "name": name,
+                "value": f"{close:,.2f}",
+                "change": f"{'+' if change_pct >= 0 else ''}{change_pct:.2f}%",
+                "up": change_pct >= 0,
+            })
     except Exception:
-        results = [{"name": n, "value": "--", "change": "--", "up": False} for n in names]
+        results = []
+
+    if len(results) != len(names):
+        results = await asyncio.to_thread(get_index_data_akshare)
+    if not results:
+        return [{"name": n, "value": "--", "change": "--", "up": False} for n in names]
+
+    _indices_cache = (time.monotonic(), results)
     return results
 
 
 async def fetch_market_news(keyword: str = "") -> list[dict]:
     """拉取财经要闻（东方财富）。"""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.get(
                 "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns",
-                params={"columns": "102", "pageSize": 8, "pageIndex": 0},
+                params={"column": "350", "pageSize": 20, "pageIndex": 1,
+                        "client": "web", "biz": "web_news_col", "req_trace": "wealthpilot"},
             )
             data = resp.json()
             news = []
-            for item in data.get("data", {}).get("list", [])[:8]:
+            for item in (data.get("data") or {}).get("list") or []:
+                if len(news) >= 8:
+                    break
                 title = item.get("title", "")
-                if keyword and keyword.casefold() not in title.casefold():
+                haystack = f"{title} {item.get('summary', '')}".casefold()
+                if keyword and keyword.casefold() not in haystack:
                     continue
                 # 自动打 tag
                 tag = "财经"
@@ -332,7 +347,8 @@ async def fetch_market_news(keyword: str = "") -> list[dict]:
                     tag = "基金"
                 elif any(k in title for k in ["政策", "央行", "监管"]):
                     tag = "政策"
-                news.append({"tag": tag, "text": title,
+                news.append({"tag": tag, "text": title, "summary": item.get("summary", ""),
+                             "media": item.get("mediaName", ""),
                              "source_url": item.get("url") or item.get("uniqueUrl") or "",
                              "published_at": str(item.get("showTime") or item.get("publishTime") or ""),
                              "retrieved_at": datetime.now().isoformat()})

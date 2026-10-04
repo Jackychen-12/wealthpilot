@@ -2,8 +2,7 @@
 
 import asyncio
 import json
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 
@@ -32,7 +31,10 @@ def record_evidence(name, inputs, output, nav_history=None):
         status = "insufficient_data"
     if any(str(output).startswith(s) for s in ("未获取", "未找到", "未取到", "暂无", "数据不足", "工具执行失败", "当前没有", "至少需要", "未知工具")):
         status = "insufficient_data"
-    codes = sorted(set([h for h in (nav_history or {})] + [str(v) for k, v in inputs.items() if k.startswith("fund_code") and isinstance(v, str)]))
+    # 指名了基金的工具只溯源到那几只；组合级工具（无基金入参）才溯源到全部持仓
+    codes = [str(v) for k, v in inputs.items() if k.startswith("fund_code") and isinstance(v, str)]
+    codes += [str(c) for c in inputs.get("fund_codes") or [] if isinstance(inputs.get("fund_codes"), list)]
+    codes = sorted(set(codes or (nav_history or {})))
     as_of = {c: max((r["nav_date"] for r in (nav_history or {}).get(c, [])), default=None) for c in codes}
     sources = []
     if name in ("get_fund_info", "get_nav_history", "calculate_return", "compare_funds", "backtest_rule", "get_max_drawdown"):
@@ -42,6 +44,6 @@ def record_evidence(name, inputs, output, nav_history=None):
     if isinstance(data, dict) and "news" in data:
         sources = [{"url": n.get("source_url", ""), "published_at": n.get("published_at", "")} for n in data["news"]]
     return {"id": f"E-{uuid4().hex[:12]}", "tool": name, "input": inputs, "output": output,
-            "status": status, "provenance": {"retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "status": status, "provenance": {"retrieved_at": datetime.now(UTC).isoformat(),
             "as_of": as_of, "sources": sources, "method": name,
             "basis": "工具原始返回及本次持仓快照；计量单位见字段名/原文，未知字段不得推断"}}

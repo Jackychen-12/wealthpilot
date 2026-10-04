@@ -1,17 +1,13 @@
 """周报路由 + PDF 导出。"""
 
-import io
 from datetime import date
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
-from sqlmodel import Session, select
-
 from fastapi.responses import Response
+from sqlmodel import Session
 
-from wealthpilot.services.deps import current_user_id, user_holdings
-from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.services.market_data import fetch_fund_nav
 from wealthpilot.services.report import generate_weekly_report
 from wealthpilot.storage.db import get_session

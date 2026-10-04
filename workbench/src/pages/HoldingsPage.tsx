@@ -1,0 +1,142 @@
+import type React from 'react'
+import { useRef, useState } from 'react'
+import { ImageUp, Plus, Upload } from 'lucide-react'
+import { api, useApi, type Holding, type HoldingInput } from '../api'
+import { Button, Callout, ConfirmDialog, Drawer, Input, Select } from '../components/kit'
+import { ASSET, CATEGORY, DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed, yuan } from '../components/ui'
+
+const blank = (): HoldingInput => ({
+  asset_type: 'fund', fund_code: '', fund_name: '', shares: 0, cost_price: 0,
+  buy_date: new Date().toISOString().slice(0, 10), category: 'equity', industry: '',
+})
+const options = (map: Record<string, string>) => Object.entries(map).map(([value, label]) => ({ value, label }))
+
+const HoldingsPage: React.FC = () => {
+  const holdings = useApi(api.holdings)
+  const [editing, setEditing] = useState<{ id: number | null; form: HoldingInput } | null>(null)
+  const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [removing, setRemoving] = useState<Holding | null>(null)
+  const csvRef = useRef<HTMLInputElement>(null)
+  const ocrRef = useRef<HTMLInputElement>(null)
+
+  const rows = holdings.data ?? []
+  const total = rows.reduce((s, h) => s + (h.market_value ?? 0), 0)
+  const cost = rows.reduce((s, h) => s + h.shares * h.cost_price, 0)
+  const totalReturn = rows.reduce((s, h) => s + (h.total_return ?? 0), 0)
+
+  const run = async (work: () => Promise<string>) => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      setMessage({ tone: 'success', text: await work() })
+      holdings.reload()
+    } catch (e) {
+      setMessage({ tone: 'danger', text: e instanceof Error ? e.message : '操作失败' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editing) return
+    const { id, form } = editing
+    void run(async () => {
+      if (id == null) await api.addHolding(form)
+      else await api.updateHolding(id, form)
+      setEditing(null)
+      return id == null ? `已添加 ${form.fund_name}` : `已更新 ${form.fund_name}`
+    })
+  }
+  const importFile = (kind: 'csv' | 'ocr', file: File | undefined) => {
+    if (file) void run(async () => `已导入 ${(await api.importFile(kind, file)).imported_count} 条持仓`)
+  }
+  const set = <K extends keyof HoldingInput>(key: K, value: HoldingInput[K]) =>
+    setEditing((ed) => (ed ? { ...ed, form: { ...ed.form, [key]: value } } : ed))
+
+  return (
+    <Page title="持仓" description="录入、导入和维护持仓"
+      actions={(
+        <>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => csvRef.current?.click()}><Upload className="h-4 w-4" />导入 CSV / Excel</Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => ocrRef.current?.click()}><ImageUp className="h-4 w-4" />截图识别</Button>
+          <Button size="sm" onClick={() => setEditing({ id: null, form: blank() })}><Plus className="h-4 w-4" />添加持仓</Button>
+          <input ref={csvRef} type="file" accept=".csv,.xlsx,.xls" hidden onChange={(e) => { importFile('csv', e.target.files?.[0]); e.target.value = '' }} />
+          <input ref={ocrRef} type="file" accept="image/*" hidden onChange={(e) => { importFile('ocr', e.target.files?.[0]); e.target.value = '' }} />
+        </>
+      )}>
+      {message ? <Callout tone={message.tone}>{message.text}</Callout> : null}
+
+      {rows.length > 0 ? (
+        <Metrics>
+          <Metric label="持仓数" value={rows.length} />
+          <Metric label="总市值（元）" value={yuan(total)} />
+          <Metric label="总成本（元）" value={yuan(cost)} />
+          <Metric label="累计收益（元）" value={signed(totalReturn, 0)} tone={signClass(totalReturn)} hint={cost ? signed((totalReturn / cost) * 100, 2, '%') : undefined} />
+        </Metrics>
+      ) : null}
+
+      <Section title="持仓明细" hint="最新价来自实时行情；取不到时按成本价计">
+        <DataState loading={holdings.loading} error={holdings.error} onRetry={holdings.reload}
+          empty={rows.length === 0 ? '还没有持仓。点右上角"添加持仓"，或导入天天基金导出的 CSV。' : undefined}>
+          <Table minWidth={980} head={[
+            { label: '标的' }, { label: '类别' }, { label: '份额', right: true }, { label: '成本价', right: true }, { label: '最新价', right: true },
+            { label: '市值', right: true }, { label: '占比', right: true }, { label: '持有收益', right: true }, { label: '收益率', right: true }, { label: '', right: true },
+          ]}>
+            {rows.map((h) => (
+              <tr key={h.id}>
+                <Td><div className="font-medium text-ink">{h.fund_name}</div><div className="font-mono text-xs text-stone">{h.fund_code} · {h.buy_date}</div></Td>
+                <Td>{CATEGORY[h.category] ?? h.category}{h.industry ? <div className="text-xs text-steel">{h.industry}</div> : null}</Td>
+                <Td right num>{yuan(h.shares, 2)}</Td>
+                <Td right num>{h.cost_price.toFixed(4)}</Td>
+                <Td right num>{h.latest_nav == null ? '—' : h.latest_nav.toFixed(4)}</Td>
+                <Td right num>{yuan(h.market_value)}</Td>
+                <Td right num>{total && h.market_value != null ? `${((h.market_value / total) * 100).toFixed(1)}%` : '—'}</Td>
+                <Td right num className={signClass(h.total_return)}>{signed(h.total_return, 0)}</Td>
+                <Td right num className={signClass(h.return_pct)}>{signed(h.return_pct, 2, '%')}</Td>
+                <Td right className="whitespace-nowrap">
+                  <Button size="xs" variant="ghost" onClick={() => setEditing({ id: h.id, form: { asset_type: h.asset_type, fund_code: h.fund_code, fund_name: h.fund_name, shares: h.shares, cost_price: h.cost_price, buy_date: h.buy_date, category: h.category, industry: h.industry } })}>修改</Button>
+                  <Button size="xs" variant="danger" onClick={() => setRemoving(h)}>删除</Button>
+                </Td>
+              </tr>
+            ))}
+          </Table>
+        </DataState>
+        <p className="mt-3 text-[13px] text-steel">截图识别使用 Claude Vision，需要后端配置 Anthropic Key；CSV 支持天天基金导出格式。</p>
+      </Section>
+
+      <Drawer open={editing != null} onClose={() => setEditing(null)} title={editing?.id == null ? '添加持仓' : '修改持仓'} width="max-w-md">
+        {editing ? (
+          <form className="flex flex-col gap-4" onSubmit={save}>
+            <Select id="h-type" label="资产类型" value={editing.form.asset_type} onChange={(v) => set('asset_type', v)} options={options(ASSET)} />
+            <Input id="h-code" label="代码" placeholder="如 110011" value={editing.form.fund_code} onChange={(e) => set('fund_code', e.target.value.trim())} required />
+            <Input id="h-name" label="名称" value={editing.form.fund_name} onChange={(e) => set('fund_name', e.target.value)} required />
+            <div className="grid grid-cols-2 gap-3">
+              <Input id="h-shares" label="持有份额" type="number" step="any" min="0" value={editing.form.shares || ''} onChange={(e) => set('shares', Number(e.target.value))} required />
+              <Input id="h-cost" label="成本价" type="number" step="any" min="0" value={editing.form.cost_price || ''} onChange={(e) => set('cost_price', Number(e.target.value))} required />
+            </div>
+            <Input id="h-date" label="买入日期" type="date" value={editing.form.buy_date} onChange={(e) => set('buy_date', e.target.value)} required />
+            <Select id="h-cat" label="类别" value={editing.form.category} onChange={(v) => set('category', v)} options={options(CATEGORY)} />
+            <Input id="h-ind" label="行业标签" hint="用于按行业归因和行业排除校验，可留空" placeholder="如 科技、消费" value={editing.form.industry} onChange={(e) => set('industry', e.target.value)} />
+            <div className="flex gap-2 pt-1">
+              <Button type="submit" loading={busy}>保存</Button>
+              <Button variant="ghost" onClick={() => setEditing(null)}>取消</Button>
+            </div>
+          </form>
+        ) : null}
+      </Drawer>
+
+      <ConfirmDialog open={removing != null} title="删除持仓" confirmText="删除"
+        message={removing ? `确定删除「${removing.fund_name}」吗？删除后无法恢复。` : ''}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() => {
+          const target = removing
+          setRemoving(null)
+          if (target) void run(async () => { await api.removeHolding(target.id); return `已删除 ${target.fund_name}` })
+        }} />
+    </Page>
+  )
+}
+
+export default HoldingsPage

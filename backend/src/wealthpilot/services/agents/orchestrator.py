@@ -27,11 +27,9 @@ from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.critic_agent import CriticAgent, Verdict, rewrite_instruction
-from wealthpilot.services.evidence import ToolSession
 from wealthpilot.services.agents.market_agent import MarketAgent
 from wealthpilot.services.agents.planner_agent import (
     KEYWORD_RULES,
-    Plan,
     PlannerAgent,
     Task,
 )
@@ -43,6 +41,7 @@ from wealthpilot.services.agents.synthesizer_agent import (
     check_numeric_grounding,
 )
 from wealthpilot.services.ai_client import create_ai_client
+from wealthpilot.services.evidence import ToolSession
 from wealthpilot.settings import get_settings
 
 AGENT_LABELS = {
@@ -71,11 +70,19 @@ async def chat_stream(
         await queue.put(event)
 
     async def pipeline() -> None:
+        timeout = getattr(get_settings(), "run_timeout_seconds", None)
         try:
-            await _run_pipeline(
-                message, history, holdings, nav_data, nav_history,
-                conversation_id, db_session, profile, user_id, emit,
+            await asyncio.wait_for(
+                _run_pipeline(
+                    message, history, holdings, nav_data, nav_history,
+                    conversation_id, db_session, profile, user_id, emit,
+                ),
+                timeout,
             )
+        except TimeoutError:
+            text = f"本次研究超过 {timeout:.0f} 秒未完成，已中止。请缩小问题范围后重试。"
+            await emit({"type": "error", "content": text})
+            await emit({"type": "done", "content": text, "meta": {"status": "failed"}})
         except Exception as e:  # noqa: BLE001
             await emit({"type": "error", "content": f"Agent 执行异常: {e}"})
         finally:
@@ -110,10 +117,13 @@ async def _run_pipeline(
     if not history and conversation_id and db_session:
         history = _load_history(db_session, conversation_id, user_id)
     base_messages = [{"role": "assistant" if m["role"] == "ai" else m["role"], "content": m["content"]}
-                     for m in history[-10:] if m["role"] in ("user", "assistant", "ai")]
+                     for m in history[-10:] if m["role"] in ("user", "assistant", "ai") and m["content"]]
+    # 截取窗口可能从 assistant 开头，而对话必须以 user 起始
+    while base_messages and base_messages[0]["role"] != "user":
+        base_messages.pop(0)
     planner = PlannerAgent(client, model, profile)
     context = "\n".join(f"{m['role']}: {m['content']}" for m in base_messages[-4:])
-    plan = await asyncio.to_thread(planner.plan, f"此前对话：\n{context}\n当前问题：{message}")
+    plan = await asyncio.to_thread(planner.plan, message, context)
     await emit({"type": "plan", "intent": plan.intent, "source": plan.source,
                 "tasks": [{"id": t.id, "agent": t.agent, "goal": t.goal, "deps": t.deps,
                            "label": AGENT_LABELS.get(t.agent, t.agent)} for t in plan.tasks],
@@ -130,7 +140,8 @@ async def _run_pipeline(
 
     async def run_task(task):
         async with semaphore:
-            await emit({"type": "task_start", "id": task.id, "agent": task.agent, "goal": task.goal})
+            await emit({"type": "task_start", "id": task.id, "agent": task.agent, "goal": task.goal,
+                        "label": AGENT_LABELS.get(task.agent, task.agent)})
             kwargs = dict(client=client, model=model, profile=profile)
             if task.agent == "market":
                 agent = MarketAgent(**kwargs)
@@ -150,8 +161,11 @@ async def _run_pipeline(
     for wave in plan.waves():
         results.extend(await asyncio.gather(*[run_task(t) for t in wave]))
 
-    evidence_verdict = Verdict(passed=False, issues=["尚未完成证据审核"])
-    for attempt in range(settings.critic_max_replans + 1):
+    critic_on = getattr(settings, "critic_enabled", True)
+    # 所有任务都失败（典型：Key 无效、模型不可用）时补任务只会再失败一轮，直接收尾
+    all_failed = all(r.status == "failed" for r in results)
+    evidence_verdict = Verdict(passed=not all_failed, issues=["尚未完成证据审核"])
+    for attempt in range(settings.critic_max_replans + 1 if critic_on and not all_failed else 0):
         evidence_verdict = await asyncio.to_thread(critic.review_evidence, message, plan.success_criteria, results)
         await emit(evidence_verdict.as_event("evidence"))
         if (evidence_verdict.passed and evidence_verdict.review_complete) or attempt == settings.critic_max_replans:
@@ -164,7 +178,13 @@ async def _run_pipeline(
         results.extend(await asyncio.gather(*[run_task(t) for t in extra]))
 
     status = "passed"
-    if not evidence_verdict.passed or not evidence_verdict.review_complete:
+    if all_failed:
+        status = "failed"
+        final_text = "研究任务全部执行失败，未能得出结论。请检查模型服务配置或稍后重试。"
+    elif not evidence_verdict.review_complete or not any(
+        e.get("status", "ok") == "ok" for r in results for e in r.evidence
+    ):
+        # 审核本身没跑完，或一条可用证据都没有 —— 没有可发布的东西
         status = "insufficient_data"
         final_text = "当前证据不足，本次研究未通过审核。请补充资料或稍后重试。"
         if evidence_verdict.missing_evidence:
@@ -175,32 +195,59 @@ async def _run_pipeline(
     else:
         await emit({"type": "synthesizing", "agents": [r.agent for r in results]})
         synthesizer = SynthesizerAgent(client, model, profile)
-        instruction = ""
+        # 补查之后仍有缺口：已有证据照常作答，但缺口必须写明，状态标为 partial 而不是整轮拒答
+        gaps = [] if evidence_verdict.passed else evidence_verdict.missing_evidence
+        gap_note = ("以下要求未能取得证据，必须在回答中单列一节明确说明"
+                    "“当前数据无法判断”，不得估算或用常识补齐：\n"
+                    + "\n".join(f"- {g}" for g in gaps)) if gaps else ""
+        if gaps:
+            status = "partial"
+        instruction = gap_note
+        best: tuple[float, str, Verdict] | None = None
         for attempt in range(settings.critic_max_rewrites + 1):
-            if plan.is_single and attempt == 0 and len(results) == 1:
+            if plan.is_single and attempt == 0 and len(results) == 1 and not gaps:
                 draft = results[0].text
             else:
                 draft = await synthesizer.run(message, results, plan.success_criteria, emit,
                                                stream_output=False, extra_instruction=instruction)
-            verdict = critic.review_answer(draft, results)
+            if not critic_on:
+                final_text = draft or "本轮未能生成回答，请换个问法再试。"
+                break
+            verdict = critic.review_answer(draft, results, message)
             await emit({**verdict.as_event("answer"), "attempt": attempt + 1})
             if verdict.passed and draft.strip():
                 final_text = draft
                 break
-            instruction = rewrite_instruction(verdict)
+            # 只剩"个别数字对不上"这一类问题的草稿留作候选（越过画像约束、乱引证据的不留）
+            if draft.strip() and all(i.startswith("以下数字未出现在工具返回中") for i in verdict.issues):
+                if best is None or verdict.grounding_rate > best[0]:
+                    best = (verdict.grounding_rate, draft, verdict)
+            instruction = "\n\n".join(filter(None, [gap_note, rewrite_instruction(verdict)]))
         else:
-            status = "rejected"
-            final_text = "本次回答未通过证据或风险约束校验，已停止发布具体结论。请补充资料后重新研究。"
+            floor = getattr(settings, "critic_min_grounding_rate", 0.9)
+            if best is not None and best[0] >= floor:
+                # 绝大多数数字都能溯源，只有少数是模型自己加总/换算出来的：
+                # 整篇拒答的代价比带着明确标注发布更大，所以发布，但把对不上的数字点名
+                status = "partial"
+                unverified = "、".join(best[2].ungrounded_numbers[:8])
+                final_text = (f"{best[1].rstrip()}\n\n---\n"
+                              f"**未能核对的数字**：{unverified}。它们没有出现在任何工具返回中，"
+                              "多半是模型自行加总或换算的结果，请不要据此决策。")
+            else:
+                status = "rejected"
+                final_text = "本次回答未通过证据或风险约束校验，已停止发布具体结论。请补充资料后重新研究。"
     await _emit_text(emit, final_text)
-    grounding = check_numeric_grounding(final_text, results) if status == "passed" else {"rate": 0, "ungrounded": []}
+    grounding = (check_numeric_grounding(final_text, results) if status in ("passed", "partial")
+                 else {"rate": 0, "ungrounded": []})
     await _finish(emit, final_text, grounding, plan, message, holdings,
                   conversation_id, db_session, user_id, [r.agent for r in results],
-                  status=status, results=results)
+                  status=status, results=results,
+                  missing=evidence_verdict.missing_evidence if status == "partial" else None)
 
 
 async def _finish(
     emit, final_text, grounding, plan, message, holdings,
-    conversation_id, db_session, user_id, agents, status="passed", results=None,
+    conversation_id, db_session, user_id, agents, status="passed", results=None, missing=None,
 ) -> None:
     if grounding["ungrounded"]:
         # 不拦截输出，但把问题暴露出来 —— 这是可以进 CI 的可观测指标
@@ -232,6 +279,7 @@ async def _finish(
         "follow_ups": _generate_follow_ups(final_text, message, agents, holdings),
         "meta": {
             "status": status,
+            "missing_evidence": missing or [],
             "evidence": [e for r in (results or []) for e in r.evidence],
             "intent": plan.intent,
             "agents": agents,

@@ -1,9 +1,8 @@
 """分析引擎路由 — 全量接入真实净值数据。"""
 
 from fastapi import APIRouter, Depends
-from sqlmodel import Session, select
+from sqlmodel import Session
 
-from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.services.analysis import (
     calculate_attribution_by_category,
@@ -16,6 +15,7 @@ from wealthpilot.services.analysis import (
     generate_suggestions,
 )
 from wealthpilot.services.assets import fetch_prices_by_type
+from wealthpilot.services.deps import current_user_id, user_holdings
 from wealthpilot.services.market_data import fetch_fund_nav
 from wealthpilot.storage.db import get_session
 
