@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import httpx
 from sqlmodel import Session, select
@@ -190,20 +190,31 @@ def _users(db: Session) -> list[int]:
     return sorted(ids)
 
 
+def due_day(now: datetime, hour: int, minute: int):
+    """最近一个"该跑而且时间已到"的交易日。
+
+    电脑合着盖、关着机错过了 15:30，不该就此跳过那一天：下次醒来时只要发现最近一份简报比这个日子早，就补跑一次。
+    """
+    day = now.date() if (now.hour, now.minute) >= (hour, minute) else now.date() - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
 async def scheduler() -> None:
-    """后台循环：交易日到了设定时间、当天还没跑过，就给每个有持仓或自选的用户跑一次。"""
+    """后台循环：最近一个该跑的交易日还没有简报，就给每个有持仓或自选的用户跑一次（含错过后的补跑）。"""
     from wealthpilot.storage.db import get_engine
 
     while True:
         try:
             settings = get_settings()   # 每轮重读：在网页上改了时间或关掉盯盘，不用重启
             hour, minute = (int(x) for x in settings.watch_time.split(":"))
-            now = datetime.now()
-            if settings.watch_enabled and now.weekday() < 5 and (now.hour, now.minute) >= (hour, minute):
+            due = due_day(datetime.now(), hour, minute)
+            if settings.watch_enabled:
                 with Session(get_engine()) as db:
                     for uid in _users(db):
-                        done = db.exec(select(Digest).where(Digest.user_id == uid, Digest.day == str(now.date()))).first()
-                        if done is None:
+                        last = db.exec(select(Digest).where(Digest.user_id == uid).order_by(Digest.day.desc()).limit(1)).first()
+                        if last is None or last.day < str(due):
                             await run(db, uid)
         except Exception:  # noqa: BLE001 — 调度循环不能因为一次失败就停
             pass

@@ -223,7 +223,8 @@ def cmd_chat(_args: argparse.Namespace) -> None:
 
 def cmd_tui(args: argparse.Namespace) -> None:
     from wealthpilot.tui import main as tui_main
-    tui_main(getattr(args, "server", ""), getattr(args, "token", ""))
+    tui_main(getattr(args, "server", ""), getattr(args, "token", ""), web=not getattr(args, "no_web", False),
+             port=getattr(args, "port", 8000))
 
 
 def cmd_watch(_args: argparse.Namespace) -> None:
@@ -294,6 +295,8 @@ def main() -> None:
         p.add_argument("--server", default=os.environ.get("WEALTHPILOT_SERVER", ""),
                        help="连接远程后端，如 http://192.168.1.10:8000；不填则在本机进程内运行")
         p.add_argument("--token", default=os.environ.get("WEALTHPILOT_TOKEN", ""), help="远程后端的登录令牌（也可进入后用 /login）")
+        p.add_argument("--no-web", action="store_true", help="只用终端，不在后台启动网页版")
+        p.add_argument("--port", type=int, default=8000, help="网页版和接口的端口，默认 8000")
     sub.add_parser("watch", help="跑一次每日盯盘并打印简报（可挂 cron）")
     sub.add_parser("mcp", help="启动 MCP Server (stdio, for Claude Code)")
 

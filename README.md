@@ -84,18 +84,30 @@
 
 ## Quick Start
 
-### 方式一：Makefile（推荐）
+### 方式一：一条命令（推荐）
 
 ```bash
 git clone https://github.com/Jackychen-12/wealthpilot.git
 cd wealthpilot
 
-make setup          # 安装依赖 + 复制 .env
-# 编辑 backend/.env，填入 API Key（见下方配置说明）
-make dev            # 启动后端(:8000) + 工作台(:5180)
+make setup      # 装依赖、构建网页版、复制 .env
+make install    # 把 wealthpilot 装成全局命令（可选）
+wealthpilot     # 之后在任意目录敲这一条
 ```
 
-打开 http://localhost:5180 即可使用。
+`wealthpilot` 一条命令同时给你三样东西：
+
+- **终端**：当前窗口里直接提问、用 `/` 命令；
+- **网页版**：后台带起 http://localhost:8000 （接口和页面同一个端口，不用另开前端）；
+- **每日盯盘**：跟着这个进程跑，错过的那次（合盖、关机）下次启动时会补上。
+
+模型 Key 在网页版左侧「设置」里填，或直接编辑 `backend/.env`。第一次进来是空的，终端里 `/sample`、或网页首页的「先用一份示例数据看看」可以载入一份带标记的示例持仓，随时一键清掉。
+
+没装全局命令时用 `make start`，效果一样。只想要终端：`wealthpilot --no-web`；端口被占：`wealthpilot --port 8001`。配置、数据库、技能文件都固定在仓库的 `backend/` 下（或 `WEALTHPILOT_HOME` 指定的目录），和你在哪个目录敲命令无关。
+
+开发时想要前端热更新，仍然可以 `make dev`（后端 :8000 + Vite :5180）。
+
+一点如实说明：电脑合盖休眠时进程会被挂起，盯盘和进行中的研究都会停，软件层面拦不住；能做的是醒来后把错过的那次盯盘补上。要它全天候跑，需要放在一台不休眠的机器上（见 Docker 部署），再用 `wealthpilot --server` 连过去。
 
 ### 方式二：CLI 交互式初始化
 

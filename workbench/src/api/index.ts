@@ -149,6 +149,8 @@ export const api = {
   saveSettings: (values: Record<string, unknown>) => request<AppSettings>('/api/settings', json('PUT', values)),
   testModel: () => request<{ ok: boolean; provider: string; model: string; error?: string; reply?: string }>('/api/settings/test', { method: 'POST' }),
   desk: () => request<Desk>('/api/desk'),
+  loadSample: () => request<unknown>('/api/sample', { method: 'POST' }),
+  clearSample: () => request<unknown>('/api/sample', { method: 'DELETE' }),
   thesis: (code: string) => request<Thesis>(`/api/research/latest?code=${code}`),
   movers: () => request<{ trade_date: string; min_mv_yi: number; gainers: Mover[]; losers: Mover[] }>('/api/market/movers'),
   memory: () => request<MemoryItem[]>('/api/memory'),
@@ -251,7 +253,7 @@ export interface ScreenBacktest { start: string; end: string; top_n: number; tot
   periods: { start: string; end: string; picked: number; held?: number; return_pct: number | null; benchmark_pct: number | null; equity?: number; benchmark_equity?: number; top: { code: string; name: string; return_pct: number }[] }[] }
 export interface DeskStock { code: string; name: string; asset_type: string; held: boolean; price: number | null; change_pct: number | null; market_value: number | null; return_pct: number | null
   pe_percentile: number | null; checkpoints: { pending: number; held: number; broken: number }; last_research: { id: number; date: string; status: string } | null; open_proposals: number }
-export interface Desk { stocks: DeskStock[]; todo: { proposals: number; broken: number; pending: number; unresearched: number }; verified_recent: Checkpoint[]; digest: Digest | null }
+export interface Desk { sample?: boolean; stocks: DeskStock[]; todo: { proposals: number; broken: number; pending: number; unresearched: number }; verified_recent: Checkpoint[]; digest: Digest | null }
 export interface Thesis { code: string; latest: { id: number; date: string; status: string; playbook: string; conclusion: string; stance: string } | null; research_dates: string[]
   checkpoints: { total: number; pending: number; held: number; broken: number }; broken: Checkpoint[] }
 export interface Mover { code: string; name: string; industry: string; price: number | null; change_pct: number; total_mv_yi: number | null }

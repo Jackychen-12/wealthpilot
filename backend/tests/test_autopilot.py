@@ -224,3 +224,39 @@ def test_stance_is_read_per_stock_in_a_comparison():
     from wealthpilot.routes.research import _stance
     line = "立场：贵州茅台——看多（持有，不加仓）；五粮液——中性（持有观察）。"
     assert (_stance(line, "贵州茅台"), _stance(line, "五粮液"), _stance("**立场：看空。**"), _stance("没有写")) == ("看多", "中性", "看空", "")
+
+
+def test_watch_catches_up_after_a_missed_day():
+    from datetime import datetime
+
+    assert str(watcher.due_day(datetime(2026, 10, 9, 16, 0), 15, 30)) == "2026-10-09"    # 周五收盘后：今天
+    assert str(watcher.due_day(datetime(2026, 10, 9, 10, 0), 15, 30)) == "2026-10-08"    # 周五上午：还轮不到今天，该有的是周四那份
+    assert str(watcher.due_day(datetime(2026, 10, 11, 9, 0), 15, 30)) == "2026-10-09"    # 周日开机：补周五那份
+    assert str(watcher.due_day(datetime(2026, 10, 12, 9, 0), 15, 30)) == "2026-10-09"    # 周一上午：还是周五那份
+
+
+def test_sample_data_is_marked_and_removable_without_touching_real_holdings(db):
+    db.add(PortfolioHolding(user_id=0, asset_type="stock", fund_code="600519", fund_name="贵州茅台", shares=100, cost_price=1200.0, buy_date=date(2025, 1, 1)))
+    db.commit()
+    with TestClient(app) as client:
+        assert client.get("/api/desk").json()["sample"] is False
+        client.post("/api/sample")
+        client.post("/api/sample")                                   # 重复载入不会重复添加
+        codes = [h["fund_code"] for h in client.get("/api/portfolio").json()]
+        assert sorted(codes) == ["000858", "110011", "300750", "510300", "600036", "600519"]
+        assert client.get("/api/desk").json()["sample"] is True
+        assert client.delete("/api/sample").json()["removed"] == 7   # 5 条示例持仓 + 2 条示例自选
+        assert [h["fund_code"] for h in client.get("/api/portfolio").json()] == ["600519"]   # 自己录的那条还在
+        assert client.get("/api/watchlist").json() == []
+        for h in client.get("/api/portfolio").json():   # 不给别的测试留下持仓
+            client.delete(f"/api/portfolio/{h['id']}")
+
+
+def test_paths_are_anchored_to_home_not_the_current_directory(tmp_path, monkeypatch):
+    from wealthpilot import settings as settings_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SKILLS_DIR", raising=False)
+    fresh = settings_module.Settings()
+    assert fresh.skills_dir == settings_module.HOME / "skills" and fresh.skills_dir.is_absolute()
+    assert settings_module.HOME.name == "backend" and not str(fresh.skills_dir).startswith(str(tmp_path))

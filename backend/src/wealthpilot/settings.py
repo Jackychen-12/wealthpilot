@@ -1,14 +1,31 @@
 """环境变量配置。"""
 
+import os
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _home() -> Path:
+    """配置、数据库、技能这些文件放在哪。
+
+    以前都是相对当前目录找的，所以命令只能在 backend/ 下运行。现在固定到一个"家目录"：
+    WEALTHPILOT_HOME 指定的位置；没指定时用源码所在的 backend/（从仓库安装时就是这种情况）；都不是才退回当前目录。
+    """
+    env = os.environ.get("WEALTHPILOT_HOME")
+    if env:
+        return Path(env).expanduser().resolve()
+    backend = Path(__file__).resolve().parents[2]
+    return backend if (backend / "pyproject.toml").exists() else Path.cwd()
+
+
+HOME = _home()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(HOME / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -75,6 +92,15 @@ class Settings(BaseSettings):
         if self.ai_provider == "deepseek":
             return self.deepseek_model
         return self.anthropic_model
+
+    @model_validator(mode="after")
+    def _anchor_paths(self):
+        # 相对路径一律相对家目录，而不是相对"命令是在哪个目录下敲的"
+        for name in ("db_path", "skills_dir", "connectors_file"):
+            value = getattr(self, name)
+            if not value.is_absolute():
+                object.__setattr__(self, name, HOME / value)
+        return self
 
     def ensure_dirs(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

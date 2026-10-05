@@ -46,6 +46,7 @@ COMMANDS: dict[str, str] = {
     "/digest": "/digest [run] — 每日简报（run 立即检查一次）",
     "/broker": "模拟盘账户与持仓",
     "/order": "/order <buy|sell> <名称或代码> <数量> — 在模拟盘下单（会再确认一次）",
+    "/sample": "/sample [clear] — 载入或清除示例持仓与自选",
     "/skills": "我的研究方法（技能）",
     "/memory": "/memory [add <内容> | rm <编号>] — AI 记住的事",
     "/audit": "审计日志（只追加，带完整性校验）",
@@ -468,6 +469,36 @@ class App:
         else:
             self.console.print(f"[red]被拒[/] {o['reason']}")
 
+    async def greet(self) -> None:
+        """进来先说一句现在的情况：有什么等着处理，或者怎么开始。"""
+        try:
+            desk = await self.backend.request("GET", "/api/desk")
+        except Exception:  # noqa: BLE001 — 打招呼失败不该挡住使用
+            return
+        todo = desk["todo"]
+        if not desk["stocks"]:
+            self.console.print("[dim]还没有持仓和自选。/sample 载入一份示例数据先看看，或 /watch add 茅台 加一只自选。[/]")
+            return
+        parts = [f"{len(desk['stocks'])} 只股票在盯"]
+        if todo["proposals"]:
+            parts.append(f"[magenta]{todo['proposals']} 条建议等你决定（/proposals）[/]")
+        if todo["broken"]:
+            parts.append(f"[red]{todo['broken']} 条判断被证伪（/review）[/]")
+        if todo["pending"]:
+            parts.append(f"{todo['pending']} 个验证点待核对")
+        digest = desk.get("digest")
+        if digest:
+            parts.append(f"最近一次检查 {digest['day']}：{digest['summary']}（/digest）")
+        self.console.print("[dim]" + " · ".join(parts) + ("  [示例数据，/sample clear 清除]" if desk.get("sample") else "") + "[/]")
+
+    async def cmd_sample(self, args: str) -> None:
+        if args.strip() == "clear":
+            r = await self.backend.request("DELETE", "/api/sample")
+            self.console.print(f"已清除示例数据（{r['removed']} 项）")
+            return
+        await self.backend.request("POST", "/api/sample")
+        self.console.print("已载入示例持仓和自选（都带示例标记，/sample clear 可以一键清掉）。试试 /holdings、/digest run，或直接问：帮我诊断一下我的持仓")
+
     async def cmd_skills(self, _: str) -> None:
         data = await self.backend.request("GET", "/api/skills")
         t = self.table("方法", "名称", "触发词", "派谁去查")
@@ -582,7 +613,14 @@ class App:
     async def run(self) -> None:
         c = self.console
         c.print(f"[bold]WealthPilot[/] [dim]v{__version__} · {self.backend.label}[/]")
-        c.print("[dim]输入问题开始研究，/help 看命令，Ctrl-C 中断当前研究，/quit 退出[/]\n")
+        if getattr(self.backend, "web", ""):
+            c.print(f"[dim]{self.backend.web}[/]")
+        if getattr(self.backend, "own_scheduler", False):
+            from wealthpilot.services import watcher
+            self._scheduler = asyncio.ensure_future(watcher.scheduler())
+        c.print("[dim]输入问题开始研究，/help 看命令，Ctrl-C 中断当前研究，/quit 退出[/]")
+        await self.greet()
+        c.print()
         read = self._reader()
         while True:
             try:
@@ -628,6 +666,38 @@ class App:
         return lambda: session.prompt_async(HTML("<ansicyan><b>› </b></ansicyan>"))
 
 
+def start_web(port: int) -> tuple[str, str]:
+    """在后台线程里把后端（连同网页版和每日盯盘）带起来，这样一条命令就同时有了终端和网页。
+
+    返回（网址, 状态）：started 是这次带起来的；running 是端口上已经有一个 WealthPilot 在跑（比如另开着 make dev）；
+    busy 是端口被别的程序占了，这时网页版不可用，但终端照常能用。
+    """
+    import os
+    import socket
+    import threading
+
+    url = f"http://localhost:{port}"
+    with socket.socket() as probe:
+        probe.settimeout(0.3)
+        occupied = probe.connect_ex(("127.0.0.1", port)) == 0
+    if occupied:
+        try:
+            ours = httpx.get(f"{url}/health", timeout=2).json().get("status") == "ok"
+        except Exception:  # noqa: BLE001
+            ours = False
+        return (url, "running") if ours else ("", "busy")
+
+    import uvicorn
+
+    from wealthpilot.main import app
+
+    os.environ["WEALTHPILOT_QUIET"] = "1"
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", access_log=False))
+    server.install_signal_handlers = lambda: None   # Ctrl-C 归终端界面管
+    threading.Thread(target=server.run, daemon=True, name="wp-web").start()
+    return url, "started"
+
+
 def saved_token(server: str) -> str:
     try:
         data = json.loads((HOME / "token").read_text())
@@ -636,7 +706,16 @@ def saved_token(server: str) -> str:
     return data.get("token", "") if data.get("server") == server.rstrip("/") else ""
 
 
-def main(server: str = "", token: str = "") -> None:
+def main(server: str = "", token: str = "", web: bool = True, port: int = 8000) -> None:
     backend: Backend = RemoteBackend(server, token or saved_token(server)) if server else LocalBackend()
+    if not server:
+        from wealthpilot.main import WEB_DIR
+        url, state = start_web(port) if web else ("", "off")
+        has_page = (WEB_DIR / "index.html").is_file()
+        backend.web = (f"网页版 {url}" if has_page else f"接口 {url}（网页版还没构建：在仓库里运行 make setup）") if url else ""
+        # 盯盘跟着后端走；没带起后端（--no-web 或端口被占）时，就在终端这个进程里自己盯
+        backend.own_scheduler = state in ("off", "busy")
+        if state == "busy":
+            backend.web = f"端口 {port} 被别的程序占用，网页版没有启动（可用 --port 换一个）"
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(App(backend).run())
