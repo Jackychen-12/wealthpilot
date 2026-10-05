@@ -40,6 +40,7 @@ from wealthpilot.services.agents.registry import AGENT_LABELS, build_agent
 from wealthpilot.services.agents.synthesizer_agent import (
     SynthesizerAgent,
     check_numeric_grounding,
+    strip_ungrounded,
 )
 from wealthpilot.services.ai_client import Usage, create_ai_client
 from wealthpilot.services.checkpoints import ACTIVE_USER
@@ -253,8 +254,17 @@ async def _run_pipeline(
             status = "partial"
         instruction = gap_note
         best: tuple[float, str, Verdict] | None = None
+        repair_from: tuple[str, Verdict] | None = None
         for attempt in range(settings.critic_max_rewrites + 1):
-            if plan.is_single and attempt == 0 and len(results) == 1 and not gaps and not plan.method:
+            draft = ""
+            if repair_from is not None:
+                # 上一稿只是个别数字对不上：只改那几处，不重发全部证据、不重写全文
+                await emit({"type": "synthesizing", "agents": [r.agent for r in results], "mode": "repair"})
+                draft = await synthesizer.repair(repair_from[0], repair_from[1].issues, repair_from[1].ungrounded_numbers)
+                repair_from = None
+            if draft:
+                pass
+            elif plan.is_single and attempt == 0 and len(results) == 1 and not gaps and not plan.method:
                 draft = results[0].text
             else:
                 draft = await synthesizer.run(message, results, plan.success_criteria, emit,
@@ -270,6 +280,7 @@ async def _run_pipeline(
                 break
             # 只剩"个别数字对不上"这一类问题的草稿留作候选（越过画像约束、乱引证据的不留）
             if draft.strip() and all(i.startswith("以下数字未出现在工具返回中") for i in verdict.issues):
+                repair_from = (draft, verdict)
                 if best is None or verdict.grounding_rate > best[0]:
                     best = (verdict.grounding_rate, draft, verdict)
             instruction = "\n\n".join(filter(None, [gap_note, rewrite_instruction(verdict)]))
@@ -284,8 +295,17 @@ async def _run_pipeline(
                               f"**未能核对的数字**：{unverified}。它们没有出现在任何工具返回中，"
                               "多半是模型自行加总或换算的结果，请不要据此决策。")
             else:
-                status = "rejected"
-                final_text = "本次回答未通过证据或风险约束校验，已停止发布具体结论。请补充资料后重新研究。"
+                # 还差几个数字去不掉：把含这些数字的分句删掉再核对一次，过了就发布（标注为部分），过不了才整篇不发
+                trimmed = strip_ungrounded(best[1], best[2].ungrounded_numbers) if best is not None else ""
+                recheck = critic.review_answer(trimmed, results, message, holdings_context, plan.sections) if trimmed.strip() else None
+                if recheck is not None and recheck.passed:
+                    await emit({**recheck.as_event("answer"), "attempt": settings.critic_max_rewrites + 2})
+                    status = "partial"
+                    final_text = (f"{trimmed.rstrip()}\n\n---\n"
+                                  f"有 {len(best[2].ungrounded_numbers)} 个数字查不到出处，含这些数字的表述已从回答中删去。")
+                else:
+                    status = "rejected"
+                    final_text = "本次回答未通过证据或风险约束校验，已停止发布具体结论。请补充资料后重新研究。"
     await _emit_text(emit, final_text)
     grounding = (check_numeric_grounding(final_text, results) if status in ("passed", "partial")
                  else {"rate": 0, "ungrounded": []})

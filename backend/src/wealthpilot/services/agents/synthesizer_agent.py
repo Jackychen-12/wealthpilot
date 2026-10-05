@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -18,6 +19,8 @@ from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.prompts import build_synthesizer_prompt
 from wealthpilot.services.agents.streaming import stream_sync_in_thread
+from wealthpilot.services.ai_client import json_mode
+from wealthpilot.services.evidence import brief
 from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
@@ -102,16 +105,45 @@ class SynthesizerAgent:
 
     @staticmethod
     def _build_evidence_block(question: str, results: list[AgentResult]) -> str:
-        parts = [f"用户问题：{question}\n", "以下是各专业 Agent 收集到的证据：\n"]
+        parts = [f"用户问题：{question}\n", "以下是各专业 Agent 收集到的证据。较长的返回已经压缩（列表只留前几项、长文只留开头），"
+                 "被省略的数字不要去猜；各 Agent 的初步结论是它们看过完整数据后写的，里面带证据 ID 的数字可以直接引用。\n"]
         for r in results:
             parts.append(f"\n### [{r.agent}] {r.goal or '（无显式目标）'}")
             if r.evidence:
-                parts.append("工具返回原始数据：")
+                parts.append("工具返回：")
                 for e in r.evidence:
-                    parts.append(f"- [{e.get('id', 'legacy')}] {e['tool']}({e['input']}) → {e['output']}\n元数据：{e.get('provenance', {})}")
+                    parts.append(f"- {brief(e)}")
             if r.text.strip():
                 parts.append(f"该 Agent 的初步结论：{r.text.strip()}")
         return "\n".join(parts)
+
+    async def repair(self, draft: str, issues: list[str], numbers: list[str]) -> str:
+        """只改有问题的那几处，而不是把几千字重写一遍。
+
+        校验没过、且问题只是"个别数字对不上"时用：让模型给出若干处"原文片段 → 改后片段"，由代码套上去。
+        这样不用重发全部证据，输出也只有几百字。任何一处套不上、或者一处都没改成，返回空串，由调用方退回完整重写。
+        """
+        system = ("你在修订一份已经写好的研究回答。校验发现其中有些数字在证据里找不到。\n"
+                  "只做最小改动：对每个找不到出处的数字，删掉它所在的短语，或改成不含这个数字的说法（例如把“约占三成（31.2%）”改成“约占三成”）。\n"
+                  "不要引入任何新的数字，不要改动其它内容，不要增删证据标记。\n"
+                  '只返回 JSON：{"edits":[{"find":"回答里逐字出现的一小段原文","replace":"改后的写法"}]}。find 要足够长以保证只匹配一处。')
+        user = "需要处理的问题：\n" + "\n".join(f"- {i}" for i in issues) + f"\n\n找不到出处的数字：{'、'.join(numbers)}\n\n回答全文：\n{draft}"
+        try:
+            result = await asyncio.to_thread(self.client.create, model=self.model, max_tokens=4000, system=system,
+                                             messages=[{"role": "user", "content": user}], **json_mode(self.client))
+            match = re.search(r"\{.*\}", result.text.strip(), re.DOTALL)
+            edits = json.loads(match.group()).get("edits") if match else None
+        except Exception:
+            return ""
+        if not isinstance(edits, list) or not edits:
+            return ""
+        text = draft
+        for edit in edits:
+            find, replace = str((edit or {}).get("find") or ""), str((edit or {}).get("replace") or "")
+            if not find or find not in text:
+                return ""   # 套不上就整体放弃，不做一半
+            text = text.replace(find, replace, 1)
+        return text if text != draft else ""
 
     @staticmethod
     def _fallback_merge(results: list[AgentResult]) -> str:
@@ -212,6 +244,31 @@ def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
         "ungrounded": sorted(set(ungrounded)),
         "rate": (grounded / total) if total else 1.0,
     }
+
+
+def strip_ungrounded(answer: str, numbers: list[str]) -> str:
+    """最后的办法：把含有无法核对数字的那半句话删掉（表格里换成"—"）。
+
+    重写和定点修订都没能去掉这些数字时用。宁可少一句话，也不让一个查不到出处的数字留在回答里，
+    更不该因为一两个数字把整篇已经核对过的内容都扣下不发。
+    """
+    if not numbers:
+        return answer
+    pattern = re.compile(r"(?<![\d.])(?:" + "|".join(re.escape(n.lstrip("+-")) for n in numbers) + r")(?![\d.])")
+    out = []
+    for line in answer.splitlines():
+        if not pattern.search(line) or line.lstrip().startswith("#"):
+            out.append(line)
+        elif line.lstrip().startswith("|"):
+            out.append(pattern.sub("—", line))
+        else:
+            # 按句读切开，只丢掉含这些数字的分句
+            clauses = re.split(r"(?<=[。；;！？!?，,])", line)
+            kept = "".join(c for c in clauses if not pattern.search(c)).strip()
+            kept = re.sub(r"[，,；;]\s*$", "。", kept)
+            if kept and not re.fullmatch(r"[-*\d.、\s]*", kept):
+                out.append(kept)
+    return "\n".join(out)
 
 
 _MAX_OPERANDS = 14
