@@ -16,7 +16,15 @@ start:           ## 一条命令启动：终端入口，同时在后台带起网
 
 install:         ## 把 wealthpilot 装成全局命令（任意目录可用；代码改了不用重装）
 	@mkdir -p $(HOME)/.local/bin
-	@printf '#!/bin/sh\n# WealthPilot 的入口：转给仓库里那套已经装好的环境，所以代码更新后不用重装\nexec "%s/backend/.venv/bin/wealthpilot" "$$@"\n' "$(CURDIR)" > $(HOME)/.local/bin/wealthpilot
+	@printf '%s\n' '#!/bin/sh' \
+	  '# WealthPilot 的入口：转给仓库里那套已经装好的环境，所以代码更新后不用重装。' \
+	  'REPO="$(CURDIR)"' \
+	  'if [ ! -x "$$REPO/backend/.venv/bin/wealthpilot" ]; then' \
+	  '  echo "找不到 WealthPilot：$$REPO 下没有可用的安装。" >&2' \
+	  '  echo "仓库是不是挪了位置或删掉了环境？到仓库目录里重新运行：make setup && make install" >&2' \
+	  '  exit 127' \
+	  'fi' \
+	  'exec "$$REPO/backend/.venv/bin/wealthpilot" "$$@"' > $(HOME)/.local/bin/wealthpilot
 	@chmod +x $(HOME)/.local/bin/wealthpilot
 	@echo "✅ 已安装到 ~/.local/bin/wealthpilot，现在可以在任意目录运行：wealthpilot"
 	@case ":$$PATH:" in *":$(HOME)/.local/bin:"*) ;; *) echo "   注意：~/.local/bin 不在 PATH 里，需要先加进去";; esac
@@ -24,12 +32,12 @@ install:         ## 把 wealthpilot 装成全局命令（任意目录可用；�
 uninstall:       ## 移除全局命令
 	@rm -f $(HOME)/.local/bin/wealthpilot && echo "已移除 ~/.local/bin/wealthpilot"
 
-dev:             ## 启动后端 + 工作台（开发模式）
-	@echo "启动后端（:8000）+ 工作台（http://localhost:5180）..."
-	cd backend && uv run uvicorn wealthpilot.main:app --reload --port 8000 &
-	npm --prefix workbench run dev
+dev:             ## 开发：后端热重载 + 网页版改了自动重新构建，只有一个地址 http://localhost:8000
+	@echo "开发模式：http://localhost:8000 （改了前端代码会自动重新构建，刷新页面即可）"
+	npm --prefix workbench run build -- --outDir dist-app --emptyOutDir --watch &
+	cd backend && uv run uvicorn wealthpilot.main:app --reload --port 8000
 
-workbench:       ## 仅启动工作台（:5180，/api 代理到 :8000）
+workbench:       ## 前端热更新（:5180，/api 代理到 :8000）——只在需要逐像素调界面时用，平时用 make dev
 	npm --prefix workbench run dev
 
 demo-build:      ## 构建在线演示版（无后端，回放录好的真实结果）
