@@ -48,6 +48,8 @@ export const ProposalList: React.FC<{ items: Proposal[]; onChanged?: (p: Proposa
   const [price, setPrice] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [rejecting, setRejecting] = useState<number | null>(null)
+  const [reason, setReason] = useState('')
   const done = (p: Proposal) => { setLocal((m) => ({ ...m, [p.id]: p })); setTarget(null); onChanged?.(p) }
   const act = async (work: () => Promise<Proposal>) => {
     setBusy(true); setError('')
@@ -75,8 +77,14 @@ export const ProposalList: React.FC<{ items: Proposal[]; onChanged?: (p: Proposa
               {p.status === 'proposed' ? (
                 <div className="mt-3 flex items-center gap-2">
                   <Button size="sm" disabled={DEMO} onClick={() => open(p)}>{paper ? '授权并在模拟盘下单' : '授权并记入持仓'}</Button>
-                  <Button size="sm" variant="ghost" disabled={DEMO || busy} onClick={() => void act(() => api.rejectProposal(p.id))}>不采纳</Button>
+                  <Button size="sm" variant="ghost" disabled={DEMO || busy} onClick={() => { setRejecting(p.id); setReason('') }}>不采纳</Button>
                 </div>
+              ) : null}
+              {rejecting === p.id && p.status === 'proposed' ? (
+                <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); setRejecting(null); void act(() => api.rejectProposal(p.id, reason)) }}>
+                  <div className="min-w-[240px] flex-1"><Input id={`rej-${p.id}`} label="为什么不采纳（可不填）" placeholder="比如：仓位本来就小 / 我想再等一期财报" hint="原因会记下来，下次研究这只股票时 AI 会看到" value={reason} onChange={(e) => setReason(e.target.value)} /></div>
+                  <Button type="submit" size="sm" variant="secondary" className="mb-[22px]" loading={busy}>确认不采纳</Button>
+                </form>
               ) : null}
             </div>
           )

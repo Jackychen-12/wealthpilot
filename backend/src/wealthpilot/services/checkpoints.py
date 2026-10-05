@@ -22,7 +22,8 @@ from sqlmodel import Session, select
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.review import Checkpoint, TradeProposal
-from wealthpilot.services import cache, stocks
+from wealthpilot.services import cache, memory, stocks
+from wealthpilot.services.ai_client import json_mode
 from wealthpilot.settings import get_settings
 
 # 工具执行时"当前是谁"。Web 请求由路由 / 编排器设置；CLI 与 MCP 用默认的本机用户
@@ -200,7 +201,7 @@ async def create_from_research(
         advice=_ADVICE_RULES if advice else "",
         proposal_shape=',"proposals":[{"code":"600519","action":"add","shares":100,"reason":"...","invalidation":"..."}]' if advice else "")
     result = await asyncio.to_thread(client.create, model=model, max_tokens=4000, system=system,
-                                     messages=[{"role": "user", "content": prompt}])
+                                     messages=[{"role": "user", "content": prompt}], **json_mode(client))
     data = _parse_json(result.text)
 
     today = date.today()
@@ -279,6 +280,7 @@ async def verify_pending(db: Session, user_id: int, *, force: bool = False, toda
     today = today or date.today()
     pending = db.exec(select(Checkpoint).where(Checkpoint.user_id == user_id, Checkpoint.status == "pending")).all()
     counts = {"checked": 0, "held": 0, "broken": 0, "unverifiable": 0}
+    verified: list[Checkpoint] = []
     for cp in pending:
         try:
             outcome = await _actual(cp, today)
@@ -296,7 +298,11 @@ async def verify_pending(db: Session, user_id: int, *, force: bool = False, toda
         cp.checked_at = datetime.now()
         counts["checked"] += 1
         db.add(cp)
+        verified.append(cp)
     db.commit()
+    for cp in verified:
+        memory.record(db, user_id, "checkpoint/verified", f"{cp.name} {METRICS.get(cp.metric, (cp.metric,))[0]}：{cp.status}",
+                      {"id": cp.id, "code": cp.code, "status": cp.status, "actual": cp.actual_value, "as_of": cp.actual_as_of})
     cache.write(key, {"at": str(today)})
     return counts
 

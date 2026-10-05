@@ -3,7 +3,7 @@
  * 切到别的页面再回来，对话和正在跑的研究都还在。
  */
 import { useSyncExternalStore } from 'react'
-import { streamChat, type Checkpoint, type Proposal, type Security, type StreamEvent } from '../api'
+import { streamChat, type Checkpoint, type Proposal, type Security, type StreamEvent, type Usage } from '../api'
 
 export interface Evidence { id: string; tool: string; agent: string; taskId: string; ok: boolean; input: string; output: string; asOf: string; source: string }
 export interface Task { id: string; agent: string; goal: string; state: 'pending' | 'running' | 'done' | 'failed' }
@@ -12,7 +12,7 @@ export interface Turn {
   id: number; question: string; answer: string; status: string; running: boolean
   intent: string; fallbackPlan: boolean; tasks: Task[]; criteria: string[]; evidence: Evidence[]; checks: Check[]
   missing: string[]; followUps: string[]; seconds: number; error: string
-  playbook: string; securities: Security[]; checkpoints: Checkpoint[]; proposals: Proposal[]
+  playbook: string; securities: Security[]; checkpoints: Checkpoint[]; proposals: Proposal[]; usage: Usage | null
 }
 
 interface State { turns: Turn[]; selected: number | null; focusEvidence: string }
@@ -70,7 +70,7 @@ function apply(turn: Turn, e: StreamEvent): Turn {
     case 'delta': return { ...turn, answer: turn.answer + (e.content || '') }
     case 'done':
       return { ...turn, answer: e.content || turn.answer, status: e.meta?.status || 'passed', running: false,
-        missing: e.meta?.missing_evidence || [], followUps: e.follow_ups || [] }
+        missing: e.meta?.missing_evidence || [], followUps: e.follow_ups || [], usage: e.meta?.usage ?? null }
     default: return turn
   }
 }
@@ -88,7 +88,7 @@ export const research = {
     const history = state.turns.filter(t => t.status && t.answer).slice(-5)
       .flatMap(t => [{ role: 'user', content: t.question }, { role: 'assistant', content: t.answer }])
     const turn: Turn = { id, question: question.trim(), answer: '', status: '', running: true, intent: '', fallbackPlan: false,
-      tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '', playbook: '', securities: [], checkpoints: [], proposals: [] }
+      tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '', playbook: '', securities: [], checkpoints: [], proposals: [], usage: null }
     emit({ turns: [...state.turns, turn], selected: id, focusEvidence: '' })
 
     const started = Date.now()

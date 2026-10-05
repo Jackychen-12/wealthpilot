@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.synthesizer_agent import check_numeric_grounding
+from wealthpilot.services.ai_client import json_mode
 from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
@@ -124,6 +125,7 @@ class CriticAgent:
             out = self.client.create(
                 model=self.model, max_tokens=4000, system=system,
                 messages=[{"role": "user", "content": user}],
+                **json_mode(self.client),
             )
             match = re.search(r"\{.*\}", out.text.strip(), re.DOTALL)
             if not match:

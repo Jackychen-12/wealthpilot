@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.review import Checkpoint, TradeProposal
-from wealthpilot.services import broker, checkpoints
+from wealthpilot.services import broker, checkpoints, memory
 from wealthpilot.services.deps import current_user_id
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_session
@@ -67,6 +67,21 @@ def _owned(db: Session, proposal_id: int, user_id: int) -> TradeProposal:
     return p
 
 
+def _decided(db: Session, user_id: int, p: TradeProposal, outcome: str, reason: str = "") -> None:
+    """审批结果进审计日志，同时记成一条"决定"：Agent 下次研究这只股票时知道用户上次怎么选的。
+    outcome 沿用 DeepSeek Harness 审批子系统的取值：allowed-once 只授权这一次，rejected 为拒绝。"""
+    label = checkpoints.ACTIONS.get(p.action, p.action)
+    memory.record(db, user_id, "approval/decided", f"{label} {p.name}：{'授权' if outcome == 'allowed-once' else '不采纳'}",
+                  {"proposal_id": p.id, "code": p.code, "action": p.action, "outcome": outcome, "shares": p.exec_shares,
+                   "price": p.exec_price, "reason": reason}, actor="user")
+    day = datetime.now().strftime("%Y-%m-%d")
+    if outcome == "allowed-once":
+        text = f"{day} 采纳了对{p.name}的{label}建议（{p.exec_shares} 股 @ {p.exec_price}）"
+    else:
+        text = f"{day} 没有采纳对{p.name}的{label}建议" + (f"，原因：{reason}" if reason else "")
+    memory.add(db, user_id, text, kind="decision", code=p.code, source=f"proposal:{p.id}")
+
+
 @router.get("/proposals")
 def list_proposals(status: str = "", db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     stmt = select(TradeProposal).where(TradeProposal.user_id == user_id)
@@ -94,6 +109,7 @@ async def authorize_proposal(proposal_id: int, req: Authorize, db: Session = Dep
         db.add(p)
         db.commit()
         db.refresh(p)
+        _decided(db, user_id, p, "allowed-once")
         return checkpoints.serialize_proposal(p)
     if req.price is None:
         raise HTTPException(422, "请填写实际成交价")
@@ -122,14 +138,48 @@ async def authorize_proposal(proposal_id: int, req: Authorize, db: Session = Dep
     db.add(p)
     db.commit()
     db.refresh(p)
+    _decided(db, user_id, p, "allowed-once")
     return checkpoints.serialize_proposal(p)
 
 
 @router.post("/proposals/{proposal_id}/reject")
-def reject_proposal(proposal_id: int, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+def reject_proposal(proposal_id: int, body: dict | None = None, db: Session = Depends(get_session),
+                    user_id: int = Depends(current_user_id)):
+    """不采纳。可以带上原因 —— 原因会记进投资者记忆，下次研究这只股票时 Agent 会看到。"""
     p = _owned(db, proposal_id, user_id)
     p.status, p.decided_at = "rejected", datetime.now()
     db.add(p)
     db.commit()
     db.refresh(p)
+    _decided(db, user_id, p, "rejected", str((body or {}).get("reason") or "").strip())
     return checkpoints.serialize_proposal(p)
+
+
+# ── 投资者记忆与审计日志 ────────────────────────────────
+
+class MemoryCreate(BaseModel):
+    content: str = Field(..., min_length=2, max_length=300)
+    code: str = Field(default="", pattern=r"^(\d{6})?$")
+
+
+@router.get("/memory")
+def list_memory(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    return [memory.serialize(m) for m in memory.list_memories(db, user_id)]
+
+
+@router.post("/memory", status_code=201)
+def add_memory(req: MemoryCreate, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    return memory.serialize(memory.add(db, user_id, req.content, kind="note", code=req.code, source="manual"))
+
+
+@router.delete("/memory/{memory_id}")
+def delete_memory(memory_id: int, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    if not memory.remove(db, user_id, memory_id):
+        raise HTTPException(404, "这条记忆不存在")
+    return {"ok": True}
+
+
+@router.get("/audit")
+def audit_log(limit: int = 100, kind: str = "", db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """审计日志，新的在前。只读：没有修改和删除的接口。"""
+    return {"events": memory.events(db, user_id, limit, kind), "integrity": memory.verify(db, user_id)}

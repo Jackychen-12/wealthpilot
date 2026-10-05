@@ -138,14 +138,16 @@ VALID_AGENTS = tuple(AGENTS)
 
 
 def build_prompt(name: str, holdings: list[PortfolioHolding], nav_data: dict[str, float],
-                 profile: InvestorProfile | None) -> str:
+                 profile: InvestorProfile | None, stable_prefix: bool = False) -> str:
+    """stable_prefix=True 时系统提示里不放持仓快照（价格每次都变）——持仓改由调用方放进用户消息。
+    这样同一个 Agent 的系统提示和工具定义逐字不变，能命中模型的上下文缓存。"""
     spec = AGENTS[name]
     from wealthpilot.settings import get_settings
     stance = _STANCE_ADVICE if get_settings().advice_mode else _STANCE_NEUTRAL
     rules = "\n".join(f"{i}. {r.format(stance=stance) if r == '{stance}' else r}"
                       for i, r in enumerate((*spec.rules, *_COMMON_RULES), 1))
     holdings_block = (f"\n## 用户当前持仓\n{_build_holdings_context(holdings, nav_data)}\n"
-                      if spec.needs_holdings or holdings else "")
+                      if (spec.needs_holdings or holdings) and not stable_prefix else "")
     return f"""{spec.role}
 {holdings_block}
 ## 规则
@@ -156,12 +158,12 @@ def build_prompt(name: str, holdings: list[PortfolioHolding], nav_data: dict[str
 
 def build_agent(name: str, client: AIClient, model: str, holdings: list[PortfolioHolding],
                 nav_data: dict[str, float], nav_history: dict[str, list[dict]] | None,
-                profile: InvestorProfile | None) -> BaseAgent:
+                profile: InvestorProfile | None, stable_prefix: bool = False) -> BaseAgent:
     if name not in AGENTS:
         name = "portfolio"
     return BaseAgent(
         name=name, tools=list(AGENT_TOOLS[name]),
-        system_prompt=build_prompt(name, holdings, nav_data, profile),
+        system_prompt=build_prompt(name, holdings, nav_data, profile, stable_prefix),
         client=client, model=model, holdings=holdings, nav_data=nav_data,
         nav_history=nav_history, profile=profile,
     )

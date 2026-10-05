@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from wealthpilot.models.profile import InvestorProfile
+from wealthpilot.services import skills
 from wealthpilot.services.agents.prompts import build_profile_context
+from wealthpilot.services.ai_client import json_mode
 from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
@@ -66,6 +68,7 @@ class Plan:
     playbook: str = ""   # 命中的研究模板；空表示自由规划
     sections: list[str] = field(default_factory=list)   # 模板要求回答包含的章节
     securities: list[dict] = field(default_factory=list)
+    method: str = ""     # 技能正文：用户写的做法，交给撰写环节
 
     @property
     def is_single(self) -> bool:
@@ -105,6 +108,14 @@ class PlannerAgent:
         securities 是规划之前已经解析出来的证券 —— 代码不让模型猜。
         """
         securities = securities or []
+        # 用户自己写的方法优先：话里点到了某个技能的触发词，就按它来，不再让模型另外规划
+        skill = skills.match(message)
+        if skill:
+            from wealthpilot.services.agents.playbooks import build_skill_tasks
+            tasks = build_skill_tasks(skill, securities, holdings or [], message)
+            if tasks:
+                return Plan(intent=skill.label or skill.name, tasks=tasks, success_criteria=list(skill.criteria), source="skill",
+                            playbook=skill.key, sections=list(skill.sections), securities=securities, method=skill.body)
         decision = self._decide(message, context, securities)
         intent = decision.intent if decision else self.classify_by_rules(message, securities, bool(holdings))
 
@@ -133,6 +144,7 @@ class PlannerAgent:
                 system=('列出用户问题里提到的每一只股票、ETF 或基金的名称或代码，原样照抄，不要补全、不要翻译成代码。'
                         '只返回 JSON：{"securities":["..."]}。没有提到任何具体证券就返回 {"securities":[]}。'),
                 messages=[{"role": "user", "content": f"此前对话：\n{context}\n\n当前问题：{message}" if context else message}],
+                **json_mode(self.client),
             )
             match = re.search(r"\{.*\}", result.text.strip(), re.DOTALL)
             names = json.loads(match.group()).get("securities") if match else []
@@ -151,6 +163,7 @@ class PlannerAgent:
                 max_tokens=4000,
                 system=build_planner_prompt(self.profile),
                 messages=[{"role": "user", "content": prompt}],
+                **json_mode(self.client),
             )
             return self._parse(result.text, max_tasks)
         except Exception:

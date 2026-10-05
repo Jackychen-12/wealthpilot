@@ -10,8 +10,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
+from sqlmodel import Session
 
+from wealthpilot.services import memory
 from wealthpilot.settings import Settings, get_settings, reload_settings
+from wealthpilot.storage.db import get_engine
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -85,6 +88,8 @@ def update_settings(body: dict, request: Request):
         raise HTTPException(422, "；".join(f"{err['loc'][0]}：{err['msg']}" for err in e.errors())) from e
     _write_env({k.upper(): str(v).lower() if isinstance(v, bool) else str(v).strip() for k, v in changes.items()})
     reload_settings()
+    with Session(get_engine()) as db:   # 只记改了哪些项，不记值（里面可能有 Key）
+        memory.record(db, get_settings().local_user_id, "settings/changed", "、".join(sorted(changes)), {"keys": sorted(changes)}, actor="user")
     return _view()
 
 

@@ -42,10 +42,13 @@ COMMANDS: dict[str, str] = {
     "/verify": "立即核对到期的验证点",
     "/proposals": "操作建议单",
     "/approve": "/approve <编号> <数量> [成交价] — 授权一条建议（开了模拟盘按最新价下单，否则填成交价记账）",
-    "/reject": "/reject <编号> — 不采纳一条建议",
+    "/reject": "/reject <编号> [原因] — 不采纳一条建议（原因会记下来）",
     "/digest": "/digest [run] — 每日简报（run 立即检查一次）",
     "/broker": "模拟盘账户与持仓",
     "/order": "/order <buy|sell> <名称或代码> <数量> — 在模拟盘下单（会再确认一次）",
+    "/skills": "我的研究方法（技能）",
+    "/memory": "/memory [add <内容> | rm <编号>] — AI 记住的事",
+    "/audit": "审计日志（只追加，带完整性校验）",
     "/history": "研究记录",
     "/evidence": "/evidence [证据ID前4位] — 上一次回答的证据",
     "/new": "开始新会话（清空上下文）",
@@ -247,7 +250,10 @@ class App:
         c.print(Markdown(cite(answer or "没有生成回答。")))
         done = meta.get("done", {})
         color, label = STATUS.get(done.get("status", ""), ("dim", done.get("status", "")))
-        c.print(f"\n[{color}]● {label}[/] [dim]· {time.time() - started:.0f} 秒 · {len(self.evidence)} 条证据（/evidence 查看）[/]")
+        usage = done.get("usage") or {}
+        cost = (f" · {(usage['input_tokens'] + usage['output_tokens']) / 1000:.0f}k token（缓存 {usage['cache_hit_pct']}%）"
+                if usage.get("input_tokens") else "")
+        c.print(f"\n[{color}]● {label}[/] [dim]· {time.time() - started:.0f} 秒 · {len(self.evidence)} 条证据（/evidence 查看）{cost}[/]")
         if done.get("missing_evidence"):
             c.print("[yellow]未能取得的证据：[/]" + "；".join(done["missing_evidence"]))
         if meta.get("checkpoints"):
@@ -416,7 +422,8 @@ class App:
         self.show_proposals([done])
 
     async def cmd_reject(self, args: str) -> None:
-        self.show_proposals([await self.backend.request("POST", f"/api/proposals/{int(args.strip().lstrip('#'))}/reject")])
+        pid, _, reason = args.strip().partition(" ")
+        self.show_proposals([await self.backend.request("POST", f"/api/proposals/{int(pid.lstrip('#'))}/reject", json={"reason": reason.strip()})])
 
     async def cmd_digest(self, args: str) -> None:
         if args.strip() == "run":
@@ -460,6 +467,38 @@ class App:
             self.console.print(f"[green]已成交[/] {verb} {o['name']} {o['shares']} 股 @ {o['price']}，费用 {o['fee']} 元")
         else:
             self.console.print(f"[red]被拒[/] {o['reason']}")
+
+    async def cmd_skills(self, _: str) -> None:
+        data = await self.backend.request("GET", "/api/skills")
+        t = self.table("方法", "名称", "触发词", "派谁去查")
+        for s in data["skills"]:
+            t.add_row(s["label"], s["name"], "、".join(s["triggers"][:4]), " ".join(s["agents"]))
+        self.console.print(t if data["skills"] else "[dim]还没有方法。[/]")
+        for bad in data["invalid"]:
+            self.console.print(f"[yellow]未加载 {bad['path']}：{'；'.join(bad['problems'])}[/]")
+        self.console.print(f"[dim]文件放在 {data['dirs'][0]}；话里带上触发词或方法名就会按它研究[/]")
+
+    async def cmd_memory(self, args: str) -> None:
+        action, _, rest = args.partition(" ")
+        if action == "add" and rest.strip():
+            await self.backend.request("POST", "/api/memory", json={"content": rest.strip()})
+        elif action == "rm" and rest.strip().isdigit():
+            await self.backend.request("DELETE", f"/api/memory/{rest.strip()}")
+        rows = await self.backend.request("GET", "/api/memory")
+        label = {"preference": "偏好", "decision": "决定", "note": "备注"}
+        for m in rows:
+            self.console.print(f"  [bold]#{m['id']}[/] [dim]{label.get(m['kind'], m['kind'])}[/] {m['content']}")
+        if not rows:
+            self.console.print("[dim]还没有。提问时说「记住，……」会被记下来，也可以 /memory add <内容>[/]")
+
+    async def cmd_audit(self, _: str) -> None:
+        data = await self.backend.request("GET", "/api/audit", params={"limit": 30})
+        ok = data["integrity"]
+        self.console.print(f"[green]共 {ok['count']} 条，哈希链校验通过[/]" if ok["ok"] else f"[red]校验失败：第 {ok['broken_at']} 条被改动过[/]")
+        t = self.table("时间", "类型", "谁", "内容")
+        for e in data["events"]:
+            t.add_row(e["at"][:16].replace("T", " "), e["kind"], {"user": "你", "agent": "AI", "system": "系统"}.get(e["actor"], e["actor"]), e["summary"][:60])
+        self.console.print(t)
 
     async def cmd_history(self, _: str) -> None:
         t = self.table("时间", "问题", "结论", "证据", right=(3,))
