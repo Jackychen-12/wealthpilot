@@ -2,11 +2,12 @@
 
 setup:           ## 首次配置：复制 .env、安装依赖
 	@test -f backend/.env || cp backend/.env.example backend/.env
-	cd backend && uv sync
+	cd backend && uv sync --extra dev
 	npm --prefix workbench install
 	@echo ""
-	@echo "✅ 安装完成！请编辑 backend/.env 填入 ANTHROPIC_API_KEY 或 DEEPSEEK_API_KEY"
-	@echo "   然后运行 make dev 启动开发服务"
+	@echo "✅ 安装完成。下一步："
+	@echo "   make dev   启动后端和工作台，打开 http://localhost:5180（模型 Key 可在左侧「设置」里填）"
+	@echo "   make tui   在终端里直接用（不需要先启动后端）"
 
 dev:             ## 启动后端 + 工作台（开发模式）
 	@echo "启动后端（:8000）+ 工作台（http://localhost:5180）..."
