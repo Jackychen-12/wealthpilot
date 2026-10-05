@@ -20,9 +20,37 @@ os.environ["DB_PATH"] = str(_TMP_DIR / "test.db")
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["DEEPSEEK_API_KEY"] = ""
 # 同理，不读开发者本机的外部连接器配置
+os.environ["ADVICE_MODE"] = "false"
+os.environ["BROKER"] = "none"
+os.environ["WATCH_ENABLED"] = "false"
 os.environ["CONNECTORS_FILE"] = str(_TMP_DIR / "connectors.json")
 
 import pytest  # noqa: E402 — 必须在设置 DB_PATH 之后
+
+
+@pytest.fixture(autouse=True)
+def _no_network_security_resolution(monkeypatch):
+    """编排器在规划前会解析证券（要拉全市场快照、打搜索接口）。测试里一律不联网：
+    默认解析不出任何证券；需要解析结果的测试自己再覆盖这几个桩。"""
+    from wealthpilot.services.agents import orchestrator
+    from wealthpilot.services.agents.planner_agent import PlannerAgent
+
+    async def nothing(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(orchestrator, "resolve_text", nothing)
+    monkeypatch.setattr(orchestrator, "resolve_names", nothing)
+    monkeypatch.setattr(PlannerAgent, "extract_names", lambda self, *a, **k: [])
+    # 全市场快照同理：冒烟测试会扫到选股相关的接口，不能让它们去拉真实数据
+    from wealthpilot.services import screener
+    monkeypatch.setattr(screener, "_load_snapshot", nothing)
+    # 验证点要取财报、估值、日线：默认取不到任何基准值（于是也不会多调一次模型）
+    from wealthpilot.services import checkpoints
+
+    async def no_values(code):
+        return {}
+
+    monkeypatch.setattr(checkpoints, "current_values", no_values)
 
 
 @pytest.fixture(scope="session", autouse=True)

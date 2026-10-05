@@ -22,7 +22,13 @@ dependencies = [
     "pyjwt>=2.9.0",
     "mcp[cli]>=2.0.0,<3",
     "reportlab>=5.0.1",
+    "rich>=13.7.0",
+    "prompt-toolkit>=3.0.43",
+    "pypdf>=5.0.0",
 ]
+
+[project.scripts]
+wealthpilot = "wealthpilot.__main__:main"
 
 [project.optional-dependencies]
 dev = [

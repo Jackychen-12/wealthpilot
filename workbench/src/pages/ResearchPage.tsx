@@ -1,21 +1,29 @@
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, ChevronRight, ListTree, Square, SquarePen } from 'lucide-react'
-import { DEMO } from '../api'
+import { Link } from 'react-router-dom'
+import { DEMO, api, runTool, useApi, type ValuationHistory } from '../api'
 import { research, useResearch, type Evidence, type Turn } from '../api/researchStore'
 import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
+import { Sparkline } from '../components/charts'
+import { CheckpointTable, ProposalList } from '../components/Checkpoints'
+import { securityPath } from '../components/SecuritySearch'
 import { Button, Callout, Dot, Drawer, Tag, type Tone } from '../components/kit'
 import { cn } from '../utils/cn'
 
 const AGENT: Record<string, { label: string; tone: Tone }> = {
-  market: { label: '市场分析', tone: 'blue' },
-  portfolio: { label: '持仓分析', tone: 'green' },
-  risk: { label: '风险评估', tone: 'orange' },
-  quant: { label: '量化验证', tone: 'purple' },
-  stock: { label: '个股研究', tone: 'pink' },
+  fundamental: { label: '基本面', tone: 'blue' },
+  valuation: { label: '估值', tone: 'purple' },
+  price: { label: '走势', tone: 'pink' },
+  industry: { label: '行业与市场', tone: 'yellow' },
+  screener: { label: '选股', tone: 'orange' },
+  portfolio: { label: '组合与风险', tone: 'green' },
+  fund: { label: '基金', tone: 'gray' },
+  review: { label: '复盘', tone: 'green' },
 }
-const STATUS: Record<string, { tone: Tone; label: string }> = {
+export const PLAYBOOK: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '事后复盘' }
+export const STATUS: Record<string, { tone: Tone; label: string }> = {
   passed: { tone: 'green', label: '已通过校验' },
   partial: { tone: 'yellow', label: '部分证据缺失' },
   rejected: { tone: 'pink', label: '未通过校验 · 未发布' },
@@ -23,13 +31,15 @@ const STATUS: Record<string, { tone: Tone; label: string }> = {
   failed: { tone: 'pink', label: '执行失败' },
   stopped: { tone: 'gray', label: '已停止' },
 }
-const STARTERS = [
-  { agent: 'portfolio', desc: '总览、归因、健康度', qs: ['我的组合整体表现如何，收益主要来自哪里？', '我的持仓集中度高吗？'] },
-  { agent: 'risk', desc: '回撤、相关性、约束校验', qs: ['我的组合回撤风险大吗？哪只最危险？', '我的持仓之间相关性高不高，分散得够吗？'] },
-  { agent: 'quant', desc: '持仓穿透、重叠、规则回测', qs: ['把我的组合穿透到个股，真实暴露集中在哪里？', '110011 回撤5%加30%、回撤10%加70%的分批建仓规则，历史上比一次性买入好吗'] },
-  { agent: 'stock', desc: 'A 股行情、估值、业绩、行业', qs: ['贵州茅台现在估值怎么样，最近业绩如何？', '宁德时代近半年走势如何，现在在高位还是低位？'] },
-  { agent: 'market', desc: '基金信息、净值走势、要闻', qs: ['110011 最新净值多少，近一个月表现如何', '今天有什么重要的财经新闻'] },
+// 起始页只给四个最常用的问法；其余能力直接问就行，不需要先学有哪些"模板"
+const EXAMPLES = [
+  { label: '研究一只股票', q: '帮我深度分析一下贵州茅台' },
+  { label: '对比几只股票', q: '对比一下贵州茅台和五粮液的基本面和估值' },
+  { label: '看看我的持仓', q: '帮我诊断一下我的持仓' },
+  { label: '按条件选股', q: '帮我筛选市盈率低于15、ROE高于15%的大市值股票' },
 ]
+const MORE_EXAMPLES = ['复盘一下之前的研究：验证点成立了多少，哪些判断被证伪了', '今天哪些行业领涨，大盘情绪如何', '宁德时代最近一期财报里管理层怎么解释业绩变化', '低市盈率高 ROE 这个选股条件过去两年表现如何']
+const PROCESS_KEY = 'wp_show_process'
 
 function phase(t: Turn) {
   if (!t.tasks.length) return '规划任务中'
@@ -44,6 +54,12 @@ const ResearchPage: React.FC = () => {
   const { turns, selected, focusEvidence } = useResearch()
   const [draft, setDraft] = useState('')
   const [processOpen, setProcessOpen] = useState(false)
+  // 研究过程默认不占地方：想看的时候点「过程」，选择会记住
+  const [showProcess, setShowProcess] = useState(() => { try { return localStorage.getItem(PROCESS_KEY) === '1' } catch { return false } })
+  const toggleProcess = () => {
+    if (!matchMedia('(min-width: 1280px)').matches) { setProcessOpen(true); return }
+    setShowProcess((v) => { try { localStorage.setItem(PROCESS_KEY, v ? '0' : '1') } catch { /* 只在本次生效 */ } return !v })
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
   const busy = turns.some((t) => t.running)
   const current = turns.find((t) => t.id === selected) ?? turns[turns.length - 1]
@@ -64,7 +80,7 @@ const ResearchPage: React.FC = () => {
             {turns.length === 0 ? (
               <>
                 <h1 className="text-[32px] font-semibold leading-tight tracking-[-0.5px] text-ink">想研究什么？</h1>
-                <p className="mt-2 text-base text-steel">每个问题会被拆成任务，交给专业 Agent 并行取证；回答通过校验后才发布，右侧能看到每一步。</p>
+                <p className="mt-2 text-base text-steel">直接问。回答里的每个数字都能点开看它来自哪条数据。</p>
                 {DEMO ? (
                   <div className="mt-8 rounded-lg border border-hairline p-4">
                     <p className="mb-2 text-[13px] text-steel">在线演示没有连接模型，可以回放下面这几次真实的研究过程：</p>
@@ -75,23 +91,29 @@ const ResearchPage: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                ) : null}
-                <div className={cn('mt-8 grid gap-3 sm:grid-cols-2', DEMO && 'hidden')}>
-                  {STARTERS.map((s) => (
-                    <div key={s.agent} className="rounded-lg border border-hairline p-4">
-                      <div className="mb-2 flex items-center gap-2">
-                        <Tag tone={AGENT[s.agent].tone}>{AGENT[s.agent].label}</Tag>
-                        <span className="text-[13px] text-steel">{s.desc}</span>
-                      </div>
-                      {s.qs.map((q) => (
-                        <button key={q} type="button" onClick={() => send(q)}
-                          className="-mx-1.5 block w-[calc(100%+0.75rem)] rounded-sm px-1.5 py-1.5 text-left text-sm text-charcoal transition-colors hover:bg-hover">
-                          {q}
+                ) : (
+                  <>
+                    <div className="mt-8 grid gap-2 sm:grid-cols-2">
+                      {EXAMPLES.map((ex) => (
+                        <button key={ex.q} type="button" onClick={() => send(ex.q)}
+                          className="rounded-lg border border-hairline px-4 py-3 text-left transition-colors hover:bg-surface-soft">
+                          <span className="block text-sm font-medium text-ink">{ex.label}</span>
+                          <span className="mt-0.5 block truncate text-[13px] text-steel">{ex.q}</span>
                         </button>
                       ))}
                     </div>
-                  ))}
-                </div>
+                    <details className="mt-4 text-sm text-slate">
+                      <summary className="cursor-pointer select-none text-[13px] text-steel hover:text-ink">还能问什么</summary>
+                      <div className="mt-1">
+                        {MORE_EXAMPLES.map((q) => (
+                          <button key={q} type="button" onClick={() => send(q)} className="-mx-1.5 flex items-center gap-1.5 rounded-sm px-1.5 py-1 text-left hover:bg-hover hover:text-ink">
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />{q}
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  </>
+                )}
               </>
             ) : (
               <div className="mb-6 flex items-center justify-between">
@@ -112,20 +134,40 @@ const ResearchPage: React.FC = () => {
                       {t.running
                         ? <Tag tone="purple"><Dot tone="purple" pulse className="h-1.5 w-1.5" />{phase(t)}</Tag>
                         : st ? <Tag tone={st.tone}>{st.label}</Tag> : null}
+                      {PLAYBOOK[t.playbook] ? <Tag tone="purple">{PLAYBOOK[t.playbook]}</Tag> : null}
+                      {t.securities.map((s) => (
+                        <Link key={s.code} to={securityPath(s)} onClick={(e) => e.stopPropagation()} title="已解析出的证券，点击查看详情"
+                          className="rounded-sm bg-tint-gray px-1.5 py-0.5 text-xs text-on-gray hover:brightness-95">{s.name} <span className="font-mono">{s.code}</span></Link>
+                      ))}
                       <span className="tabular-nums">{t.seconds.toFixed(0)} 秒</span>
                       <span>·</span>
-                      <span>{t.tasks.length} 个任务</span>
-                      <span>·</span>
                       <span>{t.evidence.length} 条证据</span>
-                      <Button size="xs" variant="ghost" className="xl:hidden" onClick={(e) => { e.stopPropagation(); research.select(t.id); setProcessOpen(true) }}>
-                        <ListTree className="h-3.5 w-3.5" />查看过程
+                      <Button size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); research.select(t.id); toggleProcess() }}>
+                        <ListTree className="h-3.5 w-3.5" />过程
                       </Button>
                     </div>
+                    {t.securities.filter((x) => x.asset_type === 'stock').slice(0, 3).length > 0 ? (
+                      <div className="mt-4 grid gap-2 sm:grid-cols-3" onClick={(e) => e.stopPropagation()}>
+                        {t.securities.filter((x) => x.asset_type === 'stock').slice(0, 3).map((x) => <StockSnapshot key={x.code} code={x.code} name={x.name} />)}
+                      </div>
+                    ) : null}
                     <div className="mt-4">
                       {t.answer
-                        ? <AnswerMarkdown content={t.answer} onCite={(id) => { research.focus(t.id, id); if (!matchMedia('(min-width: 1280px)').matches) setProcessOpen(true) }} />
+                        ? <AnswerMarkdown content={t.answer} onCite={(id) => { research.focus(t.id, id); if (matchMedia('(min-width: 1280px)').matches) { setShowProcess(true) } else { setProcessOpen(true) } }} />
                         : <p className="text-[15px] text-steel">{t.running ? '回答会在通过校验后出现，未过审的草稿不会显示。' : t.error || '没有生成回答。'}</p>}
                     </div>
+                    {t.checkpoints.length > 0 ? (
+                      <details className="mt-6" onClick={(e) => e.stopPropagation()}>
+                        <summary className="cursor-pointer select-none text-[13px] text-steel hover:text-ink">{t.checkpoints.length} 个验证点 · 到期后自动核对这次的判断对不对</summary>
+                        <div className="mt-2"><CheckpointTable items={t.checkpoints} showStock={new Set(t.checkpoints.map((c) => c.code)).size > 1} /></div>
+                      </details>
+                    ) : null}
+                    {t.proposals.length > 0 ? (
+                      <div className="mt-6" onClick={(e) => e.stopPropagation()}>
+                        <p className="eyebrow mb-2">操作建议单 · 需要你逐条授权</p>
+                        <ProposalList items={t.proposals} />
+                      </div>
+                    ) : null}
                     {t.missing.length > 0 ? <Callout tone="warning" className="mt-4">未能取得的证据：{t.missing.join('；')}</Callout> : null}
                     {!t.running && t.followUps.length > 0 && t.id === turns[turns.length - 1].id ? (
                       <div className="mt-5 flex flex-col items-start gap-1">
@@ -163,7 +205,7 @@ const ResearchPage: React.FC = () => {
         </div>
       </div>
 
-      <aside className="hidden h-full w-[360px] shrink-0 flex-col border-l border-hairline bg-surface-soft xl:flex">
+      <aside className={cn('hidden h-full w-[360px] shrink-0 flex-col border-l border-hairline bg-surface-soft', showProcess && 'xl:flex')}>
         <Inspector turn={current} focus={focusEvidence} />
       </aside>
       {/* 窄屏：过程面板收进抽屉 */}
@@ -171,6 +213,36 @@ const ResearchPage: React.FC = () => {
         <div className="-mx-6 -my-5 flex h-full flex-col bg-surface-soft"><Inspector turn={current} focus={focusEvidence} compact /></div>
       </Drawer>
     </div>
+  )
+}
+
+/** 回答上方的一眼图：近半年走势、现价与涨跌、PE 所处的历史分位。数字和回答引用的是同一批工具。 */
+const StockSnapshot: React.FC<{ code: string; name: string }> = ({ code, name }) => {
+  const kline = useApi(() => api.stockKline(code, 125), [code])
+  const valuation = useApi(() => runTool<ValuationHistory | string>('get_valuation_history', { code }), [code])
+  const points = kline.data ? [...kline.data.data].reverse() : []
+  const last = points[points.length - 1]
+  const change = points.length > 1 ? (last.nav / points[0].nav - 1) * 100 : null
+  const pe = valuation.data && typeof valuation.data.data !== 'string' ? valuation.data.data.pe : null
+  if (kline.error && valuation.error) return null
+  return (
+    <Link to={securityPath({ code, asset_type: 'stock' })} className="block rounded-lg border border-hairline p-3 transition-colors hover:bg-surface-soft">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-sm font-medium text-ink">{name}</span>
+        <span className="font-mono text-xs text-stone">{code}</span>
+      </div>
+      {points.length > 1 ? <Sparkline values={points.map((p) => p.nav)} /> : <div className="h-11" />}
+      <div className="flex items-baseline justify-between text-[13px] tabular-nums">
+        <span className="text-ink">{last ? last.nav.toFixed(2) : '—'}</span>
+        <span className={change == null ? 'text-steel' : change >= 0 ? 'text-up' : 'text-down'}>{change == null ? '' : `近半年 ${change >= 0 ? '+' : ''}${change.toFixed(1)}%`}</span>
+      </div>
+      {pe?.percentile != null ? (
+        <div className="mt-2">
+          <div className="relative h-1.5 rounded-full bg-surface"><span className="absolute top-1/2 h-3 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary" style={{ left: `${pe.percentile}%` }} /></div>
+          <p className="mt-1 text-xs text-steel">PE {pe.current} · 历史分位 {pe.percentile}%</p>
+        </div>
+      ) : null}
+    </Link>
   )
 }
 
@@ -215,7 +287,7 @@ const Inspector: React.FC<{ turn?: Turn; focus: string; compact?: boolean }> = (
       <header className={cn('px-5 pb-3', compact ? 'pt-4' : 'pt-10')}>
         {compact ? null : <h2 className="text-base font-semibold text-ink">研究过程</h2>}
         <p className="mt-0.5 truncate text-[13px] text-steel">
-          {turn ? (turn.intent || '等待规划') + (turn.fallbackPlan ? ' · 关键词兜底规划' : '') : '规划、证据与校验记录'}
+          {turn ? (PLAYBOOK[turn.playbook] ? `${PLAYBOOK[turn.playbook]}模板 · ` : '') + (turn.intent || '等待规划') + (turn.fallbackPlan ? ' · 关键词兜底规划' : '') : '规划、证据与校验记录'}
         </p>
       </header>
       <div className="flex-1 space-y-6 overflow-y-auto px-5 pb-6">

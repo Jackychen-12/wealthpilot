@@ -1,6 +1,7 @@
 """WealthPilot CLI — python -m wealthpilot [command]"""
 
 import argparse
+import os
 import sys
 
 
@@ -220,6 +221,28 @@ def cmd_chat(_args: argparse.Namespace) -> None:
         history.append({"role": "assistant", "content": full_text})
 
 
+def cmd_tui(args: argparse.Namespace) -> None:
+    from wealthpilot.tui import main as tui_main
+    tui_main(getattr(args, "server", ""), getattr(args, "token", ""))
+
+
+def cmd_watch(_args: argparse.Namespace) -> None:
+    """跑一次盯盘并打印简报。适合挂 cron；后端开着时会自己定时跑。"""
+    import asyncio
+
+    from sqlmodel import Session
+
+    from wealthpilot.services import watcher
+    from wealthpilot.settings import get_settings
+    from wealthpilot.storage.db import get_engine
+
+    with Session(get_engine()) as db:
+        digest = asyncio.run(watcher.run(db, get_settings().local_user_id))
+    print(f"{digest['day']} · {digest['summary']}")
+    for e in digest["events"]:
+        print(f"  - {e['name']} {e['code']}：{e['text']}".replace("  ：", "："))
+
+
 def cmd_mcp(_args: argparse.Namespace) -> None:
     from wealthpilot.mcp_server import main as mcp_main
     mcp_main()
@@ -266,7 +289,12 @@ def main() -> None:
 
     sub.add_parser("init", help="初始化 .env 和数据库")
     sub.add_parser("config", help="查看当前配置")
-    sub.add_parser("chat", help="终端交互式 AI 对话")
+    sub.add_parser("chat", help="终端交互式 AI 对话（旧版，建议直接运行 wealthpilot）")
+    for p in (parser, sub.add_parser("tui", help="终端入口（默认）：研究、行情、选股、复盘")):
+        p.add_argument("--server", default=os.environ.get("WEALTHPILOT_SERVER", ""),
+                       help="连接远程后端，如 http://192.168.1.10:8000；不填则在本机进程内运行")
+        p.add_argument("--token", default=os.environ.get("WEALTHPILOT_TOKEN", ""), help="远程后端的登录令牌（也可进入后用 /login）")
+    sub.add_parser("watch", help="跑一次每日盯盘并打印简报（可挂 cron）")
     sub.add_parser("mcp", help="启动 MCP Server (stdio, for Claude Code)")
 
     ask_p = sub.add_parser("ask", help="非交互式 AI 查询（支持管道输入）")
@@ -279,6 +307,8 @@ def main() -> None:
         "init": cmd_init,
         "config": cmd_config,
         "chat": cmd_chat,
+        "tui": cmd_tui,
+        "watch": cmd_watch,
         "mcp": cmd_mcp,
         "ask": cmd_ask,
     }
@@ -286,7 +316,7 @@ def main() -> None:
     if args.command in commands:
         commands[args.command](args)
     else:
-        parser.print_help()
+        cmd_tui(args)  # 不带子命令：直接进终端入口
 
 
 if __name__ == "__main__":

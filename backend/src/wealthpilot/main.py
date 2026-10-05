@@ -1,5 +1,7 @@
 """FastAPI 入口。"""
 
+import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from wealthpilot import __version__
 from wealthpilot.routes import api_router
+from wealthpilot.services import watcher
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_engine
 
@@ -18,7 +21,11 @@ async def lifespan(app: FastAPI):
     get_engine()  # 初始化数据库表
     print(f"🚀 WealthPilot Backend v{__version__}")
     print(f"📂 DB: {settings.db_path.resolve()}")
+    # 每日盯盘：后端开着就自己跑，不需要另配 cron
+    task = asyncio.create_task(watcher.scheduler()) if os.environ.get("WATCH_ENABLED", "").lower() != "false" else None
     yield
+    if task:
+        task.cancel()
 
 
 app = FastAPI(

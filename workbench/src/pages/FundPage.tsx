@@ -1,5 +1,6 @@
 import type React from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { DEMO, api, runTool, type FundInfo, type NavPoint } from '../api'
 import { DEMO_DEFAULTS } from '../demo/defaults'
@@ -10,7 +11,9 @@ import { DataState, Metric, Metrics, Page, Section, signClass, signed } from '..
 const RANGES = [['21', '近 1 月'], ['63', '近 3 月'], ['125', '近半年'], ['250', '近 1 年']] as const
 
 const FundPage: React.FC = () => {
-  const [draft, setDraft] = useState(DEMO ? DEMO_DEFAULTS.fund : '')
+  const routeCode = useParams().code ?? ''
+  const navigate = useNavigate()
+  const [draft, setDraft] = useState(routeCode || (DEMO ? DEMO_DEFAULTS.fund : ''))
   const [code, setCode] = useState('')
   const [days, setDays] = useState('63')
   const [state, setState] = useState<{ loading: boolean; error: string; info: FundInfo | null; nav: NavPoint[] }>({ loading: false, error: '', info: null, nav: [] })
@@ -29,9 +32,16 @@ const FundPage: React.FC = () => {
     e.preventDefault()
     const target = draft.trim()
     if (!target) return
-    setCode(target)
-    void load(target, days)
+    if (target === routeCode) { setCode(target); void load(target, days) } else navigate(`/fund/${target}`)
   }
+  // 地址里带代码（从搜索或持仓点进来）时直接查
+  useEffect(() => {
+    if (!routeCode) return
+    setDraft(routeCode)
+    setCode(routeCode)
+    void load(routeCode, days)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeCode])
 
   const { info, nav } = state
   const first = nav[0]?.nav

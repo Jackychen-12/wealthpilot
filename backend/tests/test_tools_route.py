@@ -10,8 +10,8 @@ client = TestClient(app)
 
 def test_lists_all_agent_tools_by_group():
     listed = client.get("/api/tools").json()
-    assert len(listed) == 24
-    assert {t["group"] for t in listed} == {"market", "portfolio", "risk", "compute", "quant", "stock"}
+    assert len(listed) == 40
+    assert {t["group"] for t in listed} == {"fundamental", "valuation", "price", "industry", "screener", "portfolio", "fund", "review"}
 
 
 def test_unknown_tool_is_404_and_missing_argument_is_422():

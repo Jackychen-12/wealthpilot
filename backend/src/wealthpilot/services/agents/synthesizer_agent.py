@@ -31,7 +31,8 @@ _NUMBER_RE = re.compile(r"(?<![\d.])[+-]?\d+(?:\.\d+)?")
 _DATE_RE = re.compile(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|(?<!\d)\d{1,2}[-/]\d{1,2}(?![\d.%])|\d{1,2}月\d{1,2}日|(?<!\d)\d{1,2}[日号](?!均)")
 # 指数名里的数字是名字的一部分（沪深300、中证500）
 _INDEX_NAME_RE = re.compile(r"(沪深|中证|上证|深证|国证|标普|纳指|纳斯达克|恒生|科创|创业板|MSCI\s?)\d+")
-_LOSS_RE = re.compile(r"回撤|跌|亏|损|回落|下滑|降|减|缩|负")
+# 表示"方向为负"的字：正文说"低于均线 8.59%""下挫 18.82%"时数值不带符号，对应源数据里的负数
+_LOSS_RE = re.compile(r"回撤|[低下跌亏损落滑降减缩负挫弱少]")
 
 
 def _evidence_text(e: dict) -> str:
@@ -54,6 +55,7 @@ class SynthesizerAgent:
         *,
         stream_output: bool = True,
         extra_instruction: str = "",
+        sections: list[str] | None = None,
     ) -> str:
         """整合各 Agent 结果。
 
@@ -63,7 +65,7 @@ class SynthesizerAgent:
             extra_instruction: Critic 的重写要求，追加在证据之后。
         """
         settings = get_settings()
-        system = build_synthesizer_prompt(self.profile, success_criteria)
+        system = build_synthesizer_prompt(self.profile, success_criteria, sections)
         user_content = self._build_evidence_block(question, results)
         if extra_instruction:
             user_content += f"\n\n{extra_instruction}"
@@ -156,7 +158,10 @@ def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
 
     ungrounded = []
     total = 0
+    previous: list[float] = []   # 上一行里已溯源的数，供"下降 2.34 个百分点"这类推算核对
     for line in answer.splitlines():
+        found: list[float] = []
+        pending: list[str] = []
         # 证据 ID 不是数值；模型偶尔会漏掉方括号，一并剔除
         clean = re.sub(r"\[?E-[a-f0-9]{8,}\]?", "", line)
         clean = re.sub(r"^\s*\d+[.)、]\s*", "", clean)
@@ -190,9 +195,15 @@ def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
                 elif unit and source_unit and unit != source_unit:
                     continue
                 if any(_same_value(token, t) for t in targets):
+                    found.append(float(token))
                     break
             else:
-                ungrounded.append(token)
+                pending.append(token)
+        # 没在证据里出现的数，如果能由同一行或上一行的已溯源数字一步算出来（差、和、比、变化率），
+        # 那是模型在做对比而不是编造 —— 操作数就写在旁边，读者可以自己核对
+        operands = (found + previous)[:_MAX_OPERANDS]
+        ungrounded += [t for t in pending if not _derivable(t, operands)]
+        previous = found
     grounded = total - len(ungrounded)
 
     return {
@@ -201,6 +212,23 @@ def check_numeric_grounding(answer: str, results: list[AgentResult]) -> dict:
         "ungrounded": sorted(set(ungrounded)),
         "rate": (grounded / total) if total else 1.0,
     }
+
+
+_MAX_OPERANDS = 14
+
+
+def _derivable(token: str, operands: list[float]) -> bool:
+    """token 是否等于某两个已溯源数字做一步运算的结果。只看邻近的数，避免凑巧撞上。"""
+    for i, a in enumerate(operands):
+        for b in operands[i + 1:]:
+            candidates = [a - b, b - a, a + b]
+            for x, y in ((a, b), (b, a)):
+                if y:
+                    ratio = x / y
+                    candidates += [ratio, ratio * 100, (ratio - 1) * 100]
+            if any(_same_value(token, c) or _same_value(token, -c) for c in candidates):
+                return True
+    return False
 
 
 def _normalize(token: str) -> str | None:

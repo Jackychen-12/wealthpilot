@@ -3,6 +3,7 @@
 export const DEMO_DEFAULTS = {
   fund: '110011',
   stock: '600519',
+  screen: { pe_max: '15', roe_min: '15', mv_min_yi: '200' } as Record<string, string>,
   overlap: { a: '110011', b: '161725' },
   rebalance: { fund_code: '161725', mode: 'target_pct' as const, value: '15' },
 }

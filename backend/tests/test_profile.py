@@ -3,13 +3,9 @@
 from datetime import datetime, timedelta
 
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services.agents.prompts import (
-    build_planner_prompt,
-    build_portfolio_prompt,
-    build_profile_context,
-    build_risk_prompt,
-    build_synthesizer_prompt,
-)
+from wealthpilot.services.agents.planner_agent import build_planner_prompt
+from wealthpilot.services.agents.prompts import build_profile_context, build_synthesizer_prompt
+from wealthpilot.services.agents.registry import AGENTS, build_prompt
 
 
 def make_profile(**kw) -> InvestorProfile:
@@ -69,13 +65,11 @@ class TestProfileContext:
 class TestProfileInjection:
     """回归测试：画像必须出现在每一个会给建议的 prompt 里。"""
 
-    def test_injected_into_portfolio_prompt(self):
-        prompt = build_portfolio_prompt([], {}, make_profile())
-        assert "最大回撤容忍度" in prompt
-        assert "白酒" in prompt
-
-    def test_injected_into_risk_prompt(self):
-        assert "最大回撤容忍度" in build_risk_prompt([], {}, make_profile())
+    def test_injected_into_every_agent_prompt(self):
+        for name in AGENTS:
+            prompt = build_prompt(name, [], {}, make_profile())
+            assert "最大回撤容忍度" in prompt, name
+            assert "白酒" in prompt, name
 
     def test_injected_into_planner_prompt(self):
         assert "最大回撤容忍度" in build_planner_prompt(make_profile())
@@ -85,8 +79,7 @@ class TestProfileInjection:
 
     def test_prompts_work_without_profile(self):
         for prompt in (
-            build_portfolio_prompt([], {}, None),
-            build_risk_prompt([], {}, None),
+            *(build_prompt(name, [], {}, None) for name in AGENTS),
             build_planner_prompt(None),
             build_synthesizer_prompt(None, []),
         ):
@@ -99,8 +92,8 @@ class TestProfileInjection:
 
 
 class TestPlannerPromptRules:
-    def test_action_questions_require_risk_task(self):
-        """Planner 必须被告知：操作类问题要带 risk 任务。"""
+    def test_action_questions_require_portfolio_task(self):
+        """Planner 必须被告知：操作类问题要带组合层面的约束任务。"""
         prompt = build_planner_prompt(None)
-        assert "risk 任务" in prompt
+        assert "portfolio 任务" in prompt
         assert "success_criteria" in prompt

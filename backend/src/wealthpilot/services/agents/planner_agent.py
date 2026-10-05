@@ -16,25 +16,37 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services.agents.prompts import build_planner_prompt
+from wealthpilot.services.agents.prompts import build_profile_context
 from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
     from wealthpilot.services.ai_client import AIClient
 
-VALID_AGENTS = ("market", "portfolio", "risk", "quant", "stock")
+VALID_AGENTS = ("fundamental", "valuation", "price", "industry", "screener", "portfolio", "fund")
+INTENTS = ("stock_deep", "stock_compare", "holding_review", "screen", "review", "free")
+# 有固定流程、不需要模型拆任务的意图
+_PLAYBOOK_INTENTS = INTENTS[:5]
 
-# 关键词兜底：LLM 不可用时仍能路由，退化为旧 Router 的单任务行为
+# 关键词兜底：LLM 不可用时仍能路由
 KEYWORD_RULES: list[tuple[list[str], str]] = [
-    (["基金", "净值", "新闻", "行情", "市场", "指数", "板块"], "market"),
-    (["持仓", "收益", "配置", "健康", "归因", "总览", "建议", "调仓"], "portfolio"),
-    (["风险", "回撤", "相关性", "预警", "对比", "波动", "亏损", "止损"], "risk"),
-    (["穿透", "重仓", "重叠", "回测", "验证", "分批", "历史表现", "真实暴露"], "quant"),
-    (["股票", "个股", "股价", "市盈率", "市净率", "估值", "财报", "业绩", "营收", "净利润", "K线", "A股"], "stock"),
+    # 得分并列时靠前的优先
+    (["筛选", "选股", "找出", "有哪些股票", "哪些股票"], "screener"),
+    (["营收", "净利润", "利润", "财报", "业绩", "ROE", "毛利率", "负债", "现金流", "分红", "基本面"], "fundamental"),
+    (["估值", "市盈率", "市净率", "PE", "PB", "贵不贵", "便宜", "分位"], "valuation"),
+    (["股价", "走势", "涨跌", "行情", "均线", "K线", "波动", "高位", "低位", "回测", "分批"], "price"),
+    (["行业", "板块", "同行", "公告", "新闻", "大盘", "指数", "市场"], "industry"),
+    (["持仓", "组合", "收益", "归因", "回撤", "相关性", "集中度", "穿透", "调仓", "配置", "健康"], "portfolio"),
+    (["基金", "净值", "基金经理"], "fund"),
 ]
 
-# 触发仓位/操作类意图的词 —— 这类问题必须带上风险画像约束检查
+# 触发仓位/操作类意图的词 —— 这类问题必须带上组合层面的约束检查
 ACTION_KEYWORDS = ("加仓", "减仓", "买入", "卖出", "调仓", "止损", "仓位", "该不该", "值得")
+
+_HOLDING_WORDS = ("我的持仓", "我的组合", "我的仓位", "我持有", "我的股票", "我的基金", "持仓诊断")
+_REVIEW_WORDS = ("复盘", "验证点", "成绩单", "之前的研究", "之前的判断", "说得对不对", "准不准", "回头看")
+_SCREEN_WORDS = ("筛选", "选股", "找出", "有哪些股票", "哪些股票", "帮我找")
+# 只问一个具体数字的窄问题，不值得跑四个维度
+_NARROW_WORDS = ("多少钱", "股价多少", "现价", "最新价", "市盈率多少", "PE多少", "涨了多少", "跌了多少", "净值多少")
 
 
 @dataclass
@@ -51,6 +63,9 @@ class Plan:
     tasks: list[Task]
     success_criteria: list[str] = field(default_factory=list)
     source: str = "llm"  # llm | fallback
+    playbook: str = ""   # 命中的研究模板；空表示自由规划
+    sections: list[str] = field(default_factory=list)   # 模板要求回答包含的章节
+    securities: list[dict] = field(default_factory=list)
 
     @property
     def is_single(self) -> bool:
@@ -81,10 +96,54 @@ class PlannerAgent:
         self.model = model
         self.profile = profile
 
-    def plan(self, message: str, context: str = "") -> Plan:
-        """context 是此前几轮对话，只喂给 LLM；关键词兜底只看当前问题，免得被历史带偏。"""
+    def plan(self, message: str, context: str = "", securities: list[dict] | None = None,
+             holdings: list | None = None, nav_data: dict | None = None) -> Plan:
+        """规划一轮研究。
+
+        先识别意图：命中研究模板就由代码生成任务图（稳定、可预期），否则用模型拆解的任务。
+        context 是此前几轮对话，只喂给模型；规则兜底只看当前问题，免得被历史带偏。
+        securities 是规划之前已经解析出来的证券 —— 代码不让模型猜。
+        """
+        securities = securities or []
+        decision = self._decide(message, context, securities)
+        intent = decision.intent if decision else self.classify_by_rules(message, securities, bool(holdings))
+
+        from wealthpilot.services.agents.playbooks import PLAYBOOKS, build_tasks
+        if intent in PLAYBOOKS:
+            tasks = build_tasks(intent, securities, holdings or [], nav_data or {}, message)
+            if tasks:
+                book = PLAYBOOKS[intent]
+                sections = list(book.sections)
+                # 建议模式：个股研究多一节明确的立场与操作建议
+                if getattr(get_settings(), "advice_mode", False) and intent in ("stock_deep", "stock_compare"):
+                    sections.append("建议")
+                return Plan(intent=book.label, tasks=tasks, success_criteria=list(book.criteria),
+                            source="llm" if decision else "fallback", playbook=book.key,
+                            sections=sections, securities=securities)
+
+        plan = decision if decision and decision.tasks else self._keyword_fallback(message)
+        plan.securities = securities
+        return plan
+
+    def extract_names(self, message: str, context: str = "") -> list[str]:
+        """让模型列出问题里提到的证券名称（简称、基金名），供解析环节去查代码。失败返回 []。"""
+        try:
+            result = self.client.create(
+                model=self.model, max_tokens=2000,
+                system=('列出用户问题里提到的每一只股票、ETF 或基金的名称或代码，原样照抄，不要补全、不要翻译成代码。'
+                        '只返回 JSON：{"securities":["..."]}。没有提到任何具体证券就返回 {"securities":[]}。'),
+                messages=[{"role": "user", "content": f"此前对话：\n{context}\n\n当前问题：{message}" if context else message}],
+            )
+            match = re.search(r"\{.*\}", result.text.strip(), re.DOTALL)
+            names = json.loads(match.group()).get("securities") if match else []
+            return [str(n) for n in names][:5] if isinstance(names, list) else []
+        except Exception:
+            return []
+
+    def _decide(self, message: str, context: str, securities: list[dict]) -> Plan | None:
         max_tasks = get_settings().planner_max_tasks
-        prompt = f"此前对话：\n{context}\n\n当前问题：{message}" if context else message
+        resolved = "\n".join(f"- {s['name']}（{s['code']}，{s['asset_type']}）" for s in securities) or "（没有解析出具体证券）"
+        prompt = (f"此前对话：\n{context}\n\n" if context else "") + f"已解析出的证券：\n{resolved}\n\n当前问题：{message}"
         try:
             result = self.client.create(
                 model=self.model,
@@ -93,13 +152,25 @@ class PlannerAgent:
                 system=build_planner_prompt(self.profile),
                 messages=[{"role": "user", "content": prompt}],
             )
-            parsed = self._parse(result.text, max_tasks)
-            if parsed:
-                return parsed
+            return self._parse(result.text, max_tasks)
         except Exception:
-            pass
+            return None
 
-        return self._keyword_fallback(message)
+    @staticmethod
+    def classify_by_rules(message: str, securities: list[dict], has_holdings: bool) -> str:
+        """模型不可用时的意图识别。"""
+        stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
+        if any(w in message for w in _REVIEW_WORDS):
+            return "review"
+        if any(w in message for w in _SCREEN_WORDS) and not stocks:
+            return "screen"
+        if len(stocks) >= 2:
+            return "stock_compare"
+        if len(stocks) == 1 and not any(w in message for w in _NARROW_WORDS):
+            return "stock_deep"
+        if has_holdings and any(w in message for w in _HOLDING_WORDS):
+            return "holding_review"
+        return "free"
 
     @staticmethod
     def _parse(text: str, max_tasks: int) -> Plan | None:
@@ -126,7 +197,8 @@ class PlannerAgent:
                 )
             )
 
-        if not tasks:
+        intent = str(data.get("intent") or "free")
+        if not tasks and intent not in _PLAYBOOK_INTENTS:
             return None
 
         known = {t.id for t in tasks}
@@ -134,7 +206,7 @@ class PlannerAgent:
             t.deps = [d for d in t.deps if d in known and d != t.id]
 
         return Plan(
-            intent=str(data.get("intent") or "general"),
+            intent=intent,
             tasks=tasks,
             success_criteria=[str(c) for c in (data.get("success_criteria") or [])],
             source="llm",
@@ -148,23 +220,61 @@ class PlannerAgent:
                 if kw in message:
                     scores[agent] += 1
 
-        best = max(scores, key=lambda k: scores[k])
+        # 得分并列时按 KEYWORD_RULES 的先后取
+        order = [agent for _, agent in KEYWORD_RULES]
+        best = max(order, key=lambda k: (scores[k], -order.index(k)))
         if scores[best] == 0:
             best = "portfolio"
 
         tasks = [Task(id="t1", agent=best, goal=message, deps=[])]
 
-        # 操作类问题在兜底路径下也要补一条风险任务，否则会给出没有约束依据的仓位建议
-        if any(kw in message for kw in ACTION_KEYWORDS) and best != "risk":
-            tasks.append(Task(id="t2", agent="risk", goal=f"评估该操作的回撤与集中度影响：{message}", deps=[]))
+        # 操作类问题在兜底路径下也要补一条组合层面的任务，否则会给出没有约束依据的仓位建议
+        if any(kw in message for kw in ACTION_KEYWORDS) and best != "portfolio":
+            tasks.append(Task(id="t2", agent="portfolio",
+                              goal=f"评估该操作对组合回撤与集中度的影响，并按风险画像校验：{message}", deps=[]))
 
         criteria = ["需覆盖用户问题涉及的核心指标"]
         if len(tasks) > 1:
             criteria.append("需包含操作对组合风险的影响")
 
         return Plan(
-            intent="general",
+            intent="free",
             tasks=tasks,
             success_criteria=criteria,
             source="fallback",
         )
+
+
+def build_planner_prompt(profile: InvestorProfile | None = None) -> str:
+    from wealthpilot.services.agents.registry import AGENTS
+
+    experts = "\n".join(f"- {name}: {spec.summary}" for name, spec in AGENTS.items())
+    return f"""你是投研任务规划器。先判断用户问题属于哪种意图，再决定是否需要你来拆任务。
+
+## 意图（intent）
+- stock_deep: 对**一只**股票做综合研究（"XX 怎么样""值得关注吗""帮我分析 XX"）。只问一个具体数字、或只问一个维度（只问业绩 / 只问估值 / 只问走势）的不算，归 free。
+- stock_compare: 对比两到三只股票
+- holding_review: 诊断用户自己的整体持仓 / 组合
+- screen: 按条件找股票（"找出 ROE 高于 15 的白酒股"）
+- review: 复盘此前的研究——之前的判断对不对、验证点成立了多少、成绩单（"复盘一下之前的研究""上次对茅台的判断准不准"）
+- free: 以上都不是，或者只是问一个具体的点或单一维度（"茅台现在多少钱""比亚迪最近业绩怎么样""招商银行最近走势如何""今天大盘怎么样"），只派对应的一两个专家
+
+前五种意图有固定的研究流程，**不需要你拆任务**，tasks 留空即可。只有 free 需要你拆。
+
+## 可用专家（仅 free 时使用）
+{experts}
+
+## free 时的拆解规则
+1. 简单查询只拆 1 个任务；需要多方面证据的拆 2-4 个
+2. 相互独立的任务 deps 留空，它们会被并发执行；只有真正需要前序结果时才写 deps
+3. 涉及加仓/减仓/调仓/止损/仓位的问题，必须包含一个 portfolio 任务来评估对组合回撤与集中度的影响并校验风险画像
+4. 任务目标里提到证券时，使用"已解析出的证券"里的名称和代码，不要自己写代码
+5. success_criteria 写明"回答这个问题必须拿到哪些证据"。只写用户问到的、且上述专家取得到的证据；
+   用户没问的延伸内容不要写进来——写了取不到，整轮回答会被判为证据不足
+6. 不要把多轮追问当成孤立问题，结合此前对话理解指代
+
+{build_profile_context(profile)}
+
+## 输出
+只返回 JSON，不要任何其他内容：
+{{"intent":"free","tasks":[{{"id":"t1","agent":"price","goal":"具体要查什么","deps":[]}}],"success_criteria":["..."]}}"""

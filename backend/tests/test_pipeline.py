@@ -91,7 +91,7 @@ def _done(events) -> dict:
     return next(e for e in events if e["type"] == "done")
 
 
-PLAN = '{"intent":"查询","tasks":[{"id":"t1","agent":"market","goal":"查净值"}],"success_criteria":["最新净值"]}'
+PLAN = '{"intent":"查询","tasks":[{"id":"t1","agent":"fund","goal":"查净值"}],"success_criteria":["最新净值"]}'
 
 
 async def test_single_task_answer_is_published_with_citation(monkeypatch):

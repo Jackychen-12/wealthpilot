@@ -6,12 +6,15 @@ from sqlalchemy import DateTime, inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from wealthpilot.models.alert import Alert  # noqa: F401 — register table
+from wealthpilot.models.broker import Digest, Order, PaperAccount, PaperPosition  # noqa: F401
 from wealthpilot.models.chat import ChatMessage  # noqa: F401 — register table
 
 # 显式注册其余表，避免依赖 import 顺序
 from wealthpilot.models.market import FundNavCache, IndexSnapshot  # noqa: F401
 from wealthpilot.models.portfolio import PortfolioHolding  # noqa: F401
 from wealthpilot.models.profile import InvestorProfile  # noqa: F401 — register table
+from wealthpilot.models.research import DataCache, WatchItem  # noqa: F401
+from wealthpilot.models.review import Checkpoint, TradeProposal  # noqa: F401
 from wealthpilot.models.user import User  # noqa: F401
 from wealthpilot.settings import get_settings
 

@@ -96,7 +96,7 @@ def test_lookthrough_merges_direct_stock_with_fund_holdings():
 def test_keyword_fallback_routes_stock_questions_to_stock_agent():
     offline = type("C", (), {"create": lambda self, **kw: (_ for _ in ()).throw(RuntimeError("offline"))})()
     plan = PlannerAgent(offline, "m").plan("贵州茅台现在市盈率多少，财报怎么样")
-    assert plan.tasks[0].agent == "stock"
+    assert plan.tasks[0].agent in ("fundamental", "valuation")
 
 
 def test_grounding_accepts_unit_scaling_and_bare_evidence_ids():

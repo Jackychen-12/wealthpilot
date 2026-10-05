@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     run_max_tool_calls: int = Field(default=24, ge=1)
     ai_timeout_seconds: float = Field(default=60, gt=0)
 
+    checkpoints_enabled: bool = Field(default=True, description="研究发布后提出可事后核对的验证点")
+    advice_mode: bool = Field(
+        default=False,
+        description="个人模式：允许给出明确的买卖立场与操作建议（仍须逐条授权才执行），并用涨跌类验证点事后打分")
+
+    broker: str = Field(default="none", description="下单通道：none=授权只记账；paper=内置模拟盘（按最新价成交，不动真钱）")
+    paper_initial_cash: float = Field(default=1_000_000, gt=0, description="模拟盘初始资金")
+    watch_enabled: bool = Field(default=True, description="后端运行时，交易日收盘后自动跑一次盯盘")
+    watch_time: str = Field(default="15:30", pattern=r"^\d{2}:\d{2}$", description="每日盯盘时间（本机时区）")
+    watch_move_pct: float = Field(default=5.0, gt=0, description="当日涨跌幅超过多少算异动")
+
     local_user_id: int = Field(default=0, description="CLI / MCP 使用哪个用户的持仓与画像，0=匿名档")
 
     connectors_file: Path = Field(default=Path("./connectors.json"), description="外部 MCP 连接器配置文件")
@@ -68,6 +79,13 @@ class Settings(BaseSettings):
 
 
 _settings: Settings | None = None
+
+
+def reload_settings() -> Settings:
+    """丢掉缓存重新读取 .env —— 在网页上改完配置后调用，不用重启。"""
+    global _settings
+    _settings = None
+    return get_settings()
 
 
 def get_settings() -> Settings:

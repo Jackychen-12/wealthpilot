@@ -22,3 +22,4 @@ backend/.env
 
 # 外部 MCP 连接器配置（本机专用）
 backend/connectors.json
+.claude/

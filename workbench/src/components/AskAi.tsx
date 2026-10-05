@@ -9,7 +9,7 @@ export const AskAi: React.FC<{ question: string; label?: string }> = ({ question
   const navigate = useNavigate()
   return (
     <Button size="sm" variant="secondary" disabled={research.busy}
-      onClick={() => { void research.ask(question); navigate('/') }}>
+      onClick={() => { void research.ask(question); navigate('/research') }}>
       <Sparkles className="h-3.5 w-3.5" />{label}
     </Button>
   )
