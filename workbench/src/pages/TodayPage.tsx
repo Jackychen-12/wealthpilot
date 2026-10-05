@@ -96,6 +96,7 @@ const TodayPage: React.FC = () => {
               <Callout tone="info" title="从这里开始">
                 按 <kbd className="rounded-xs border border-current/30 px-1 font-mono text-xs">/</kbd> 搜一只股票加入自选，或去<Link className="mx-1 font-medium underline underline-offset-2" to="/holdings">持仓</Link>录入你的股票和基金。
                 之后这里会每天告诉你：它们发生了什么、当初的判断还成立几条。
+                {DEMO ? null : <span className="mt-2 block"><Button size="sm" variant="secondary" onClick={() => void api.loadSample().then(desk.reload)}>先用一份示例数据看看</Button></span>}
               </Callout>
             ) : (
               <div className="flex flex-col gap-3 sm:flex-row">
@@ -106,6 +107,11 @@ const TodayPage: React.FC = () => {
               </div>
             )}
 
+            {d.sample && !DEMO ? (
+              <Callout tone="warning" action={<Button size="xs" variant="secondary" onClick={() => void api.clearSample().then(desk.reload)}>清除示例数据</Button>}>
+                现在看到的是示例持仓和自选，不是你的。清除后录入自己的即可。
+              </Callout>
+            ) : null}
             {d.stocks.length > 0 ? (
               <Section title="我的股票" hint="持仓与自选。需要处理的排在前面" actions={<><More to="/holdings">持仓</More><More to="/watchlist">自选</More></>}>
                 <Table minWidth={940} head={[{ label: '股票' }, { label: '最新价', right: true }, { label: '今日', right: true }, { label: '持有收益', right: true }, { label: 'PE 历史分位' }, { label: '当初的判断' }, { label: '最近研究' }, { label: '' }]}>

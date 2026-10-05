@@ -13,11 +13,17 @@ def test_health():
     assert resp.json() == {"status": "ok"}
 
 
-def test_root():
-    resp = client.get("/")
-    data = resp.json()
-    assert data["name"] == "wealthpilot"
-    assert "version" in data
+def test_root(monkeypatch, tmp_path):
+    from wealthpilot import main
+
+    # 没有构建好的工作台时返回服务信息
+    monkeypatch.setattr(main, "WEB_DIR", tmp_path)
+    data = client.get("/").json()
+    assert data["name"] == "wealthpilot" and "version" in data
+    # 构建好了就直接把页面发出去：一个进程、一个端口
+    (tmp_path / "index.html").write_text("<title>WealthPilot 工作台</title>", encoding="utf-8")
+    page = client.get("/")
+    assert page.status_code == 200 and "text/html" in page.headers["content-type"] and "工作台" in page.text
 
 
 def test_portfolio_empty():

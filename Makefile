@@ -1,12 +1,28 @@
-.PHONY: setup dev backend workbench demo-build record-demo test docker clean
+.PHONY: setup start install uninstall dev backend workbench demo-build record-demo test docker clean
 
 setup:           ## 首次配置：复制 .env、安装依赖
 	@test -f backend/.env || cp backend/.env.example backend/.env
-	cd backend && uv sync
+	cd backend && uv sync --extra dev
 	npm --prefix workbench install
+	npm --prefix workbench run build -- --outDir dist-app --emptyOutDir
 	@echo ""
-	@echo "✅ 安装完成！请编辑 backend/.env 填入 ANTHROPIC_API_KEY 或 DEEPSEEK_API_KEY"
-	@echo "   然后运行 make dev 启动开发服务"
+	@echo "✅ 安装完成。下一步："
+	@echo "   make start     一条命令：终端 + 网页版（http://localhost:8000）+ 每日盯盘"
+	@echo "   make install   把 wealthpilot 装成全局命令，之后在任意目录直接敲 wealthpilot"
+	@echo "   模型 Key 可以在网页版左侧「设置」里填"
+
+start:           ## 一条命令启动：终端入口，同时在后台带起网页版和每日盯盘
+	cd backend && uv run wealthpilot
+
+install:         ## 把 wealthpilot 装成全局命令（任意目录可用；代码改了不用重装）
+	@mkdir -p $(HOME)/.local/bin
+	@printf '#!/bin/sh\n# WealthPilot 的入口：转给仓库里那套已经装好的环境，所以代码更新后不用重装\nexec "%s/backend/.venv/bin/wealthpilot" "$$@"\n' "$(CURDIR)" > $(HOME)/.local/bin/wealthpilot
+	@chmod +x $(HOME)/.local/bin/wealthpilot
+	@echo "✅ 已安装到 ~/.local/bin/wealthpilot，现在可以在任意目录运行：wealthpilot"
+	@case ":$$PATH:" in *":$(HOME)/.local/bin:"*) ;; *) echo "   注意：~/.local/bin 不在 PATH 里，需要先加进去";; esac
+
+uninstall:       ## 移除全局命令
+	@rm -f $(HOME)/.local/bin/wealthpilot && echo "已移除 ~/.local/bin/wealthpilot"
 
 dev:             ## 启动后端 + 工作台（开发模式）
 	@echo "启动后端（:8000）+ 工作台（http://localhost:5180）..."

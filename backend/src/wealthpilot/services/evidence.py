@@ -47,3 +47,46 @@ def record_evidence(name, inputs, output, nav_history=None):
             "status": status, "provenance": {"retrieved_at": datetime.now(UTC).isoformat(),
             "as_of": as_of, "sources": sources, "method": name,
             "basis": "工具原始返回及本次持仓快照；计量单位见字段名/原文，未知字段不得推断"}}
+
+
+# ── 证据外置：完整内容留在证据库，交给模型的是压缩后的版本 ──────────
+# 一轮深度研究里，同一批证据要发给审核、撰写（每次重写再发一遍）好几次。长证据（财报正文摘录、
+# 同行列表、公告列表）占了大头，而撰写环节真正要用的数字，取证的 Agent 已经在初步结论里引用过了。
+# 所以给模型看的只留"够判断、够引用"的部分；数字溯源校验和界面上的"查看证据"仍然用完整内容。
+_LEVELS = ((8, 400), (5, 240), (3, 140))   # (列表保留几项, 字符串保留多少字)，逐级收紧直到放得下
+
+
+def _shrink(value, keep: int, limit: int):
+    if isinstance(value, dict):
+        return {k: _shrink(v, keep, limit) for k, v in value.items()}
+    if isinstance(value, list):
+        head = [_shrink(v, keep, limit) for v in value[:keep]]
+        return [*head, f"…其余 {len(value) - keep} 项已省略"] if len(value) > keep else head
+    if isinstance(value, str) and len(value) > limit:
+        return f"{value[:limit]}…（共 {len(value)} 字，已省略）"
+    return value
+
+
+def compact(output, budget: int = 1600) -> str:
+    """把一条工具返回压到 budget 字左右。放得下就原样返回；JSON 按结构收紧，纯文本取开头。"""
+    text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
+    if len(text) <= budget:
+        return text
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return f"{text[:budget]}…（共 {len(text)} 字，已省略）"
+    result = text
+    for keep, limit in _LEVELS:
+        result = json.dumps(_shrink(data, keep, limit), ensure_ascii=False, separators=(",", ":"))
+        if len(result) <= budget:
+            break
+    return result
+
+
+def brief(e: dict, budget: int = 1600) -> str:
+    """一条证据给模型看的写法：ID、工具、入参、压缩后的返回、数据日期。"""
+    dates = sorted({str(v) for v in ((e.get("provenance") or {}).get("as_of") or {}).values() if v})
+    args = json.dumps(e.get("input", {}), ensure_ascii=False, separators=(",", ":"))
+    return (f"[{e.get('id', 'legacy')}] {e['tool']}({args}) → {compact(e.get('output', ''), budget)}"
+            + (f"（数据日期 {dates[-1]}）" if dates else ""))

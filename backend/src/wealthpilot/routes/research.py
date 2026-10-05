@@ -275,6 +275,7 @@ async def desk(db: Session = Depends(get_session), user_id: int = Depends(curren
                  "unresearched": sum(1 for s in stocks if s["last_research"] is None)},
         "verified_recent": [checkpoints.serialize(c) for c in verified[:5]],
         "digest": digest[0] if digest else None,
+        "sample": _has_sample(db, user_id),
     }
 
 
@@ -289,3 +290,49 @@ async def movers(limit: int = 8, min_mv_yi: float = 100):
     limit = max(1, min(limit, 20))
     return {"trade_date": snap.get("trade_date"), "min_mv_yi": min_mv_yi,
             "gainers": [pick(r) for r in reversed(ranked[-limit:])], "losers": [pick(r) for r in ranked[:limit]]}
+
+
+# ── 示例数据：第一次打开不至于一片空白 ──────────────────
+
+_SAMPLE_HOLDINGS = [
+    ("stock", "300750", "宁德时代", 100, 262.0, "电池"), ("stock", "600036", "招商银行", 600, 36.5, "银行"),
+    ("stock", "000858", "五粮液", 200, 78.4, "白酒"), ("etf", "510300", "沪深300ETF华泰柏瑞", 5000, 3.95, "宽基"),
+    ("fund", "110011", "易方达优质精选混合", 2500, 4.35, "消费"),
+]
+_SAMPLE_WATCH = [("600519", "贵州茅台"), ("601899", "紫金矿业")]
+_SAMPLE_NOTE = "示例"
+
+
+def _has_sample(db: Session, user_id: int) -> bool:
+    return db.exec(select(PortfolioHolding).where(PortfolioHolding.user_id == user_id, PortfolioHolding.source == "sample")).first() is not None
+
+
+@router.post("/sample")
+def load_sample(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """放一份示例持仓和自选进来。都打了"示例"标记，随时可以一键清掉，不会和你自己录的混在一起。"""
+    from datetime import date
+
+    held = {h.fund_code for h in db.exec(select(PortfolioHolding).where(PortfolioHolding.user_id == user_id)).all()}
+    watched = {w.code for w in db.exec(select(WatchItem).where(WatchItem.user_id == user_id)).all()}
+    for asset_type, code, name, shares, cost, industry in _SAMPLE_HOLDINGS:
+        if code not in held:
+            db.add(PortfolioHolding(user_id=user_id, asset_type=asset_type, fund_code=code, fund_name=name, shares=shares,
+                                    cost_price=cost, buy_date=date(2025, 3, 3), industry=industry, source="sample"))
+    for code, name in _SAMPLE_WATCH:
+        if code not in watched:
+            db.add(WatchItem(user_id=user_id, code=code, name=name, asset_type="stock", note=_SAMPLE_NOTE))
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/sample")
+def clear_sample(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    removed = 0
+    for h in db.exec(select(PortfolioHolding).where(PortfolioHolding.user_id == user_id, PortfolioHolding.source == "sample")).all():
+        db.delete(h)
+        removed += 1
+    for w in db.exec(select(WatchItem).where(WatchItem.user_id == user_id, WatchItem.note == _SAMPLE_NOTE)).all():
+        db.delete(w)
+        removed += 1
+    db.commit()
+    return {"ok": True, "removed": removed}

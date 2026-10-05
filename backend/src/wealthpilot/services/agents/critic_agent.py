@@ -28,6 +28,7 @@ from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.synthesizer_agent import check_numeric_grounding
 from wealthpilot.services.ai_client import json_mode
+from wealthpilot.services.evidence import brief
 from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
@@ -79,7 +80,9 @@ def _build_evidence_digest(results: list[AgentResult]) -> str:
         if r.text.strip():
             lines.append(f"  结论：{r.text.strip()[:220]}")
         for e in r.evidence:
-            lines.append(f"  原始证据 [{e.get('id', 'legacy')}]：{json.dumps(e, ensure_ascii=False)}")
+            # 审核只判断"要求的证据有没有取到"，看压缩后的就够了；完整内容留给代码做数字核对
+            flag = "" if e.get("status", "ok") == "ok" else "（未取到数据）"
+            lines.append(f"  证据{flag} {brief(e, 500)}")
     return "\n".join(lines) or "（本轮没有收集到任何证据）"
 
 

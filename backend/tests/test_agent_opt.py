@@ -135,3 +135,60 @@ def test_skills_can_be_edited_from_the_web_but_only_valid_ones_are_saved(tmp_pat
         assert "财报季检查" in client.get("/api/skills/earnings-check").json()["content"]
         assert client.delete("/api/skills/earnings-check").status_code == 200
         assert client.get("/api/skills").json()["skills"] == []
+
+
+# ── 证据外置与定点修订 ─────────────────────────────────
+
+def test_long_evidence_is_compacted_for_the_model_but_short_evidence_is_untouched():
+    import json
+
+    from wealthpilot.services import evidence
+
+    short = json.dumps({"price": 1258.62, "pe_ttm": 19.32})
+    assert evidence.compact(short) == short
+    peers = [{"code": f"60{i:04d}", "name": f"公司{i}", "pe_ttm": 10 + i, "total_mv_yi": 1000 - i} for i in range(30)]
+    report = {"title": "2026年半年度报告", "sections": [{"topic": "管理层讨论", "excerpt": "正文" * 1500}], "peers": peers,
+              "limitations": ["只有 6 个持有期"]}
+    out = evidence.compact(json.dumps(report, ensure_ascii=False), 1600)
+    data = json.loads(out)
+    assert len(out) <= 1600 and data["title"] == "2026年半年度报告" and data["limitations"] == ["只有 6 个持有期"]
+    assert "已省略" in data["sections"][0]["excerpt"] and "项已省略" in data["peers"][-1]
+    assert data["peers"][0]["pe_ttm"] == 10                      # 留下的行里数字原样保留
+    text = evidence.brief({"id": "E-abc", "tool": "get_x", "input": {"code": "600519"}, "output": "未获取到数据",
+                           "provenance": {"as_of": {"600519": "2026-09-30"}, "basis": "很长的口径说明" * 20}})
+    assert text == '[E-abc] get_x({"code":"600519"}) → 未获取到数据（数据日期 2026-09-30）'   # 不再附整段元数据
+
+
+async def test_repair_patches_only_the_flagged_spots_and_gives_up_cleanly():
+    import json
+
+    from wealthpilot.services.agents.synthesizer_agent import SynthesizerAgent
+
+    draft = "## 结论\n毛利率 23.93% [E-1]，预计明年回到 30% 左右。\n## 风险\n负债率 63.65% [E-1]。"
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        return SimpleNamespace(text=json.dumps({"edits": [{"find": "，预计明年回到 30% 左右", "replace": ""}]}, ensure_ascii=False))
+
+    fixed = await SynthesizerAgent(SimpleNamespace(create=create), "m").repair(draft, ["以下数字未出现在工具返回中，可能是编造的：30"], ["30"])
+    assert fixed == "## 结论\n毛利率 23.93% [E-1]。\n## 风险\n负债率 63.65% [E-1]。"
+    assert "证据" not in calls[0]["messages"][0]["content"].split("回答全文")[0] and len(calls) == 1   # 不重发证据
+
+    bad = lambda text: SynthesizerAgent(SimpleNamespace(create=lambda **kw: SimpleNamespace(text=text)), "m")  # noqa: E731
+    assert await bad('{"edits":[{"find":"原文里没有这句","replace":""}]}').repair(draft, [], ["30"]) == ""   # 套不上：放弃，退回完整重写
+    assert await bad("不是 JSON").repair(draft, [], ["30"]) == ""
+    assert await bad('{"edits":[]}').repair(draft, [], ["30"]) == ""
+
+
+def test_last_resort_trim_drops_only_the_clause_with_the_unverifiable_number():
+    from wealthpilot.services.agents.synthesizer_agent import strip_ungrounded
+
+    answer = ("## 结论\n上涨 2567 家 [E-1]，下跌 2824 家 [E-1]，上涨家数不足 50%，情绪偏弱。\n"
+              "- 生物制品领涨，中位涨幅 3.16% [E-2]。\n- 预计明天反弹 50 点。\n\n| 行业 | 涨幅 |\n|---|---|\n| 元件 | 50 |\n## 50 这个标题不动")
+    out = strip_ungrounded(answer, ["50"])
+    assert "上涨 2567 家 [E-1]，下跌 2824 家 [E-1]，情绪偏弱。" in out          # 只删中间那半句
+    assert "3.16%" in out and "预计明天反弹" not in out                      # 整条都靠这个数的列表项被删掉
+    assert "| 元件 | — |" in out and "## 50 这个标题不动" in out             # 表格换成"—"，标题不碰
+    assert "2567" in strip_ungrounded("上涨 2567 家，占 50%。", ["50"])      # 2567 里的 "5" 不会被误伤
+    assert strip_ungrounded(answer, []) == answer

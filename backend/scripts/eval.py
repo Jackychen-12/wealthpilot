@@ -11,6 +11,7 @@
 
 import argparse
 import asyncio
+import faulthandler
 import json
 import os
 import sys
@@ -59,11 +60,18 @@ async def run_all(out: Path) -> None:
     rows = []
     for kind, question in QUESTIONS:
         started, events = time.time(), []
-        try:
-            async for line in chat_stream(question, [], holdings, nav_data, nav_history, profile=profile):
+        async def consume(q=question, sink=events):
+            async for line in chat_stream(q, [], holdings, nav_data, nav_history, profile=profile):
                 event = json.loads(line[6:])
                 if event["type"] != "delta":
-                    events.append(event)
+                    sink.append(event)
+
+        # 卡住超过 4 分钟就把各线程的调用栈打出来（下次能知道卡在哪），并放弃这一题
+        faulthandler.dump_traceback_later(240, file=sys.stderr)
+        try:
+            await asyncio.wait_for(consume(), 300)
+        except TimeoutError:
+            events.append({"type": "done", "content": "超时", "meta": {"status": "timeout"}})
         except Exception as e:  # noqa: BLE001
             events.append({"type": "done", "content": f"异常：{e}", "meta": {"status": "crashed"}})
         done = next((e for e in reversed(events) if e["type"] == "done"), {"content": "", "meta": {"status": "no_done"}})
@@ -77,10 +85,15 @@ async def run_all(out: Path) -> None:
             "replans": sum(e["type"] == "replan" for e in events),
             "grounding_rate": done["meta"].get("grounding_rate"),
             "answer_chars": len(done.get("content", "")),
+            "input_tokens": ((done.get("meta") or {}).get("usage") or {}).get("input_tokens", 0),
+            "cached_tokens": ((done.get("meta") or {}).get("usage") or {}).get("cached_tokens", 0),
+            "output_tokens": ((done.get("meta") or {}).get("usage") or {}).get("output_tokens", 0),
             "rejected_reasons": [i for e in events if e["type"] == "critic" and not e["passed"] for i in e.get("issues", [])][:6],
             "answer": done.get("content", ""),
         }
         rows.append(row)
+        faulthandler.cancel_dump_traceback_later()
+        out.write_text(json.dumps(rows, ensure_ascii=False, indent=1))   # 每题都落盘，中途断了也不白跑
         print(f"[{kind}] {question} -> {row['status']}  {row['seconds']}s  工具{row['tool_calls']}  打回{row['rewrites']}", flush=True)
         out.write_text(json.dumps(rows, ensure_ascii=False, indent=1))
 
@@ -97,6 +110,9 @@ def summarize(rows: list[dict]) -> dict:
         "平均工具调用": round(sum(r["tool_calls"] for r in rows) / n, 1),
         "平均被打回次数": round(sum(r["rewrites"] for r in rows) / n, 2),
         "平均回答字数": round(sum(r["answer_chars"] for r in published) / max(1, len(published))),
+        "平均输入token": round(sum(r.get("input_tokens", 0) for r in rows) / n),
+        "平均未命中缓存的输入token": round(sum(r.get("input_tokens", 0) - r.get("cached_tokens", 0) for r in rows) / n),
+        "平均输出token": round(sum(r.get("output_tokens", 0) for r in rows) / n),
     }
 
 

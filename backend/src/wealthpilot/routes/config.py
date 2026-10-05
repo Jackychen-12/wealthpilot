@@ -6,19 +6,18 @@
 
 import os
 import re
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 from sqlmodel import Session
 
 from wealthpilot.services import memory
-from wealthpilot.settings import Settings, get_settings, reload_settings
+from wealthpilot.settings import HOME, Settings, get_settings, reload_settings
 from wealthpilot.storage.db import get_engine
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
-ENV_FILE = Path(".env")
+ENV_FILE = HOME / ".env"
 _SECRETS = ("anthropic_api_key", "deepseek_api_key")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
