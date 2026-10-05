@@ -105,7 +105,9 @@ wealthpilot     # 之后在任意目录敲这一条
 
 没装全局命令时用 `make start`，效果一样。只想要终端：`wealthpilot --no-web`；端口被占：`wealthpilot --port 8001`。配置、数据库、技能文件都固定在仓库的 `backend/` 下（或 `WEALTHPILOT_HOME` 指定的目录），和你在哪个目录敲命令无关。
 
-开发时想要前端热更新，仍然可以 `make dev`（后端 :8000 + Vite :5180）。
+网页版只有一个地址：http://localhost:8000 。开发时用 `make dev`，也是这个地址——后端热重载，前端代码改了会自动重新构建，刷新页面即可。只有需要逐像素调界面时才用 `make workbench`（Vite 热更新，:5180）。
+
+全局命令是一个很小的转发脚本（`~/.local/bin/wealthpilot`），指向这个仓库里装好的环境，所以代码更新后不用重装。仓库挪了位置它会直接告诉你去新位置重新 `make install`；`make uninstall` 移除。
 
 一点如实说明：电脑合盖休眠时进程会被挂起，盯盘和进行中的研究都会停，软件层面拦不住；能做的是醒来后把错过的那次盯盘补上。要它全天候跑，需要放在一台不休眠的机器上（见 Docker 部署），再用 `wealthpilot --server` 连过去。
 
@@ -383,7 +385,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 
 ## 投研工作台
 
-`make dev` 启动后打开 **http://localhost:5180**。这是日常使用的入口：桌面端布局，所有数字都来自后端实时计算，接口失败就显示失败，不会回退成示例数据。
+`wealthpilot`（或 `make start` / `make dev`）启动后打开 **http://localhost:8000**。这是日常使用的入口：桌面端布局，所有数字都来自后端实时计算，接口失败就显示失败，不会回退成示例数据。
 
 | 分组 | 页面 | 做什么 | 背后的能力 |
 |---|---|---|---|
@@ -756,7 +758,8 @@ Claude 会自动调用:
 
 ```bash
 make setup     # 首次配置：安装依赖 + 复制 .env
-make dev       # 启动后端 + 工作台（http://localhost:5180）
+make start     # 终端 + 网页版（http://localhost:8000）+ 每日盯盘
+make dev       # 开发：后端热重载 + 前端自动重新构建，同一个地址
 make backend   # 仅启动后端
 make workbench # 仅启动工作台
 make demo-build   # 构建在线演示版（只读，回放录好的结果）
