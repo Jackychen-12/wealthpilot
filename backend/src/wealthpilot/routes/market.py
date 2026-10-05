@@ -75,7 +75,16 @@ async def get_stock_kline(code: str, days: int = 120):
     """A 股 / ETF 前复权日线（最新在前），字段与基金净值历史一致。"""
     from wealthpilot.services.stocks import fetch_stock_kline
     data = await fetch_stock_kline(code, max(5, min(days, 750)))
-    return {"code": code, "count": len(data), "data": data, "price_basis": "前复权收盘价"}
+    basis = data[0].get("price_basis", "前复权") if data else "前复权"
+    return {"code": code, "count": len(data), "data": data, "price_basis": f"{basis}收盘价"}
+
+
+@router.get("/stock/{code}/valuation-history")
+async def get_valuation_series(code: str):
+    """近五年 PE / PB 走势（每周取一个点，画图用），最早在前。"""
+    from wealthpilot.services.stocks import fetch_valuation_history
+    rows = list(reversed(await fetch_valuation_history(code)))
+    return {"code": code, "data": [{"date": r["date"], "pe": r["pe_ttm"], "pb": r["pb"]} for r in rows[::5] + rows[-1:]]}
 
 
 @router.get("/crypto/{symbol}")

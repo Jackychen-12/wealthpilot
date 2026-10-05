@@ -42,7 +42,7 @@ PLAYBOOKS: dict[str, Playbook] = {
     "review": Playbook(
         "review", "事后复盘",
         sections=("成绩", "成立", "证伪", "启示"),
-        criteria=("验证点的总体成立率与各状态数量", "已核对出结果的验证点明细"),
+        criteria=("验证点的总数与各状态（成立 / 被证伪 / 待核对）的数量",),
     ),
     "screen": Playbook(
         "screen", "选股",
@@ -52,10 +52,10 @@ PLAYBOOKS: dict[str, Playbook] = {
 }
 
 _DIMENSIONS = {
-    "fundamental": "研究{name}（{code}）的基本面：最近几期营收、净利润及同比、ROE、毛利率、负债率、现金流与分红",
+    "fundamental": "研究{name}（{code}）的基本面：最近几期营收、净利润及同比、ROE、毛利率、负债率、现金流与分红；并读最新定期报告里管理层对业绩变动的解释与风险提示",
     "valuation": "研究{name}（{code}）的估值：当前 PE/PB/PS、各自的历史分位、与同行业公司的对比",
     "price": "研究{name}（{code}）的走势：最新行情、近一年所处价格区间位置、均线排列与波动率",
-    "industry": "研究{name}（{code}）的行业位置：所属行业、行业内市值排名与主要同行、所在行业当日表现、近期公告与新闻",
+    "industry": "研究{name}（{code}）的行业位置：所属行业、行业内市值排名与主要同行、所在行业当日表现、近期公告与新闻；近期有重要公告的读一下正文",
 }
 
 

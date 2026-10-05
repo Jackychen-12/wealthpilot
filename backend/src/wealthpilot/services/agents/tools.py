@@ -5,7 +5,7 @@ import json
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services import screener
+from wealthpilot.services import filings, screener
 from wealthpilot.services.analysis import (
     calculate_attribution_by_fund,
     calculate_correlation,
@@ -39,7 +39,6 @@ from wealthpilot.services.simulation import (
     simulate_change,
 )
 from wealthpilot.services.stocks import (
-    fetch_announcements,
     fetch_dividends,
     fetch_financial_indicators,
     fetch_industry_peers,
@@ -458,7 +457,7 @@ RESEARCH_TOOLS = [
     },
     {
         "name": "get_stock_announcements",
-        "description": "查询个股最近的公告标题与日期（财报、分红、重大事项等）。只有标题，没有正文。",
+        "description": "查询个股最近的公告：标题、日期、类别与 art_code。要看某条公告的正文，把 art_code 交给 read_announcement。",
         "input_schema": {"type": "object", "properties": {"code": _STOCK_CODE, "limit": {"type": "integer", "description": "条数，默认 10"}}, "required": ["code"]},
     },
     {
@@ -498,6 +497,43 @@ RESEARCH_TOOLS = [
     },
 ]
 
+FILING_TOOLS = [
+    {
+        "name": "read_latest_report",
+        "description": (
+            "读取个股最新一份定期报告（年报 / 半年报 / 季报）正文里的关键章节摘录：管理层讨论、主营构成、业绩变动原因、风险、展望。"
+            "用来回答“公司自己怎么解释这期业绩”“管理层提示了哪些风险”。摘录是原文片段，引用时要说明出自哪份报告。"
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "code": _STOCK_CODE,
+            "topics": {"type": "array", "items": {"type": "string", "enum": ["管理层讨论", "主营构成", "业绩变动原因", "风险", "展望"]},
+                       "description": "要读哪些章节；不填读全部"},
+        }, "required": ["code"]},
+    },
+    {
+        "name": "read_announcement",
+        "description": "读取一条公告的正文。art_code 来自 get_stock_announcements。给 keyword 则返回该词附近的片段，否则按页返回（每页约 4000 字）。",
+        "input_schema": {"type": "object", "properties": {
+            "art_code": {"type": "string", "description": "公告编号，如 AN202608141827994408"},
+            "keyword": {"type": "string", "description": "只看包含这个词的片段，如 减持、回购、业绩"},
+            "page": {"type": "integer", "description": "第几页，默认 1"},
+        }, "required": ["art_code"]},
+    },
+    {
+        "name": "backtest_screen",
+        "description": (
+            "把一组选股条件放回历史验证：每个调仓日（每年 5、9、11 月初）按当时已披露的数据筛出前 top_n 只，等权持有到下一个调仓日，"
+            "与沪深300ETF 比较。条件字段与 screen_stocks 相同。返回每期收益、累计与年化收益、超额、最大回撤和局限说明。"
+            "历史只有约两年，持有期很少——引用结果时必须同时转述 limitations。"
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "criteria": {"type": "object", "description": "与 screen_stocks 相同的筛选条件，如 {\"pe_max\":15,\"roe_min\":15}"},
+            "top_n": {"type": "integer", "description": "每期持有几只，默认 20"},
+            "years": {"type": "number", "description": "回测几年，默认 2，最多 2.5"},
+        }, "required": ["criteria"]},
+    },
+]
+
 REVIEW_TOOLS = [
     {
         "name": "get_research_track_record",
@@ -515,7 +551,7 @@ REVIEW_TOOLS = [
 ]
 
 _ALL_TOOLS = {t["name"]: t for t in [*MARKET_TOOLS, *PORTFOLIO_TOOLS, *RISK_TOOLS, *COMPUTE_TOOLS,
-                                     *QUANT_TOOLS, *STOCK_TOOLS, *RESEARCH_TOOLS, *REVIEW_TOOLS]}
+                                     *QUANT_TOOLS, *STOCK_TOOLS, *RESEARCH_TOOLS, *REVIEW_TOOLS, *FILING_TOOLS]}
 
 
 def _pick(*names: str) -> list[dict]:
@@ -525,13 +561,13 @@ def _pick(*names: str) -> list[dict]:
 # 按研究维度分组 —— 每个 Agent 拿到的就是这里的一组。同一个工具可以出现在多个组里。
 AGENT_TOOLS: dict[str, list[dict]] = {
     "fundamental": _pick("resolve_security", "get_stock_profile", "get_stock_financials",
-                         "get_financial_indicators", "get_dividend_history"),
+                         "get_financial_indicators", "get_dividend_history", "read_latest_report"),
     "valuation": _pick("resolve_security", "get_stock_valuation", "get_valuation_history", "compare_peers_valuation"),
     "price": _pick("resolve_security", "get_stock_quote", "get_stock_kline", "get_technical_indicators",
                    "calculate_return", "get_max_drawdown", "backtest_rule"),
     "industry": _pick("resolve_security", "get_industry_peers", "get_sector_ranking", "get_stock_announcements",
-                      "search_market_news", "get_market_overview"),
-    "screener": _pick("screen_stocks", "get_sector_ranking"),
+                      "read_announcement", "search_market_news", "get_market_overview"),
+    "screener": _pick("screen_stocks", "get_sector_ranking", "backtest_screen"),
     "portfolio": _pick("get_portfolio_overview", "get_attribution", "get_health_score", "get_investment_suggestions",
                        "get_drawdown_analysis", "get_correlation_matrix", "lookthrough_portfolio",
                        "compute_concentration", "simulate_portfolio_change", "check_profile_constraint",
@@ -633,11 +669,28 @@ async def execute_tool(
         return json.dumps({"code": input_data["code"], **summarize_technicals(kline)}, ensure_ascii=False)
 
     if name == "get_stock_announcements":
-        rows = await fetch_announcements(input_data["code"], int(input_data.get("limit", 10)))
+        rows = await filings.list_filings(input_data["code"], int(input_data.get("limit", 10)))
         if not rows:
             return f"未获取到 {input_data['code']} 的公告"
         return json.dumps({"code": input_data["code"], "announcements": rows,
-                           "note": "仅标题与日期，未读取公告正文"}, ensure_ascii=False)
+                           "note": "这里只有标题；正文用 read_announcement 读"}, ensure_ascii=False)
+
+    if name == "read_latest_report":
+        report = await filings.latest_report(input_data["code"], input_data.get("topics"))
+        if not report or not report.get("sections"):
+            return f"未能读取 {input_data['code']} 最新定期报告的正文"
+        return json.dumps(report, ensure_ascii=False)
+
+    if name == "read_announcement":
+        doc = await filings.read(str(input_data["art_code"]), str(input_data.get("keyword") or ""), int(input_data.get("page") or 1))
+        if not doc or not doc.get("text"):
+            return "未能读取这条公告的正文" if not doc else f"公告正文里没有出现「{input_data.get('keyword')}」"
+        return json.dumps(doc, ensure_ascii=False)
+
+    if name == "backtest_screen":
+        result = await screener.backtest_screen(dict(input_data.get("criteria") or {}), float(input_data.get("years") or 2),
+                                                int(input_data.get("top_n") or 20))
+        return result["error"] if "error" in result else json.dumps(result, ensure_ascii=False)
 
     if name in ("get_sector_ranking", "get_market_overview", "screen_stocks"):
         snap = await screener.snapshot()

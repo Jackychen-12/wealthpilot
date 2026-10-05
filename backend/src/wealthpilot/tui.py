@@ -41,8 +41,11 @@ COMMANDS: dict[str, str] = {
     "/review": "验证点成绩单（事后验证）",
     "/verify": "立即核对到期的验证点",
     "/proposals": "操作建议单",
-    "/approve": "/approve <编号> <数量> <成交价> — 授权一条建议并记入持仓",
+    "/approve": "/approve <编号> <数量> [成交价] — 授权一条建议（开了模拟盘按最新价下单，否则填成交价记账）",
     "/reject": "/reject <编号> — 不采纳一条建议",
+    "/digest": "/digest [run] — 每日简报（run 立即检查一次）",
+    "/broker": "模拟盘账户与持仓",
+    "/order": "/order <buy|sell> <名称或代码> <数量> — 在模拟盘下单（会再确认一次）",
     "/history": "研究记录",
     "/evidence": "/evidence [证据ID前4位] — 上一次回答的证据",
     "/new": "开始新会话（清空上下文）",
@@ -393,22 +396,70 @@ class App:
 
     async def cmd_approve(self, args: str) -> None:
         parts = args.split()
-        if len(parts) != 3:
-            raise RuntimeError("用法：/approve <编号> <数量> <成交价>")
-        pid, shares, price = int(parts[0].lstrip("#")), int(parts[1]), float(parts[2])
+        paper = (await self.backend.request("GET", "/api/broker")).get("mode") == "paper"
+        if len(parts) not in ((2, 3) if paper else (3,)):
+            raise RuntimeError("用法：/approve <编号> <数量>" + ("" if paper else " <成交价>"))
+        pid, shares = int(parts[0].lstrip("#")), int(parts[1])
+        price = None if paper else float(parts[2])
         target = next((p for p in await self.backend.request("GET", "/api/proposals") if p["id"] == pid), None)
         if target is None:
             raise RuntimeError(f"没有编号 {pid} 的建议单")
-        self.console.print(f"将把 [bold]{target['action_label']} {target['name']} {shares} 股 @ {price}[/] 记入持仓。"
-                           "[yellow]这一步不会向券商下单[/]，请确认你已在券商成交。")
+        if paper:
+            self.console.print(f"将在[bold]模拟盘[/]按最新价 [bold]{target['action_label']} {target['name']} {shares} 股[/]（不动真钱）。")
+        else:
+            self.console.print(f"将把 [bold]{target['action_label']} {target['name']} {shares} 股 @ {price}[/] 记入持仓。"
+                               "[yellow]这一步不会向券商下单[/]，请确认你已在券商成交。")
         if (await self.ask("确认？输入 yes：")).strip().lower() != "yes":
             self.console.print("[dim]已取消[/]")
             return
-        done = await self.backend.request("POST", f"/api/proposals/{pid}/authorize", json={"shares": shares, "price": price})
+        done = await self.backend.request("POST", f"/api/proposals/{pid}/authorize", json={"shares": shares} if price is None else {"shares": shares, "price": price})
         self.show_proposals([done])
 
     async def cmd_reject(self, args: str) -> None:
         self.show_proposals([await self.backend.request("POST", f"/api/proposals/{int(args.strip().lstrip('#'))}/reject")])
+
+    async def cmd_digest(self, args: str) -> None:
+        if args.strip() == "run":
+            digest = await self.backend.request("POST", "/api/digest/run")
+        else:
+            rows = await self.backend.request("GET", "/api/digest")
+            if not rows:
+                self.console.print("[dim]还没有简报。/digest run 立即检查一次；后端开着时每个交易日会自动跑。[/]")
+                return
+            digest = rows[0]
+        self.console.print(f"[bold]{digest['day']}[/] {digest['summary']}")
+        for e in digest["events"]:
+            self.console.print(f"  [dim]•[/] {e['name']} [cyan]{e['code']}[/] {e['text']}")
+
+    async def cmd_broker(self, _: str) -> None:
+        a = await self.backend.request("GET", "/api/broker")
+        if a.get("mode") != "paper":
+            self.console.print("[dim]模拟盘未开启：在 backend/.env 里设置 BROKER=paper 后重启[/]")
+            return
+        self.console.print(Text.assemble(f"总资产 {a['total_assets']:,.0f}  可用 {a['cash']:,.0f}  市值 {a['market_value']:,.0f}  累计盈亏 ", signed(a["total_pnl_pct"])))
+        t = self.table("证券", "代码", "数量", "成本", "最新", "市值", "盈亏率", right=(2, 3, 4, 5, 6))
+        for p in a["positions"]:
+            t.add_row(p["name"], p["code"], str(p["shares"]), num(p["cost_price"], 3), num(p["price"], 3), num(p["market_value"], 0), signed(p["pnl_pct"]))
+        self.console.print(t if a["positions"] else "[dim]还没有持仓。/order buy 茅台 100[/]")
+
+    async def cmd_order(self, args: str) -> None:
+        parts = args.split()
+        if len(parts) != 3 or parts[0] not in ("buy", "sell") or not parts[2].isdigit():
+            raise RuntimeError("用法：/order <buy|sell> <名称或代码> <数量>")
+        sec = await self.resolve(parts[1])
+        if sec["asset_type"] == "fund":
+            raise RuntimeError("模拟盘只支持股票和 ETF")
+        verb = "买入" if parts[0] == "buy" else "卖出"
+        self.console.print(f"将在[bold]模拟盘[/]按最新价 [bold]{verb} {sec['name']} {sec['code']} {parts[2]} 股[/]（不动真钱）。")
+        if (await self.ask("确认？输入 yes：")).strip().lower() != "yes":
+            self.console.print("[dim]已取消[/]")
+            return
+        o = await self.backend.request("POST", "/api/broker/orders", json={
+            "code": sec["code"], "name": sec["name"], "side": parts[0], "shares": int(parts[2]), "asset_type": sec["asset_type"]})
+        if o["status"] == "filled":
+            self.console.print(f"[green]已成交[/] {verb} {o['name']} {o['shares']} 股 @ {o['price']}，费用 {o['fee']} 元")
+        else:
+            self.console.print(f"[red]被拒[/] {o['reason']}")
 
     async def cmd_history(self, _: str) -> None:
         t = self.table("时间", "问题", "结论", "证据", right=(3,))

@@ -10,7 +10,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
+import time
 
 import httpx
 
@@ -54,17 +57,37 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
     """
     symbol = market_symbol(code)
     days = max(2, int(days))
-    try:
-        async with httpx.AsyncClient(timeout=10.0, headers=_HEADERS) as client:
-            resp = await client.get(
-                "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-                # 多取一根，用来算第一天的涨跌幅
-                params={"param": f"{symbol},day,,,{days + 1},qfq"},
-            )
-        node = resp.json()["data"][symbol]
-        rows = node.get("qfqday") or node.get("day") or []
-    except Exception:
-        return []
+    rows: list = []
+    # 主源偶尔单次失败：先原地重试一次，再考虑换源
+    for attempt in range(1 if _is_down("tencent") else 2):
+        try:
+            if _is_down("tencent"):
+                break
+            async with httpx.AsyncClient(timeout=6.0, headers=_HEADERS) as client:
+                resp = await client.get(
+                    "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+                    # 多取一根，用来算第一天的涨跌幅
+                    params={"param": f"{symbol},day,,,{days + 1},qfq"},
+                )
+            node = resp.json()["data"][symbol]
+            rows = node.get("qfqday") or node.get("day") or []
+        except Exception:
+            rows = []
+        if rows:
+            _failures.pop("tencent", None)
+            break
+        if attempt == 0:
+            await asyncio.sleep(0.4)
+    if not rows:
+        # 主行情源对突发请求会临时限流；换东方财富的前复权日线，字段顺序整理成一致的
+        _mark_down("tencent")
+        rows = [] if _is_down("eastmoney") else await _eastmoney_kline(symbol, days + 1)
+        if not rows:
+            _mark_down("eastmoney")
+    basis = "前复权"
+    if not rows:
+        # 最后的备用：新浪日线，只有不复权价。画图和看近期走势够用；跨越除权日的收益会略有偏差，所以打上标记
+        rows, basis = await _sina_kline(symbol, days + 1), "不复权"
 
     records = []
     for prev, row in zip(rows, rows[1:], strict=False):
@@ -76,11 +99,59 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
                 "nav": close,
                 "daily_return": round((close - prev_close) / prev_close * 100, 2) if prev_close else 0.0,
                 "open": float(row[1]), "high": float(row[3]), "low": float(row[4]),
-                "volume": float(row[5]),
+                "volume": float(row[5]), "price_basis": basis,
             })
         except (ValueError, IndexError):
             continue
     return list(reversed(records))[:days]
+
+
+# 某个行情源刚失败过，就先跳过它几分钟 —— 否则每次请求都要把超时等一遍，页面会慢到像是坏了
+_down_until: dict[str, float] = {}
+_failures: dict[str, int] = {}
+
+
+def _is_down(source: str) -> bool:
+    return time.monotonic() < _down_until.get(source, 0)
+
+
+def _mark_down(source: str, seconds: float = 120) -> None:
+    """连续失败两次才跳过它：单次抖动就切换，会让同一张图一会儿前复权一会儿不复权。"""
+    _failures[source] = _failures.get(source, 0) + 1
+    if _failures[source] >= 2:
+        _down_until[source] = time.monotonic() + seconds
+        _failures[source] = 0
+
+
+async def _sina_kline(symbol: str, count: int) -> list[list]:
+    """新浪日线（不复权），整理成 [日期, 开, 收, 高, 低, 量(手)]。"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers={"Referer": "https://finance.sina.com.cn"}) as client:
+            resp = await client.get("https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_x=/CN_MarketDataService.getKLineData",
+                                    params={"symbol": symbol, "scale": 240, "ma": "no", "datalen": min(count, 1000)})
+        match = re.search(r"\(\s*(\[.*\])\s*\)", resp.text, re.DOTALL)
+        items = json.loads(match.group(1)) if match else []
+        return [[i["day"], i["open"], i["close"], i["high"], i["low"], str(float(i["volume"]) / 100)] for i in items]
+    except Exception:
+        return []
+
+
+async def _eastmoney_kline(symbol: str, count: int) -> list[list]:
+    """返回与主行情源相同的行结构：[日期, 开, 收, 高, 低, 量]，日期升序。取不到返回 []。"""
+    secid = f"{1 if symbol.startswith('sh') else 0}.{symbol[2:]}"
+    params = {"secid": secid, "klt": 101, "fqt": 1, "lmt": count, "end": "20500101",
+              "fields1": "f1,f2,f3", "fields2": "f51,f52,f53,f54,f55,f56"}
+    # 这个接口经常直接断开连接，换节点重试几次
+    for host in ("push2his", "63.push2his"):
+        try:
+            async with httpx.AsyncClient(timeout=4.0, headers=_HEADERS) as client:
+                resp = await client.get(f"https://{host}.eastmoney.com/api/qt/stock/kline/get", params=params)
+            lines = (resp.json().get("data") or {}).get("klines") or []
+            if lines:
+                return [line.split(",") for line in lines]
+        except Exception:
+            await asyncio.sleep(0.3)
+    return []
 
 
 async def fetch_stock_quote(code: str) -> dict | None:

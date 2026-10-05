@@ -1,7 +1,7 @@
 import type React from 'react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { DEMO, api, type Checkpoint, type Proposal } from '../api'
+import { DEMO, api, useApi, type Checkpoint, type Proposal } from '../api'
 import { Button, Callout, Drawer, Input, Tag, type Tone } from './kit'
 import { Table, Td } from './ui'
 
@@ -42,6 +42,7 @@ const P_STATUS: Record<string, { tone: Tone; label: string }> = {
 /** 操作建议单：Agent 只能提出，逐条由用户授权。授权 = 把成交记入持仓台账，不向券商下单。 */
 export const ProposalList: React.FC<{ items: Proposal[]; onChanged?: (p: Proposal) => void }> = ({ items, onChanged }) => {
   const [local, setLocal] = useState<Record<number, Proposal>>({})
+  const paper = useApi(api.broker).data?.mode === 'paper'
   const [target, setTarget] = useState<Proposal | null>(null)
   const [shares, setShares] = useState('')
   const [price, setPrice] = useState('')
@@ -73,7 +74,7 @@ export const ProposalList: React.FC<{ items: Proposal[]; onChanged?: (p: Proposa
               {p.invalidation ? <p className="mt-1 text-[13px] leading-relaxed text-steel">失效条件：{p.invalidation}</p> : null}
               {p.status === 'proposed' ? (
                 <div className="mt-3 flex items-center gap-2">
-                  <Button size="sm" disabled={DEMO} onClick={() => open(p)}>授权并记入持仓</Button>
+                  <Button size="sm" disabled={DEMO} onClick={() => open(p)}>{paper ? '授权并在模拟盘下单' : '授权并记入持仓'}</Button>
                   <Button size="sm" variant="ghost" disabled={DEMO || busy} onClick={() => void act(() => api.rejectProposal(p.id))}>不采纳</Button>
                 </div>
               ) : null}
@@ -85,15 +86,19 @@ export const ProposalList: React.FC<{ items: Proposal[]; onChanged?: (p: Proposa
 
       <Drawer open={target != null} onClose={() => setTarget(null)} title={target ? `${target.action_label} ${target.name}` : ''} width="max-w-sm">
         {target ? (
-          <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void act(() => api.authorizeProposal(target.id, Number(shares), Number(price))) }}>
-            <Callout tone="warning">
-              这一步<b>不会向券商下单</b>。请先在你的券商完成交易，再把实际成交的数量和价格填在这里，系统会据此{selling ? '减少' : '增加'}持仓记录。
-            </Callout>
-            <Input id="p-shares" label="成交数量（股）" type="number" min="1" step="1" value={shares} onChange={(e) => setShares(e.target.value)} required />
-            <Input id="p-price" label="成交价（元）" type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} required />
+          <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void act(() => api.authorizeProposal(target.id, Number(shares), paper ? null : Number(price))) }}>
+            {paper ? (
+              <Callout tone="info">将在<b>模拟盘</b>按最新价{selling ? '卖出' : '买入'}，不动真钱。成交后持仓自动同步进组合。买入须为 100 股的整数倍，当天买入的次日才能卖。</Callout>
+            ) : (
+              <Callout tone="warning">
+                这一步<b>不会向券商下单</b>。请先在你的券商完成交易，再把实际成交的数量和价格填在这里，系统会据此{selling ? '减少' : '增加'}持仓记录。
+              </Callout>
+            )}
+            <Input id="p-shares" label={paper ? '数量（股）' : '成交数量（股）'} type="number" min="1" step="1" value={shares} onChange={(e) => setShares(e.target.value)} required />
+            {paper ? null : <Input id="p-price" label="成交价（元）" type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} required />}
             {error ? <Callout tone="danger">{error}</Callout> : null}
             <div className="flex gap-2">
-              <Button type="submit" loading={busy}>确认记入持仓</Button>
+              <Button type="submit" loading={busy}>{paper ? '确认下单' : '确认记入持仓'}</Button>
               <Button variant="ghost" onClick={() => setTarget(null)}>取消</Button>
             </div>
           </form>

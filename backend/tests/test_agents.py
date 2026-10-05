@@ -4,8 +4,8 @@ import json
 
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.planner_agent import Plan, PlannerAgent, Task
-from wealthpilot.services.agents.synthesizer_agent import check_numeric_grounding
 from wealthpilot.services.agents.registry import AGENTS
+from wealthpilot.services.agents.synthesizer_agent import check_numeric_grounding
 from wealthpilot.services.agents.tools import AGENT_TOOLS
 
 
@@ -174,3 +174,26 @@ class TestToolSchemas:
         for name, tools in AGENT_TOOLS.items():
             names = [t["name"] for t in tools]
             assert len(names) == len(set(names)), name
+
+
+class TestDerivedNumbers:
+    """模型拿两个已溯源的数做一步对比（差、比、变化率），操作数就在旁边时不算编造。"""
+
+    @staticmethod
+    def _res(output: str) -> list[AgentResult]:
+        return [AgentResult("fundamental", "g", "", [{"tool": "t", "input": {}, "output": output}])]
+
+    def test_difference_and_change_rate_next_to_their_operands(self):
+        res = self._res("毛利率 26.27 和 23.93；PE 19.32，中位数 28.97")
+        ok = "毛利率从 26.27% 降至 23.93%，下降 2.34 个百分点。\nPE 19.32，较中位数 28.97 低 33.3%。"
+        assert check_numeric_grounding(ok, res)["ungrounded"] == []
+
+    def test_operands_on_the_previous_line_count(self):
+        res = self._res("营收 922.78，净利润 445.17")
+        assert check_numeric_grounding("营收 922.78 亿，净利润 445.17 亿。\n净利率约 48.2%。", res)["ungrounded"] == []
+
+    def test_far_away_or_unrelated_numbers_are_still_flagged(self):
+        res = self._res("毛利率 26.27 和 23.93")
+        far = "毛利率 26.27%。\n\n另一段。\n\n第三段提到 23.93%。\n\n结论：下降 2.34 个百分点。"
+        assert check_numeric_grounding(far, res)["ungrounded"] == ["2.34"]      # 操作数不在邻近行
+        assert check_numeric_grounding("毛利率从 26.27% 降至 23.93%，预计明年回到 30%。", res)["ungrounded"] == ["30"]

@@ -4,18 +4,20 @@ import { Star } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
-  DEMO, api, runTool, useApi, type Announcement, type Dividend, type Indicator, type PeerValuation, type Peers,
+  DEMO, api, runTool, useApi, type Announcement, type Dividend, type Indicator, type PeerValuation, type Peers, type ReportExcerpts,
   type StockProfile, type StockQuote, type StockValuation, type Technicals, type ValuationBand, type ValuationHistory,
 } from '../api'
 import { AskAi } from '../components/AskAi'
+import { Candles, SeriesLine, aggregate } from '../components/charts'
 import { CheckpointTable } from '../components/Checkpoints'
 import { SecuritySearch, securityPath } from '../components/SecuritySearch'
 import { DEMO_DEFAULTS } from '../demo/defaults'
-import { Button, Callout, Segmented, Tag } from '../components/kit'
+import { Button, Callout, Drawer, Segmented, Tag } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
 
-const RANGES = [['21', '近 1 月'], ['63', '近 3 月'], ['125', '近半年'], ['250', '近 1 年']] as const
+const RANGES = [['63', '近 3 月'], ['125', '近半年'], ['250', '近 1 年'], ['500', '近 2 年']] as const
+const PERIODS = [['day', '日 K'], ['week', '周 K'], ['month', '月 K']] as const
 const TABS = [['overview', '概览与走势'], ['financials', '财务'], ['valuation', '估值'], ['peers', '同行'], ['news', '公告']] as const
 const num = (v: number | null | undefined, digits = 2) => (v == null ? '—' : v.toFixed(digits))
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${v}%`)
@@ -94,9 +96,17 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
                 <Metric label="成交额（亿元）" value={num(q.amount_yi)} hint={q.turnover_pct == null ? undefined : `换手 ${q.turnover_pct}%`} />
               </Metrics>
             </div>
-            <p className="mt-2 text-[13px] text-steel">行情时间 {q.quote_time}</p>
+            <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] tabular-nums text-steel">
+              <span>今开 <b className={cn('font-medium', signClass(q.open - q.prev_close))}>{num(q.open)}</b></span>
+              <span>最高 <b className={cn('font-medium', signClass(q.high - q.prev_close))}>{num(q.high)}</b></span>
+              <span>最低 <b className={cn('font-medium', signClass(q.low - q.prev_close))}>{num(q.low)}</b></span>
+              <span>昨收 <b className="font-medium text-ink">{num(q.prev_close)}</b></span>
+              <span>振幅 <b className="font-medium text-ink">{q.prev_close ? `${(((q.high - q.low) / q.prev_close) * 100).toFixed(2)}%` : '—'}</b></span>
+              <span>行情时间 {q.quote_time}</span>
+            </p>
           </div>
 
+          <ThesisCard code={code} name={q.name} />
           <StockCheckpoints code={code} />
           <div className="border-b border-hairline"><Segmented value={tab} onChange={setTab} options={TABS} /></div>
           {tab === 'overview' ? <OverviewTab code={code} /> : null}
@@ -111,17 +121,64 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
 }
 
 /** 此前的研究给这只股票设过的验证点：当初的判断现在还成立几条。没有就不占地方。 */
+const STANCE_TONE: Record<string, 'pink' | 'green' | 'gray'> = { 看多: 'pink', 中性偏多: 'pink', 看空: 'green', 中性偏空: 'green', 中性: 'gray' }
+
+/**
+ * 判断卡：这只股票上，我们现在的结论是什么、什么时候下的、后来验证得怎么样。
+ * 行情软件能给你所有的数，但不会替你记住"你当时为什么这么看、后来对不对"。
+ */
+const ThesisCard: React.FC<{ code: string; name: string }> = ({ code, name }) => {
+  const thesis = useApi(() => api.thesis(code), [code])
+  const t = thesis.data
+  if (thesis.loading || thesis.error || !t) return null
+  if (!t.latest) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-hairline-strong px-4 py-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-ink">还没有研究过{name}</p>
+          <p className="mt-0.5 text-[13px] text-steel">约一分钟：基本面、估值、走势、行业四个方向并行取证，每个数字可追溯，并留下可事后核对的验证点。</p>
+        </div>
+        <AskAi label="开始研究" question={`帮我深度分析一下${name}（${code}）`} />
+      </div>
+    )
+  }
+  const cp = t.checkpoints
+  return (
+    <div className="rounded-lg border border-hairline bg-surface-soft px-5 py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[13px] font-medium text-steel">当前判断</span>
+        {t.latest.stance ? <Tag tone={STANCE_TONE[t.latest.stance] ?? 'gray'}>{t.latest.stance}</Tag> : null}
+        <span className="font-mono text-xs text-stone">{t.latest.date.slice(0, 10)}</span>
+        {cp.broken ? <Tag tone="pink">已有 {cp.broken} 条判断被证伪</Tag> : cp.held ? <Tag tone="green">{cp.held} 条已成立</Tag> : null}
+        {cp.pending ? <span className="text-[13px] text-steel">{cp.pending} 条待核对</span> : null}
+        <span className="ml-auto flex items-center gap-2">
+          <Link to={`/history/${t.latest.id}`} className="text-[13px] text-steel hover:text-ink hover:underline">看完整研究</Link>
+          <AskAi label="重新研究" question={`帮我深度分析一下${name}（${code}）`} />
+        </span>
+      </div>
+      <p className="mt-2 text-[15px] leading-relaxed text-charcoal">{t.latest.conclusion}{t.latest.conclusion.length >= 320 ? '……' : ''}</p>
+      {t.broken.map((c) => (
+        <p key={c.id} className="mt-2 text-[13px] text-on-rose">被证伪：{c.metric_label} {c.op === '>=' ? '≥' : '≤'} {c.threshold}%，实际 {c.actual_value}%（{c.actual_as_of}）——上面的结论是在这之前下的，建议重新研究。</p>
+      ))}
+    </div>
+  )
+}
+
 const StockCheckpoints: React.FC<{ code: string }> = ({ code }) => {
   const list = useApi(() => api.checkpoints(code), [code])
   const items = list.data ?? []
   if (!items.length) return null
   const held = items.filter((c) => c.status === 'held').length
   const broken = items.filter((c) => c.status === 'broken').length
+  // 默认折成一行，不挡住下面的走势图；有被证伪的才自动展开
   return (
-    <Section title="此前研究的验证点" hint={`共 ${items.length} 条 · 成立 ${held} · 被证伪 ${broken} · 待核对 ${items.length - held - broken}`}
-      actions={<Link to="/review" className="text-[13px] text-steel hover:text-ink">验证与复盘</Link>}>
-      <CheckpointTable items={items.slice(0, 6)} showStock={false} />
-    </Section>
+    <details open={broken > 0} className="rounded-lg border border-hairline px-4 py-3">
+      <summary className="cursor-pointer select-none text-sm text-charcoal">
+        此前研究给它设过 <b className="font-semibold text-ink">{items.length}</b> 个验证点
+        <span className="ml-2 text-[13px] text-steel">成立 {held} · 被证伪 {broken} · 待核对 {items.length - held - broken}</span>
+      </summary>
+      <div className="mt-3"><CheckpointTable items={items.slice(0, 6)} showStock={false} /></div>
+    </details>
   )
 }
 
@@ -130,7 +187,10 @@ const OverviewTab: React.FC<{ code: string }> = ({ code }) => {
   const kline = useApi(() => api.stockKline(code, Number(days)), [code, days])
   const valuation = useTool<StockValuation>('get_stock_valuation', code)
   const tech = useTool<Technicals>('get_technical_indicators', code)
+  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day')
+  const thesis = useApi(() => api.thesis(code), [code])
   const points = kline.data ? [...kline.data.data].reverse() : []
+  const marks = points.length ? (thesis.data?.research_dates ?? []).filter((d) => d >= points[0].nav_date).map((date) => ({ date, label: '研究' })) : []
   const first = points[0]?.nav
   const last = points[points.length - 1]?.nav
   const periodReturn = first && last ? ((last - first) / first) * 100 : null
@@ -139,20 +199,11 @@ const OverviewTab: React.FC<{ code: string }> = ({ code }) => {
 
   return (
     <>
-      <Section title="日线走势" hint={points.length ? `前复权收盘价 · ${points[0].nav_date} 至 ${points[points.length - 1].nav_date} · 区间 ${signed(periodReturn, 2, '%')}` : undefined}
+      <Section title="日线走势" hint={points.length ? `${(kline.data?.price_basis ?? '前复权收盘价').replace('收盘价', '')}日 K · ${points[0].nav_date} 至 ${points[points.length - 1].nav_date} · 区间 ${signed(periodReturn, 2, '%')}` : undefined}
         actions={<Segmented value={days} onChange={setDays} options={RANGES} />}>
         <DataState loading={kline.loading && !points.length} error={kline.error} onRetry={kline.reload} empty={!kline.loading && points.length === 0 ? '没有取到日线数据' : undefined}>
-          <div className="h-[280px] rounded-lg border border-hairline p-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={points} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-                <CartesianGrid stroke="var(--hairline-soft)" vertical={false} />
-                <XAxis dataKey="nav_date" tick={AXIS} tickLine={false} axisLine={{ stroke: 'var(--hairline)' }} minTickGap={48} tickFormatter={(v: string) => v.slice(5)} />
-                <YAxis domain={['auto', 'auto']} tick={AXIS} tickLine={false} axisLine={false} width={56} tickFormatter={(v: number) => v.toFixed(v >= 100 ? 0 : 2)} />
-                <Tooltip formatter={(v) => [Number(v).toFixed(2), '收盘（前复权）']} labelStyle={{ color: 'var(--steel)' }} contentStyle={TOOLTIP} />
-                <Line type="monotone" dataKey="nav" stroke="var(--primary)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <div className="mb-2 flex"><Segmented value={period} onChange={(v) => setPeriod(v as 'day' | 'week' | 'month')} options={PERIODS} /></div>
+          <Candles data={aggregate(points, period)} marks={marks} />
         </DataState>
         {range?.range_position_pct != null ? (
           <div className="mt-4 max-w-[560px]">
@@ -235,6 +286,27 @@ const FinancialsTab: React.FC<{ code: string }> = ({ code }) => {
         </Section>
       ) : null}
 
+      {reports.length > 1 ? (
+        <Section title="利润率与负债率" hint="各报告期，从早到晚（%）">
+          <div className="h-[220px] rounded-lg border border-hairline p-3">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={[...reports].reverse().map((r) => ({ period: r.report_name, 毛利率: r.gross_margin_pct, 净利率: r.net_margin_pct, 资产负债率: r.debt_ratio_pct }))} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+                <CartesianGrid stroke="var(--hairline-soft)" vertical={false} />
+                <XAxis dataKey="period" tick={AXIS} tickLine={false} axisLine={{ stroke: 'var(--hairline)' }} />
+                <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} tickFormatter={(v: number) => `${v}%`} />
+                <Tooltip formatter={(v, name) => [`${Number(v).toFixed(2)}%`, name]} labelStyle={{ color: 'var(--steel)' }} contentStyle={TOOLTIP} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="毛利率" stroke="var(--primary)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="净利率" stroke="var(--warning)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="资产负债率" stroke="var(--stone)" strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Section>
+      ) : null}
+
+      <ReportExcerptSection code={code} />
+
       <Section title="分红记录" hint="股息率为方案公布时按当时股价计算的数值">
         <DataState loading={div.loading} error={div.error} onRetry={div.reload} empty={div.missing || (!div.loading && !div.value?.dividends.length ? '没有取到分红记录' : undefined)}>
           <Table head={[{ label: '报告期' }, { label: '方案' }, { label: '股息率', right: true }, { label: '除权除息日', right: true }]}>
@@ -278,6 +350,19 @@ const Band: React.FC<{ label: string; band: ValuationBand }> = ({ label, band })
   )
 }
 
+const ValuationChart: React.FC<{ code: string; median?: number }> = ({ code, median }) => {
+  const series = useApi(() => api.valuationSeries(code), [code])
+  const [metric, setMetric] = useState('pe')
+  const rows = (series.data?.data ?? []).map((r) => ({ date: r.date, value: metric === 'pe' ? r.pe : r.pb }))
+  if (series.error || (!series.loading && rows.length < 2)) return null
+  return (
+    <div className="mt-4">
+      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] text-steel">近五年走势（每周一个点）</span><Segmented value={metric} onChange={setMetric} options={[['pe', 'PE'], ['pb', 'PB']] as const} /></div>
+      <DataState loading={series.loading}><SeriesLine data={rows} median={metric === 'pe' ? median : undefined} label={metric.toUpperCase()} /></DataState>
+    </div>
+  )
+}
+
 const ValuationTab: React.FC<{ code: string }> = ({ code }) => {
   const hist = useTool<ValuationHistory>('get_valuation_history', code)
   const peer = useTool<PeerValuation>('compare_peers_valuation', code)
@@ -294,6 +379,7 @@ const ValuationTab: React.FC<{ code: string }> = ({ code }) => {
                 <Band label="市净率 PB" band={h.pb} />
                 <Band label="市销率 PS（TTM）" band={h.ps} />
               </div>
+              <ValuationChart code={code} median={h.pe.median} />
               <p className="mt-3 text-[13px] text-steel">分位是当前值在这段时间自身历史里的位置（0% 最便宜，100% 最贵）。只和自己的过去比，不代表绝对便宜或贵——盈利下滑时低分位也可能是合理的。</p>
             </>
           ) : null}
@@ -342,17 +428,67 @@ const PeersTab: React.FC<{ code: string }> = ({ code }) => {
 const NewsTab: React.FC<{ code: string }> = ({ code }) => {
   const ann = useTool<{ announcements: Announcement[] }>('get_stock_announcements', code)
   const list = ann.value?.announcements ?? []
+  const [reading, setReading] = useState<Announcement | null>(null)
   return (
-    <Section title="公司公告" hint="来自东方财富公告，点标题看原文">
+    <Section title="公司公告" hint="点标题直接读正文；Agent 研究时读的也是这份文本">
       <DataState loading={ann.loading} error={ann.error} onRetry={ann.reload} empty={ann.missing || (!ann.loading && list.length === 0 ? '没有取到公告' : undefined)}>
         <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
           {list.map((a) => (
             <li key={a.url} className="flex items-baseline gap-4 px-4 py-2.5">
               <span className="shrink-0 font-mono text-xs text-stone">{a.date}</span>
-              <a href={a.url} target="_blank" rel="noreferrer" className="min-w-0 text-sm text-charcoal hover:text-ink hover:underline">{a.title}</a>
+              <button type="button" onClick={() => setReading(a)} className="min-w-0 flex-1 text-left text-sm text-charcoal hover:text-ink hover:underline">{a.title}</button>
+              <a href={a.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-steel hover:text-ink">原文</a>
             </li>
           ))}
         </ul>
+      </DataState>
+      <Drawer open={reading != null} onClose={() => setReading(null)} title="公告正文" width="max-w-2xl">
+        {reading ? <FilingReader key={reading.art_code} filing={reading} /> : null}
+      </Drawer>
+    </Section>
+  )
+}
+
+const FilingReader: React.FC<{ filing: Announcement }> = ({ filing }) => {
+  const [page, setPage] = useState(1)
+  const doc = useApi(() => api.filing(filing.art_code, page), [filing.art_code, page])
+  const d = doc.data
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h3 className="text-base font-semibold leading-snug text-ink">{filing.title}</h3>
+        <p className="mt-1 text-[13px] text-steel">{filing.date}{d ? ` · 共 ${d.total_chars.toLocaleString()} 字` : ''}</p>
+      </div>
+      <DataState loading={doc.loading} error={doc.error} onRetry={doc.reload}>
+        {d ? <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-charcoal">{d.text}</pre> : null}
+      </DataState>
+      {d?.pages && d.pages > 1 ? (
+        <div className="flex items-center gap-3 text-[13px] text-steel">
+          <Button size="xs" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</Button>
+          <span className="tabular-nums">{page} / {d.pages}</span>
+          <Button size="xs" variant="secondary" disabled={page >= d.pages} onClick={() => setPage((p) => p + 1)}>下一页</Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+const ReportExcerptSection: React.FC<{ code: string }> = ({ code }) => {
+  const report = useTool<ReportExcerpts>('read_latest_report', code)
+  const [topic, setTopic] = useState('')
+  const r = report.value
+  const current = r?.sections.find((s) => s.topic === topic) ?? r?.sections[0]
+  return (
+    <Section title="最新定期报告怎么说" hint={r ? `${r.title} · ${r.date}` : '公司在报告正文里的自我陈述，不等于事实'}
+      actions={r ? <a href={r.url} target="_blank" rel="noreferrer" className="text-[13px] text-steel hover:text-ink">原文</a> : undefined}>
+      <DataState loading={report.loading} error={report.error} onRetry={report.reload} empty={report.missing || undefined}>
+        {r && current ? (
+          <>
+            <div className="mb-3 border-b border-hairline"><Segmented value={current.topic} onChange={setTopic} options={r.sections.map((s) => [s.topic, s.topic] as const)} /></div>
+            <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-soft p-4 font-sans text-sm leading-relaxed text-charcoal">{current.excerpt}……</pre>
+            <p className="mt-2 text-[13px] text-steel">{r.note}。</p>
+          </>
+        ) : null}
       </DataState>
     </Section>
   )
