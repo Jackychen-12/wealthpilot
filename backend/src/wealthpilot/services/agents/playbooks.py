@@ -63,6 +63,26 @@ def _stock_tasks(security: dict, dims: tuple[str, ...], prefix: str) -> list[Tas
     return [Task(id=f"{prefix}{dim}", agent=dim, goal=_DIMENSIONS[dim].format(**security)) for dim in dims]
 
 
+def build_skill_tasks(skill, securities: list[dict], holdings: list[PortfolioHolding], question: str) -> list[Task]:
+    """按用户写的技能生成任务图。需要股票而没解析出来时返回 []，退回常规规划。"""
+    stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
+    if skill.needs in ("stock", "stocks") and not stocks:
+        return []
+    if skill.needs == "holdings" and not holdings:
+        return []
+    targets = stocks[:1] if skill.needs == "stock" else stocks[:3] if skill.needs == "stocks" else [None]
+    tasks: list[Task] = []
+    for i, target in enumerate(targets):
+        subject = f"{target['name']}（{target['code']}）" if target else "用户的问题"
+        for agent in skill.agents:
+            how = skill.agent_goal(agent) or skill.description
+            # "研究X（代码）"这个开头是约定：验证点靠它认出这轮研究了哪只股票
+            goal = (f"研究{subject}，按「{skill.label or skill.name}」的方法：{how}" if target
+                    else f"按「{skill.label or skill.name}」的方法处理：{question}。{how}")
+            tasks.append(Task(id=f"k{i + 1}_{agent}", agent=agent, goal=goal))
+    return tasks[:6]
+
+
 def build_tasks(playbook: str, securities: list[dict], holdings: list[PortfolioHolding],
                 nav_data: dict[str, float], question: str) -> list[Task]:
     """按模板生成任务图。条件不满足（比如没解析出股票）时返回 []，由调用方退回自由规划。"""

@@ -135,7 +135,7 @@ export const api = {
   removeCheckpoint: (id: number) => request<unknown>(`/api/checkpoints/${id}`, { method: 'DELETE' }),
   proposals: () => request<Proposal[]>('/api/proposals'),
   authorizeProposal: (id: number, shares: number, price: number | null) => request<Proposal>(`/api/proposals/${id}/authorize`, json('POST', price == null ? { shares } : { shares, price })),
-  rejectProposal: (id: number) => request<Proposal>(`/api/proposals/${id}/reject`, { method: 'POST' }),
+  rejectProposal: (id: number, reason = '') => request<Proposal>(`/api/proposals/${id}/reject`, json('POST', { reason })),
   broker: () => request<BrokerOverview>('/api/broker'),
   brokerOrders: () => request<BrokerOrder[]>('/api/broker/orders'),
   placeOrder: (o: { code: string; name: string; side: 'buy' | 'sell'; shares: number; asset_type: string }) => request<BrokerOrder>('/api/broker/orders', json('POST', o)),
@@ -151,6 +151,14 @@ export const api = {
   desk: () => request<Desk>('/api/desk'),
   thesis: (code: string) => request<Thesis>(`/api/research/latest?code=${code}`),
   movers: () => request<{ trade_date: string; min_mv_yi: number; gainers: Mover[]; losers: Mover[] }>('/api/market/movers'),
+  memory: () => request<MemoryItem[]>('/api/memory'),
+  addMemory: (content: string) => request<MemoryItem>('/api/memory', json('POST', { content })),
+  removeMemory: (id: number) => request<unknown>(`/api/memory/${id}`, { method: 'DELETE' }),
+  audit: () => request<{ events: AuditEntry[]; integrity: { ok: boolean; count: number; broken_at: number | null } }>('/api/audit?limit=200'),
+  skills: () => request<{ skills: SkillInfo[]; invalid: { path: string; problems: string[] }[]; dirs: string[]; template: string }>('/api/skills'),
+  skill: (name: string) => request<SkillInfo>(`/api/skills/${name}`),
+  saveSkill: (name: string, content: string) => request<SkillInfo>(`/api/skills/${name}`, json('PUT', { content })),
+  removeSkill: (name: string) => request<unknown>(`/api/skills/${name}`, { method: 'DELETE' }),
   connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
   testConnector: (name: string) => request<ConnectorTest>(`/api/connectors/${name}/test`, { method: 'POST' }),
   fundNav: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/fund/${code}/nav?days=${days}`),
@@ -247,6 +255,10 @@ export interface Desk { stocks: DeskStock[]; todo: { proposals: number; broken: 
 export interface Thesis { code: string; latest: { id: number; date: string; status: string; playbook: string; conclusion: string; stance: string } | null; research_dates: string[]
   checkpoints: { total: number; pending: number; held: number; broken: number }; broken: Checkpoint[] }
 export interface Mover { code: string; name: string; industry: string; price: number | null; change_pct: number; total_mv_yi: number | null }
+export interface MemoryItem { id: number; kind: 'preference' | 'decision' | 'note'; code: string; content: string; source: string; created_at: string }
+export interface AuditEntry { id: number; at: string; kind: string; actor: string; summary: string; payload: Record<string, unknown>; hash: string }
+export interface SkillInfo { name: string; label: string; description: string; when_to_use: string; triggers: string[]; needs: string; agents: string[]; sections: string[]; criteria: string[]; path: string; content?: string }
+export interface Usage { calls: number; input_tokens: number; cached_tokens: number; output_tokens: number; cache_hit_pct: number }
 export interface ConnectorInfo { name: string; label: string; kind: string; transport: string; endpoint: string; enabled: boolean; description: string; auth: string }
 export interface ConnectorTest { ok: boolean; error?: string; allowed_count?: number; blocked_count?: number
   tools: { name: string; description: string; allowed: boolean; reason: string }[] }
@@ -282,7 +294,7 @@ export interface StreamEvent {
   evidence?: { id: string; tool: string; status: string; input: unknown; output: unknown; provenance?: { as_of?: Record<string, string | null>; sources?: { url?: string }[] } }
   gate?: string; passed?: boolean; issues?: string[]; attempt?: number
   agents?: string[]; ungrounded?: string[]; follow_ups?: string[]
-  meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string }
+  meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string; usage?: Usage }
 }
 
 export async function* streamChat(

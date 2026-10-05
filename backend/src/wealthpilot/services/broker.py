@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 
 from wealthpilot.models.broker import Order, PaperAccount, PaperPosition
 from wealthpilot.models.portfolio import PortfolioHolding
+from wealthpilot.services import memory
 from wealthpilot.services.assets import fetch_sina_quotes
 from wealthpilot.services.stocks import fetch_stock_profile, fetch_stock_quote
 from wealthpilot.settings import get_settings
@@ -62,6 +63,8 @@ async def place_order(db: Session, user_id: int, *, code: str, side: str, shares
         db.add(order)
         db.commit()
         db.refresh(order)
+        memory.record(db, user_id, "order/rejected", f"{side} {order.name or code} {order.shares} 股：{reason}"[:200],
+                      {"order_id": order.id, "code": code, "side": side, "shares": order.shares, "proposal_id": proposal_id}, actor="system")
         return order
 
     if side not in ("buy", "sell") or order.shares <= 0:
@@ -108,6 +111,9 @@ async def place_order(db: Session, user_id: int, *, code: str, side: str, shares
     db.add(order)
     db.commit()
     db.refresh(order)
+    memory.record(db, user_id, "order/filled", f"{side} {order.name} {order.shares} 股 @ {order.price}",
+                  {"order_id": order.id, "broker": order.broker, "code": code, "side": side, "shares": order.shares, "price": order.price,
+                   "fee": order.fee, "proposal_id": proposal_id}, actor="user")
     return order
 
 
@@ -169,6 +175,8 @@ async def sync_holdings(db: Session, user_id: int) -> dict:
                                 source="broker"))
         result["added"] += 1
     db.commit()
+    if result["added"] or result["updated"] or result["removed"]:
+        memory.record(db, user_id, "holdings/synced", f"新增 {result['added']} 更新 {result['updated']} 移除 {result['removed']}", result)
     return result
 
 

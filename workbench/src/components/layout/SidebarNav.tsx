@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, Search, Settings, ShieldCheck, Star, Sun, UserRoundCog, Wallet, Zap } from 'lucide-react'
+import { BookOpenText, Brain, BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, ScrollText, Search, Settings, ShieldCheck, Star, Sun, UserRoundCog, Wallet, Zap } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
@@ -45,10 +45,13 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   ] },
   { label: '设置', items: [
     { to: '/settings', label: '设置', icon: Settings },
+    { to: '/skills', label: '研究方法', icon: BookOpenText },
+    { to: '/memory', label: 'AI 记住的事', icon: Brain },
     { to: '/profile', label: '风险画像', icon: UserRoundCog },
     { to: '/connectors', label: '数据连接', icon: Cable },
     { to: '/report', label: '周报', icon: FileText },
     { to: '/history', label: '研究记录', icon: NotebookText },
+    { to: '/audit', label: '审计日志', icon: ScrollText },
   ] },
 ]
 const DEFAULT_COLLAPSED = ['分析工具', '设置']

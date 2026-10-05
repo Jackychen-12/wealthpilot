@@ -92,12 +92,14 @@ QUESTIONS = [
     "帮我诊断一下我的持仓",
     "帮我筛选市盈率低于15、ROE高于15%的大市值股票",
     "110011 最新净值多少，近一个月表现如何",
+    # 用户自己写的方法：话里点到「高股息检查」，就按 skills/dividend-check.md 来；顺带说一条要记住的纪律
+    "记住，我只做长线，单只股票不超过两成仓位。用「高股息检查」的方法看看贵州茅台",
     # 放在最后：复盘的是前面几次研究设下的验证点
     "复盘一下之前的研究：验证点成立了多少，哪些判断被证伪了",
 ]
 # 研究录完之后才有内容的接口
 AFTER_CHATS = ["/api/checkpoints", "/api/checkpoints?code=600519", "/api/checkpoints/scorecard", "/api/proposals",
-               "/api/desk", "/api/research/latest?code=600519"]
+               "/api/desk", "/api/research/latest?code=600519", "/api/memory", "/api/audit?limit=200", "/api/skills"]
 HISTORY = "/api/research/history"
 
 

@@ -61,6 +61,8 @@ const ResearchPage: React.FC = () => {
     setShowProcess((v) => { try { localStorage.setItem(PROCESS_KEY, v ? '0' : '1') } catch { /* 只在本次生效 */ } return !v })
   }
   const scrollRef = useRef<HTMLDivElement>(null)
+  const skillList = useApi(api.skills)
+  const skillQuestions = (skillList.data?.skills ?? []).map((k) => `用「${k.label}」的方法看看贵州茅台`)
   const busy = turns.some((t) => t.running)
   const current = turns.find((t) => t.id === selected) ?? turns[turns.length - 1]
   const lastLength = turns[turns.length - 1]?.answer.length
@@ -105,7 +107,7 @@ const ResearchPage: React.FC = () => {
                     <details className="mt-4 text-sm text-slate">
                       <summary className="cursor-pointer select-none text-[13px] text-steel hover:text-ink">还能问什么</summary>
                       <div className="mt-1">
-                        {MORE_EXAMPLES.map((q) => (
+                        {[...skillQuestions, ...MORE_EXAMPLES].map((q) => (
                           <button key={q} type="button" onClick={() => send(q)} className="-mx-1.5 flex items-center gap-1.5 rounded-sm px-1.5 py-1 text-left hover:bg-hover hover:text-ink">
                             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />{q}
                           </button>
@@ -134,7 +136,7 @@ const ResearchPage: React.FC = () => {
                       {t.running
                         ? <Tag tone="purple"><Dot tone="purple" pulse className="h-1.5 w-1.5" />{phase(t)}</Tag>
                         : st ? <Tag tone={st.tone}>{st.label}</Tag> : null}
-                      {PLAYBOOK[t.playbook] ? <Tag tone="purple">{PLAYBOOK[t.playbook]}</Tag> : null}
+                      {PLAYBOOK[t.playbook] || t.playbook.startsWith('skill:') ? <Tag tone="purple">{PLAYBOOK[t.playbook] ?? `方法：${t.intent}`}</Tag> : null}
                       {t.securities.map((s) => (
                         <Link key={s.code} to={securityPath(s)} onClick={(e) => e.stopPropagation()} title="已解析出的证券，点击查看详情"
                           className="rounded-sm bg-tint-gray px-1.5 py-0.5 text-xs text-on-gray hover:brightness-95">{s.name} <span className="font-mono">{s.code}</span></Link>
@@ -142,6 +144,7 @@ const ResearchPage: React.FC = () => {
                       <span className="tabular-nums">{t.seconds.toFixed(0)} 秒</span>
                       <span>·</span>
                       <span>{t.evidence.length} 条证据</span>
+                      {t.usage?.input_tokens ? <span title={`输入 ${t.usage.input_tokens.toLocaleString()} token，其中 ${t.usage.cached_tokens.toLocaleString()} 命中缓存；输出 ${t.usage.output_tokens.toLocaleString()}`}>· {Math.round((t.usage.input_tokens + t.usage.output_tokens) / 1000)}k token（缓存 {t.usage.cache_hit_pct}%）</span> : null}
                       <Button size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); research.select(t.id); toggleProcess() }}>
                         <ListTree className="h-3.5 w-3.5" />过程
                       </Button>

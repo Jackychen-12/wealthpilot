@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -23,6 +24,34 @@ class CompletionResult:
     stop_reason: str = "end_turn"
     tool_calls: list[ToolCall] = field(default_factory=list)
     raw_content: list[dict] = field(default_factory=list)
+
+
+class Usage:
+    """一个客户端实例上累计的用量。编排器每轮研究新建一个客户端，所以这就是"这一轮花了多少"。
+
+    cached 是命中上下文缓存的输入 token：系统提示和工具定义保持不变时，同一个 Agent 的
+    后续调用只为新增的部分按全价付费。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.calls = self.input = self.cached = self.output = 0
+
+    def add(self, input_tokens: int = 0, cached: int = 0, output: int = 0) -> None:
+        with self._lock:
+            self.calls += 1
+            self.input += int(input_tokens or 0)
+            self.cached += int(cached or 0)
+            self.output += int(output or 0)
+
+    def as_dict(self) -> dict:
+        return {"calls": self.calls, "input_tokens": self.input, "cached_tokens": self.cached, "output_tokens": self.output,
+                "cache_hit_pct": round(self.cached / self.input * 100, 1) if self.input else 0.0}
+
+
+def json_mode(client) -> dict:
+    """支持 JSON 输出模式的客户端加上这个参数：规划、审核、提取这些只要 JSON 的调用不再靠正则去抠。"""
+    return {"json_mode": True} if getattr(client, "supports_json_mode", False) else {}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -166,6 +195,7 @@ class AnthropicStreamContext:
 class AnthropicAIClient:
     def __init__(self, api_key: str, timeout: float | None = None):
         self._client = Anthropic(api_key=api_key, **({"timeout": timeout} if timeout else {}))
+        self.usage = Usage()
 
     @staticmethod
     def _kwargs(model, max_tokens, system, messages, tools, tool_choice) -> dict:
@@ -182,6 +212,10 @@ class AnthropicAIClient:
                tools: list[dict] | None = None, tool_choice: str | None = None) -> CompletionResult:
         response = self._client.messages.create(
             **self._kwargs(model, max_tokens, system, messages, tools, tool_choice))
+        u = getattr(response, "usage", None)
+        if u is not None and hasattr(self, "usage"):
+            cached = getattr(u, "cache_read_input_tokens", 0) or 0
+            self.usage.add((getattr(u, "input_tokens", 0) or 0) + cached, cached, getattr(u, "output_tokens", 0))
         return _anthropic_response_to_result(response)
 
     def stream(self, *, model: str, max_tokens: int, system, messages: list[dict],
@@ -214,7 +248,8 @@ class DeepSeekStreamContext:
             messages = [{"role": "system", "content": sys_text}] + messages
         messages = _convert_messages_to_openai(messages)
 
-        call_kwargs = dict(self._kwargs, messages=messages, stream=True)
+        self._usage = self._kwargs.pop("usage", None)
+        call_kwargs = dict(self._kwargs, messages=messages, stream=True, stream_options={"include_usage": True})
         if tools:
             call_kwargs["tools"] = _convert_tools_to_openai(tools)
             if tool_choice:
@@ -229,6 +264,8 @@ class DeepSeekStreamContext:
     @property
     def text_stream(self) -> Iterator[str]:
         for chunk in self._stream:
+            if getattr(chunk, "usage", None) and self._usage is not None:
+                _record_openai_usage(self._usage, chunk.usage)
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -289,14 +326,21 @@ class DeepSeekStreamContext:
 _DEEPSEEK_MAX_OUTPUT = 8192
 
 
+def _record_openai_usage(usage: Usage, u) -> None:
+    usage.add(getattr(u, "prompt_tokens", 0), getattr(u, "prompt_cache_hit_tokens", 0) or 0, getattr(u, "completion_tokens", 0))
+
+
 class DeepSeekAIClient:
+    supports_json_mode = True
+
     def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com",
                  timeout: float | None = None):
+        self.usage = Usage()
         self._client = OpenAI(api_key=api_key, base_url=base_url,
                               **({"timeout": timeout} if timeout else {}))
 
     def create(self, *, model: str, max_tokens: int, system, messages: list[dict],
-               tools: list[dict] | None = None, tool_choice: str | None = None) -> CompletionResult:
+               tools: list[dict] | None = None, tool_choice: str | None = None, json_mode: bool = False) -> CompletionResult:
         oai_messages = list(messages)
         sys_text = _extract_system_text(system)
         if sys_text:
@@ -310,7 +354,11 @@ class DeepSeekAIClient:
             if tool_choice:
                 kwargs["tool_choice"] = tool_choice
 
+        if json_mode and not tools:
+            kwargs["response_format"] = {"type": "json_object"}
         response = self._client.chat.completions.create(**kwargs)
+        if getattr(response, "usage", None):
+            _record_openai_usage(self.usage, response.usage)
         return self._to_result(response)
 
     def stream(self, *, model: str, max_tokens: int, system, messages: list[dict],
@@ -318,7 +366,7 @@ class DeepSeekAIClient:
         return DeepSeekStreamContext(
             self._client,
             model=model, max_tokens=min(max_tokens, _DEEPSEEK_MAX_OUTPUT),
-            system=system, messages=messages, tools=tools, tool_choice=tool_choice,
+            system=system, messages=messages, tools=tools, tool_choice=tool_choice, usage=self.usage,
         )
 
     @staticmethod

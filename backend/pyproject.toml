@@ -25,6 +25,7 @@ dependencies = [
     "rich>=13.7.0",
     "prompt-toolkit>=3.0.43",
     "pypdf>=5.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]

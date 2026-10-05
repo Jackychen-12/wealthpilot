@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     run_max_tool_calls: int = Field(default=24, ge=1)
     ai_timeout_seconds: float = Field(default=60, gt=0)
 
+    skills_dir: Path = Field(default=Path("./skills"), description="技能目录：用户自己写的研究方法（Markdown）")
+    light_model: str = Field(default="", description="提取证券名、审核证据、提出验证点等轻活用的模型；留空则与主模型相同")
     checkpoints_enabled: bool = Field(default=True, description="研究发布后提出可事后核对的验证点")
     advice_mode: bool = Field(
         default=False,

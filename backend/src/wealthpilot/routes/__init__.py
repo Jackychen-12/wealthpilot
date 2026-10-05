@@ -17,6 +17,7 @@ from wealthpilot.routes.report import router as report_router
 from wealthpilot.routes.research import router as research_router
 from wealthpilot.routes.review import router as review_router
 from wealthpilot.routes.scenario import router as scenario_router
+from wealthpilot.routes.skills import router as skills_router
 from wealthpilot.routes.tools import router as tools_router
 
 api_router = APIRouter(prefix="/api")
@@ -36,3 +37,4 @@ api_router.include_router(research_router)
 api_router.include_router(review_router)
 api_router.include_router(broker_router)
 api_router.include_router(config_router)
+api_router.include_router(skills_router)
