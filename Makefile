@@ -52,7 +52,7 @@ backend:         ## 仅启动后端
 test:            ## 运行测试
 	cd backend && uv run pytest -v
 
-docker:          ## Docker Compose 启动
+docker:          ## Docker Compose 启动（一个容器，http://localhost:8000）
 	@test -f backend/.env || cp backend/.env.example backend/.env
 	docker compose up --build
 

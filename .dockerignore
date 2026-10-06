@@ -4,3 +4,5 @@
 backend/data
 backend/.env
 .git
+**/dist-app
+backend/connectors.json
