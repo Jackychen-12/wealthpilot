@@ -28,8 +28,10 @@ class FakeBackend(tui.Backend):
 
     def __init__(self, events):
         self.events = events
+        self.calls: list[dict] = []
 
-    async def chat(self, message, history, conversation_id):
+    async def chat(self, message, history, conversation_id, *, depth="auto", rewrite_of=None):
+        self.calls.append({"message": message, "depth": depth, "rewrite_of": rewrite_of})
         for e in self.events:
             yield e
 
@@ -89,3 +91,145 @@ async def test_local_backend_serves_the_api_in_process():
         await backend.close()
         from wealthpilot.main import app
         app.dependency_overrides.clear()
+
+
+# ── 对话：深度、改写、调出历史 ──────────────────────────
+
+LONG = {"type": "done", "content": "## 结论\n基本面稳。\n" + "正文。" * 200,
+        "meta": {"status": "passed", "message_id": 42, "summary": {"conclusion": "基本面稳，估值不贵。", "stance": "中性偏多", "truncated": False}}}
+
+
+async def test_depth_and_rewrite_reach_the_backend():
+    app, out = run_app([{"type": "plan", "intent": "个股深度研究", "tasks": [], "eta_seconds": 40}, LONG])
+    await app.handle("/quick 茅台贵不贵")
+    await app.handle("/deep 帮我分析茅台")
+    await app.handle("/depth quick")
+    await app.handle("随便问一句")
+    assert [c["depth"] for c in app.backend.calls] == ["quick", "deep", "quick"]
+    text = out.getvalue()
+    assert "预计约 40 秒" in text and "中性偏多" in text and "基本面稳，估值不贵。" in text and "/rewrite" in text
+    # 改写：带上上一次研究的消息编号，不重新取证
+    await app.handle("/rewrite 只讲风险")
+    assert app.backend.calls[-1] == {"message": "只讲风险", "depth": "quick", "rewrite_of": 42}
+    assert await app.handle("/depth turbo") is True and "只能是" in out.getvalue()
+
+
+async def test_rewrite_needs_something_to_rewrite():
+    app, out = run_app([LONG])
+    await app.handle("/rewrite 更短一点")
+    assert "还没有可以改写的研究" in out.getvalue() and app.backend.calls == []
+
+
+class ApiBackend(FakeBackend):
+    """把请求记下来并按路径回放，测命令怎么调接口。"""
+
+    def __init__(self, routes):
+        super().__init__([])
+        self.routes, self.sent = routes, []
+
+    async def request(self, method, path, **kw):
+        self.sent.append((method, path, kw.get("json")))
+        return self.routes[(method, path)]
+
+
+def run_api(routes, answers=()):
+    out = io.StringIO()
+    app = tui.App(ApiBackend(routes), Console(file=out, width=140, force_terminal=False))
+    replies = list(answers)
+
+    async def ask(prompt):
+        out.write(prompt)
+        return replies.pop(0)
+    app.ask = ask
+    return app, out
+
+
+async def test_history_can_be_recalled_and_continued():
+    app, out = run_api({("GET", "/api/research/history/7"): {
+        "id": 7, "question": "帮我分析茅台", "answer": "## 结论\n稳。", "created_at": "2026-10-01T09:30:00",
+        "meta": {"evidence": [{"id": "E-5ea7c0ffee12", "tool": "get_stock_quote", "input": {}, "output": "1258"}]}}})
+    await app.handle("/history 7")
+    assert "帮我分析茅台" in out.getvalue() and app.last_message_id == 7
+    assert app.history[0]["content"] == "帮我分析茅台" and app.evidence[0]["tool"] == "get_stock_quote"
+
+
+async def test_add_previews_then_asks_before_writing():
+    rows = [{"ok": True, "name": "贵州茅台", "code": "600519", "shares": 100.0, "cost": 1500.0, "line": "贵州茅台 100 1500", "problem": "", "asset_type": "stock"},
+            {"ok": False, "name": "", "code": "", "shares": None, "cost": None, "line": "五粮液 300", "problem": "没看到成本价", "asset_type": ""}]
+    routes = {("POST", "/api/portfolio/parse"): {"rows": rows}, ("POST", "/api/portfolio/batch"): {"added": 1, "skipped": []}}
+    app, out = run_api(routes, answers=["n"])
+    await app.handle("/add 贵州茅台 100 1500; 五粮液 300")
+    assert app.backend.sent[0][2] == {"text": "贵州茅台 100 1500\n五粮液 300"}
+    assert "没看到成本价" in out.getvalue() and "已取消" in out.getvalue()
+    assert not any(path == "/api/portfolio/batch" for _, path, _ in app.backend.sent)      # 没点头就不写
+    app, out = run_api(routes, answers=["y"])
+    await app.handle("/add 贵州茅台 100 1500; 五粮液 300")
+    assert app.backend.sent[-1] == ("POST", "/api/portfolio/batch", {"rows": [rows[0]]}) and "已添加 1 条" in out.getvalue()
+
+
+async def test_tasks_and_alerts_commands():
+    listing = {"items": [], "metrics": [], "daily_runs_max": 6, "running": True}
+    routes = {("POST", "/api/automations"): {"id": 1, "kind": "task", "schedule": "工作日 08:30", "prompt": "诊断一下我的持仓", "next_run_at": "2026-10-07T08:30:00"},
+              ("GET", "/api/automations"): listing,
+              ("GET", "/api/securities/search"): [{"code": "600519", "name": "贵州茅台", "asset_type": "stock"}]}
+    app, out = run_api(routes)
+    await app.handle("/tasks add 工作日 08:30 | 诊断一下我的持仓")
+    assert app.backend.sent[0][2] == {"kind": "task", "schedule": "工作日 08:30", "prompt": "诊断一下我的持仓"}
+    assert "已建好" in out.getvalue() and "10-07 08:30" in out.getvalue()
+    await app.handle("/tasks add 没有竖线")
+    assert "用法" in out.getvalue()
+    await app.handle("/tasks")
+    assert "只在 WealthPilot 开着时运行" in out.getvalue()
+
+    routes[("POST", "/api/automations")] = {"id": 2, "kind": "alert", "condition": "贵州茅台 最新价 ≤ 1350元", "current": 1258.6, "unit": "元"}
+    await app.handle("/alert 茅台 price<=1350")
+    assert app.backend.sent[-1][2] == {"kind": "alert", "code": "600519", "name": "贵州茅台", "metric": "price", "op": "<=", "threshold": 1350.0}
+    assert "现在是 1258.6元" in out.getvalue()
+    await app.handle("/alert 茅台 贵了告诉我")
+    assert "price 价格" in out.getvalue()
+
+
+async def test_skills_draft_is_shown_and_saved_only_on_yes():
+    draft = {"content": "---\nname: my-check\n---\n# 我的方法\n", "skill": {"name": "my-check", "label": "我的方法"}, "problems": []}
+    routes = {("POST", "/api/skills/draft"): draft, ("PUT", "/api/skills/my-check"): {"name": "my-check"},
+              ("GET", "/api/skills/gallery"): [{"label": "银行股体检", "name": "bank-check", "description": "看银行", "installed": True}]}
+    app, out = run_api(routes, answers=[""])
+    await app.handle("/skills draft 买消费股前看提价能力和渠道库存")
+    assert "name: my-check" in out.getvalue() and "没有保存" in out.getvalue()
+    assert not any(method == "PUT" for method, _, _ in app.backend.sent)
+    app, out = run_api(routes, answers=["y"])
+    await app.handle("/skills draft 买消费股前看提价能力和渠道库存")
+    assert app.backend.sent[-1] == ("PUT", "/api/skills/my-check", {"content": draft["content"]})
+    await app.handle("/skills gallery")
+    assert "银行股体检" in out.getvalue() and "已装" in out.getvalue()
+
+
+async def test_help_is_grouped_and_covers_every_command():
+    listed = [name for _, names in tui.HELP_GROUPS for name in names]
+    assert sorted(listed) == sorted(tui.COMMANDS) and len(listed) == len(set(listed))
+    app, out = run_app([])
+    for name in tui.COMMANDS:
+        if name not in ("/quit", "/help"):
+            assert hasattr(app, f"cmd_{name[1:]}"), name
+    await app.handle("/help")
+    assert "自己干活" in out.getvalue() and "/rewrite" in out.getvalue()
+
+
+async def test_first_run_setup_walks_model_then_holdings():
+    routes = {("GET", "/api/onboarding"): {"steps": [{"key": "model", "done": False}, {"key": "data", "done": False}]},
+              ("PUT", "/api/settings"): {}, ("POST", "/api/settings/test"): {"ok": True, "provider": "deepseek", "model": "deepseek-chat"},
+              ("POST", "/api/sample"): {}}
+    app, out = run_api(routes, answers=["1", "s"])
+
+    async def secret(prompt):
+        return "sk-test-not-a-real-key"
+    app.ask_secret = secret
+    await app.setup()
+    assert app.backend.sent[1] == ("PUT", "/api/settings", {"ai_provider": "deepseek", "deepseek_api_key": "sk-test-not-a-real-key"})
+    text = out.getvalue()
+    assert "模型可用" in text and "已载入示例" in text and "问第一个问题" in text
+    assert "sk-test-not-a-real-key" not in text                      # Key 不回显
+    # 都配好了就不打扰
+    app, out = run_api({("GET", "/api/onboarding"): {"steps": [{"key": "model", "done": True}, {"key": "data", "done": True}]}})
+    await app.setup()
+    assert out.getvalue() == ""

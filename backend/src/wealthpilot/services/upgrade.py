@@ -7,6 +7,7 @@ WealthPilot 从源码仓库运行，所以“升级”就是把仓库拉到最�
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -22,10 +23,16 @@ BRANCH = "main"
 KEEP_BACKUPS = 5
 
 
+_DOCKER_HOW = "这是打包好的镜像，没有源码仓库。升级：docker compose pull（或重新构建）后 docker compose up -d，数据在卷里不受影响。"
+
+
 def _git(*args: str, timeout: float = 20) -> tuple[int, str]:
     try:
-        out = subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, timeout=timeout)
-        return out.returncode, (out.stdout or out.stderr).strip()
+        # 不让 git 停下来等人输入账号密码：没有终端的后台进程里那会一直挂到超时
+        out = subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, timeout=timeout,
+                             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, stdin=subprocess.DEVNULL)
+        # 只去掉结尾的换行：git status --porcelain 每行开头的空格是有意义的
+        return out.returncode, out.stdout.rstrip() if out.stdout.strip() else out.stderr.strip()
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, type(e).__name__
 
@@ -39,7 +46,7 @@ def current() -> dict:
     if out["git"]:
         out["commit"] = _git("rev-parse", "--short", "HEAD")[1]
         out["branch"] = _git("rev-parse", "--abbrev-ref", "HEAD")[1]
-        out["dirty"] = [line[3:] for line in _git("status", "--porcelain", "--untracked-files=no")[1].splitlines() if line.strip()]
+        out["dirty"] = [line[3:] for line in _git("status", "--porcelain", "--untracked-files=no")[1].splitlines() if len(line) > 3]
     return out
 
 
@@ -62,16 +69,26 @@ def _key(version: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", version)[:3])
 
 
-def check(*, force: bool = False) -> dict:
-    """看远端有没有新提交。结果缓存 12 小时；没有 git、没有网络都返回“不知道”，不报错。"""
+def status() -> dict:
+    """现在的版本，加上最近一次检查的结果。只读缓存、不联网 —— 页面一打开就要用，不能等网络。"""
     info = current()
     if not info["git"]:
-        return {**info, "checked": False, "behind": 0, "notes": [],
-                "how": "这是打包好的镜像，没有源码仓库。升级：docker compose pull（或重新构建）后 docker compose up -d，数据在卷里不受影响。"}
+        return {**info, "checked": False, "behind": 0, "notes": [], "how": _DOCKER_HOW}
+    hit = cache.read("upgrade:check", 7 * cache.DAY)
+    if hit and hit.get("commit") == info["commit"]:
+        return {**info, **hit, "cached": True}
+    return {**info, "checked": False, "behind": 0, "notes": [], "how": "还没有检查过更新"}
+
+
+def check(*, force: bool = False) -> dict:
+    """看远端有没有新提交（会联网）。结果缓存 12 小时；没有 git、没有网络都返回“不知道”，不报错。"""
+    info = current()
+    if not info["git"]:
+        return {**info, "checked": False, "behind": 0, "notes": [], "how": _DOCKER_HOW}
     hit = None if force else cache.read("upgrade:check", 12 * cache.HOUR)
     if hit and hit.get("commit") == info["commit"]:
         return {**info, **hit, "cached": True}
-    code, _ = _git("fetch", "--quiet", "origin", BRANCH, timeout=25)
+    code, _ = _git("fetch", "--quiet", "origin", BRANCH, timeout=10)
     if code != 0:
         return {**info, "checked": False, "behind": 0, "notes": [], "how": "没能连上远端仓库，稍后再试"}
     behind = int(_git("rev-list", "--count", f"HEAD..origin/{BRANCH}")[1] or 0)
@@ -88,8 +105,8 @@ def notice() -> str:
     """启动时用的一句话提示。只读缓存，不联网，不拖慢启动；没有新版本返回空串。"""
     if not get_settings().update_check:
         return ""
-    hit = cache.read("upgrade:check", 7 * cache.DAY) or {}
-    if not hit.get("behind") or hit.get("commit") != current()["commit"]:
+    hit = status()
+    if not hit.get("behind"):
         return ""
     latest = hit.get("latest_version") or ""
     what = f"新版本 {latest}" if latest and _key(latest) > _key(__version__) else f"{hit['behind']} 处更新"

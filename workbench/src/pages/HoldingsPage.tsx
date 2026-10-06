@@ -1,11 +1,11 @@
 import type React from 'react'
-import { Fragment, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { ImageUp, Plus, Upload } from 'lucide-react'
-import { api, runTool, useApi, type Holding, type HoldingInput, type StockProfile } from '../api'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ClipboardPaste, ImageUp, Plus, Upload } from 'lucide-react'
+import { api, runTool, useApi, type Holding, type HoldingInput, type ParsedHolding, type StockProfile } from '../api'
 import { Donut, PnlBars } from '../components/charts'
 import { securityPath } from '../components/SecuritySearch'
-import { Button, Callout, ConfirmDialog, Drawer, Input, Segmented, Select } from '../components/kit'
+import { Button, Callout, ConfirmDialog, Drawer, Input, Segmented, Select, Tag } from '../components/kit'
 import OverviewPage from './OverviewPage'
 import { ASSET, CATEGORY, DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed, yuan } from '../components/ui'
 
@@ -24,6 +24,71 @@ const options = (map: Record<string, string>) => Object.entries(map).map(([value
 
 const TABS = [['list', '明细'], ['analysis', '收益与归因']] as const
 
+/**
+ * 粘贴导入：把券商 App 里的持仓照着敲几行（或直接复制过来），先解析成预览，
+ * 每一行认成了哪只股票、多少股、成本多少都给用户看过，确认后才写入。
+ */
+const PasteImport: React.FC<{ open: boolean; onClose: () => void; onDone: (text: string) => void }> = ({ open, onClose, onDone }) => {
+  const [text, setText] = useState('')
+  const [rows, setRows] = useState<ParsedHolding[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const good = (rows ?? []).filter((r) => r.ok)
+  const act = async (work: () => Promise<void>) => {
+    setBusy(true); setError('')
+    try { await work() } catch (e) { setError(e instanceof Error ? e.message : '操作失败') } finally { setBusy(false) }
+  }
+  const parse = () => act(async () => setRows((await api.parseHoldings(text)).rows))
+  const confirm = () => act(async () => {
+    const res = await api.addHoldings(good)
+    setText(''); setRows(null)
+    onDone(`已添加 ${res.added} 条持仓${res.skipped.length ? `；跳过：${res.skipped.join('；')}` : ''}`)
+  })
+  return (
+    <Drawer open={open} onClose={onClose} title="粘贴导入持仓" width="max-w-xl">
+      <div className="flex flex-col gap-3">
+        <p className="text-[13px] leading-relaxed text-steel">一行一只：名称或代码、数量、成本价，中间用空格或逗号隔开。写“2手”会按 200 股算。</p>
+        <textarea value={text} onChange={(e) => { setText(e.target.value); setRows(null) }} rows={6} aria-label="持仓文本"
+          placeholder={'贵州茅台 100 1500\n600036 2000 35.2\n宁德时代 2手 262'}
+          className="w-full resize-y rounded-md border border-hairline bg-canvas px-3 py-2 font-mono text-[13px] leading-relaxed text-ink outline-none placeholder:text-stone focus:border-primary focus:ring-1 focus:ring-primary" />
+        {error ? <Callout tone="danger">{error}</Callout> : null}
+        {rows == null ? (
+          <div><Button size="sm" loading={busy} disabled={!text.trim()} onClick={() => void parse()}>识别</Button></div>
+        ) : (
+          <>
+            <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline text-sm">
+              {rows.map((r, i) => (
+                <li key={i} className="flex items-baseline gap-3 px-3 py-2">
+                  {r.ok ? (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-ink">{r.name}<span className="ml-2 font-mono text-xs text-stone">{r.code}</span>
+                        {r.asset_type !== 'stock' ? <Tag className="ml-2 !py-0">{ASSET[r.asset_type] ?? r.asset_type}</Tag> : null}</span>
+                      <span className="shrink-0 tabular-nums text-charcoal">{r.shares?.toLocaleString()} 股</span>
+                      <span className="w-24 shrink-0 text-right tabular-nums text-charcoal">成本 {r.cost}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-steel">{r.line}</span>
+                      <span className="shrink-0 text-[13px] text-on-rose">{r.problem}</span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="text-[13px] text-steel">
+              {good.length ? `认出 ${good.length} 条` : '一条也没认出来'}{rows.length > good.length ? `，${rows.length - good.length} 条有问题（改一下上面的文字再识别，或者先导入认出来的）` : ''}。已经在持仓里的代码不会被改动。
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" loading={busy} disabled={!good.length} onClick={() => void confirm()}>导入这 {good.length} 条</Button>
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => void parse()}>重新识别</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Drawer>
+  )
+}
+
 const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }) => {
   const [tab, setTab] = useState(initialTab)
   const holdings = useApi(api.holdings)
@@ -33,6 +98,12 @@ const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }
   const [removing, setRemoving] = useState<Holding | null>(null)
   const csvRef = useRef<HTMLInputElement>(null)
   const ocrRef = useRef<HTMLInputElement>(null)
+  const [params, setParams] = useSearchParams()
+  const [pasting, setPasting] = useState(false)
+  // 从首页的引导点过来（/holdings?import=1）：直接打开粘贴导入
+  useEffect(() => {
+    if (params.get('import')) { setPasting(true); setParams({}, { replace: true }) }
+  }, [params, setParams])
 
   const rows = holdings.data ?? []
   const total = rows.reduce((s, h) => s + (h.market_value ?? 0), 0)
@@ -87,6 +158,7 @@ const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }
     <Page title="持仓" description="股票、ETF 和基金放在一起：明细、分布、收益与归因"
       actions={(
         <>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => setPasting(true)}><ClipboardPaste className="h-4 w-4" />粘贴导入</Button>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => csvRef.current?.click()}><Upload className="h-4 w-4" />导入 CSV / Excel</Button>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => ocrRef.current?.click()}><ImageUp className="h-4 w-4" />截图识别</Button>
           <Button size="sm" onClick={() => setEditing({ id: null, form: blank() })}><Plus className="h-4 w-4" />添加持仓</Button>
@@ -95,6 +167,8 @@ const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }
         </>
       )}>
       {message ? <Callout tone={message.tone}>{message.text}</Callout> : null}
+      <PasteImport open={pasting} onClose={() => setPasting(false)}
+        onDone={(text) => { setPasting(false); setMessage({ tone: 'success', text }); holdings.reload() }} />
 
       {rows.length > 0 ? (
         <Metrics>

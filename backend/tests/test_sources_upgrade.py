@@ -150,11 +150,26 @@ def test_check_reports_behind_and_caches(monkeypatch):
     assert "0.3.0" in upgrade.notice()
     calls.clear()
     assert upgrade.check()["cached"] and not any(c[0] == "fetch" for c in calls)      # 第二次读缓存，不再联网
+    assert upgrade.status()["behind"] == 3 and not any(c[0] == "fetch" for c in calls)  # 页面用的接口从不联网
     # 升完级（提交变了）：旧的缓存不再算数
     _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "def5678"), ("rev-parse", "--abbrev-ref"): (0, "main"),
                             ("status",): (0, ""), ("rev-list",): (0, "0"), ("show",): (0, CHANGELOG)})
     assert upgrade.notice() == ""
     assert upgrade.check()["behind"] == 0
+
+
+def test_dirty_files_keep_their_first_letter(monkeypatch):
+    # git status --porcelain 的行以状态列开头（可能是空格）；去掉行首空白会吃掉文件名的第一个字
+    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "abc1234"), ("rev-parse", "--abbrev-ref"): (0, "main"),
+                            ("status",): (0, " M workbench/src/App.tsx\nM  backend/x.py")})
+    assert upgrade.current()["dirty"] == ["workbench/src/App.tsx", "backend/x.py"]
+
+
+def test_status_never_touches_the_network(monkeypatch):
+    calls: list = []
+    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "fresh01"), ("rev-parse", "--abbrev-ref"): (0, "main"), ("status",): (0, "")}, calls)
+    status = upgrade.status()
+    assert status["checked"] is False and status["version"] == __version__ and not any(c[0] == "fetch" for c in calls)
 
 
 def test_check_survives_no_network_and_no_git(monkeypatch):
@@ -225,5 +240,8 @@ def test_version_and_doctor_routes(monkeypatch):
     monkeypatch.setattr(upgrade, "check", lambda **kw: {**upgrade.current(), "checked": True, "behind": 0, "notes": []})
     client = TestClient(app)
     assert client.get("/api/settings/version").json()["version"] == __version__
-    names = [i["name"] for i in client.get("/api/settings/doctor").json()["items"]]
+    items = client.get("/api/settings/doctor").json()["items"]
+    names = [i["name"] for i in items]
     assert "模型" in names and "数据库" in names
+    # 从运行中的服务里自检：不该把自己的端口报成“空闲”
+    assert next(i for i in items if i["name"].startswith("端口"))["detail"] == "WealthPilot 正在运行"

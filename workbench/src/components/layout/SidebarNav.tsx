@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { BookOpenText, Brain, BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, ScrollText, Search, Settings, ShieldCheck, Star, Sun, UserRoundCog, Wallet, Zap } from 'lucide-react'
+import { AlarmClock, BookOpenText, Brain, BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, ScrollText, Search, Settings, ShieldCheck, Star, Sun, UserRoundCog, Wallet, Zap } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
@@ -34,6 +34,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { to: '/holdings', label: '持仓', icon: BriefcaseBusiness },
     { to: '/broker', label: '模拟盘', icon: Wallet },
     { to: '/review', label: '验证与复盘', icon: ClipboardCheck },
+    { to: '/automations', label: '自动任务', icon: AlarmClock },
   ] },
   { label: '分析工具', items: [
     { to: '/lookthrough', label: '持仓穿透', icon: Layers },

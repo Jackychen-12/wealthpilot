@@ -24,6 +24,7 @@ from pathlib import Path
 import httpx
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
@@ -47,16 +48,36 @@ COMMANDS: dict[str, str] = {
     "/broker": "模拟盘账户与持仓",
     "/order": "/order <buy|sell> <名称或代码> <数量> — 在模拟盘下单（会再确认一次）",
     "/sample": "/sample [clear] — 载入或清除示例持仓与自选",
-    "/skills": "我的研究方法（技能）",
+    "/skills": "/skills [gallery | install <名称> | draft <一句描述>] — 研究方法：已有的、现成可装的、让 AI 起草",
     "/memory": "/memory [add <内容> | rm <编号>] — AI 记住的事",
     "/audit": "审计日志（只追加，带完整性校验）",
-    "/history": "研究记录",
+    "/history": "/history [编号] — 研究记录；带编号则调出那一次，接着追问或 /rewrite",
     "/evidence": "/evidence [证据ID前4位] — 上一次回答的证据",
+    "/quick": "/quick <问题> — 快速回答：十几秒，简短，不留验证点",
+    "/deep": "/deep <问题> — 完整研究：四个维度取证、逐条校验",
+    "/depth": "/depth [auto|quick|deep] — 之后的提问默认查多深",
+    "/rewrite": "/rewrite <要求> — 不重新取数，用上一次的证据换个写法（更短一点 / 只讲风险 / 讲给新手听）",
+    "/add": "/add 贵州茅台 100 1500; 600036 2000 35.2 — 录入持仓（名称或代码、数量、成本价；多只用分号隔开）",
+    "/tasks": "/tasks [add <时间> | <问题>] [run|on|off|rm <编号>] — 定时任务，如 /tasks add 工作日 08:30 | 诊断一下我的持仓",
+    "/alert": "/alert [<名称或代码> price<=1350] [rm <编号>] — 提醒（price 价格 / chg 涨跌幅 / pe、pb 历史分位）",
+    "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
+    "/update": "有没有新版本、怎么升级",
+    "/setup": "重新走一遍首次配置（模型 Key、示例数据）",
     "/new": "开始新会话（清空上下文）",
     "/status": "当前模式、后端与模型",
     "/login": "/login <用户名> — 远程模式登录（密码单独输入）",
     "/quit": "退出",
 }
+# /help 按用途分组：三十多个命令排成一列没法看
+HELP_GROUPS = [
+    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/evidence", "/history", "/new"]),
+    ("行情", ["/stock", "/search", "/screen", "/market"]),
+    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/proposals", "/approve", "/reject", "/broker", "/order"]),
+    ("自己干活", ["/digest", "/tasks", "/alert"]),
+    ("调教与追责", ["/skills", "/memory", "/audit"]),
+    ("其他", ["/setup", "/sample", "/doctor", "/update", "/status", "/login", "/help", "/quit"]),
+]
+ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
 STATUS = {"passed": ("green", "已通过校验"), "partial": ("yellow", "部分证据缺失"), "rejected": ("red", "未通过校验 · 未发布"),
           "insufficient_data": ("red", "证据不足 · 未发布"), "failed": ("red", "执行失败")}
 CP_STATUS = {"pending": ("dim", "待核对"), "held": ("green", "成立"), "broken": ("red", "被证伪"), "unverifiable": ("yellow", "无法核对")}
@@ -86,7 +107,8 @@ class Backend:
             raise RuntimeError(data)
         return data
 
-    def chat(self, message: str, history: list[dict], conversation_id: str) -> AsyncIterator[dict]:
+    def chat(self, message: str, history: list[dict], conversation_id: str, *,
+             depth: str = "auto", rewrite_of: int | None = None) -> AsyncIterator[dict]:
         raise NotImplementedError
 
     async def close(self) -> None:
@@ -110,21 +132,12 @@ class LocalBackend(Backend):
         self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://local", timeout=120)
         self.label = f"本机 · {self.settings.ai_provider} / {self.settings.active_model}"
 
-    async def chat(self, message, history, conversation_id):
-        from sqlmodel import Session
+    async def chat(self, message, history, conversation_id, *, depth="auto", rewrite_of=None):
+        from wealthpilot.services.local_run import stream_local
 
-        from wealthpilot.services.agents.orchestrator import chat_stream
-        from wealthpilot.services.context import load_local_user, load_market_context
-        from wealthpilot.storage.db import get_engine
-
-        uid = self.settings.local_user_id
-        holdings, profile = load_local_user(uid)
-        nav_data, nav_history = await load_market_context(holdings)
-        with Session(get_engine()) as db:
-            async for line in chat_stream(message, history, holdings, nav_data, nav_history,
-                                          conversation_id=conversation_id, db_session=db, profile=profile, user_id=uid):
-                if line.startswith("data: "):
-                    yield json.loads(line[6:])
+        async for event in stream_local(message, history, conversation_id, depth=depth, rewrite_of=rewrite_of,
+                                        user_id=self.settings.local_user_id):
+            yield event
 
 
 class RemoteBackend(Backend):
@@ -138,8 +151,8 @@ class RemoteBackend(Backend):
     def set_token(self, token: str) -> None:
         self.http.headers["Authorization"] = f"Bearer {token}"
 
-    async def chat(self, message, history, conversation_id):
-        body = {"message": message, "history": history, "conversation_id": conversation_id}
+    async def chat(self, message, history, conversation_id, *, depth="auto", rewrite_of=None):
+        body = {"message": message, "history": history, "conversation_id": conversation_id, "depth": depth, "rewrite_of": rewrite_of}
         async with self.http.stream("POST", "/api/chat", json=body) as resp:
             if resp.status_code >= 400:
                 raise RuntimeError(f"后端返回 {resp.status_code}")
@@ -199,6 +212,9 @@ class App:
         self.history: list[dict] = []
         self.conversation_id = str(uuid.uuid4())
         self.evidence: list[dict] = []
+        self.depth = "auto"
+        # 上一次研究存下的消息编号：/rewrite 靠它找到那次的证据
+        self.last_message_id: int | None = None
 
     def table(self, *columns: str, right: tuple[int, ...] = ()) -> Table:
         t = Table(box=None, pad_edge=False, header_style="dim", padding=(0, 2, 0, 0))
@@ -208,22 +224,29 @@ class App:
 
     # —— 研究 ——
 
-    async def research(self, message: str) -> None:
+    async def research(self, message: str, *, depth: str | None = None, rewrite_of: int | None = None) -> None:
         c, started, answer, meta = self.console, time.time(), "", {}
-        self.evidence = []
-        with c.status("[dim]解析证券与规划…", spinner="dots") as status:
-            async for e in self.backend.chat(message, list(self.history), self.conversation_id):
+        if rewrite_of is None:
+            self.evidence = []   # 改写沿用上一次的证据，/evidence 还能查
+        eta = ""
+        with c.status("[dim]基于已有证据改写…" if rewrite_of else "[dim]解析证券与规划…", spinner="dots") as status:
+            async for e in self.backend.chat(message, list(self.history), self.conversation_id,
+                                             depth=depth or self.depth, rewrite_of=rewrite_of):
                 kind = e.get("type")
                 if kind == "resolved":
                     c.print("[dim]◆ 已解析[/] " + "、".join(f"{s['name']} [cyan]{s['code']}[/]" for s in e["securities"]))
                 elif kind == "plan":
                     head = e.get("intent") or "自由问答"
-                    c.print(f"[dim]◆ 规划[/] [bold]{head}[/] [dim]· {len(e.get('tasks', []))} 个任务[/]")
+                    eta = f" · 预计约 {e['eta_seconds']} 秒" if e.get("eta_seconds") else ""
+                    if rewrite_of:
+                        status.update(f"[dim]基于已有证据改写{eta}…")
+                        continue
+                    c.print(f"[dim]◆ 规划[/] [bold]{head}[/] [dim]· {len(e.get('tasks', []))} 个任务{eta}[/]")
                     for t in e.get("tasks", []):
                         c.print(f"  [dim]├[/] {t.get('label', t['agent'])} [dim]{t.get('goal', '')[:60]}[/]")
-                    status.update("[dim]取证中…")
+                    status.update(f"[dim]取证中{eta}…")
                 elif kind == "tool_call":
-                    status.update(f"[dim]取证中 · {e.get('tool')}")
+                    status.update(f"[dim]取证中 · {e.get('tool')}{eta}")
                 elif kind == "evidence":
                     self.evidence.append(e["evidence"])
                 elif kind == "task_done":
@@ -265,6 +288,13 @@ class App:
             self.show_proposals(meta["proposals"])
         if done.get("status") in ("passed", "partial"):
             self.history += [{"role": "user", "content": message}, {"role": "assistant", "content": answer}]
+            self.last_message_id = done.get("message_id") or self.last_message_id
+            card = done.get("summary")
+            if card and not rewrite_of:
+                # 长报告看完往往已经翻过好几屏：把结论再放在最后，停下来时眼前就是它
+                stance = f" [bold]{card['stance']}[/]" if card.get("stance") else ""
+                c.print(f"\n[bold]结论[/]{stance}\n{card['conclusion']}", highlight=False)
+                c.print("[dim]/rewrite 更短一点 · /rewrite 只讲风险 · /rewrite 讲给新手听 —— 不重新取数，几秒钟[/]")
 
     def show_checkpoints(self, items: list[dict]) -> None:
         t = self.table("股票", "条件", "设定时", "核对结果", "状态", right=(2, 3))
@@ -475,9 +505,13 @@ class App:
             desk = await self.backend.request("GET", "/api/desk")
         except Exception:  # noqa: BLE001 — 打招呼失败不该挡住使用
             return
+        with contextlib.suppress(Exception):   # 只读缓存里的检查结果，不联网
+            version = await self.backend.request("GET", "/api/settings/version")
+            if version.get("behind"):
+                self.console.print(f"[cyan]有新版本可用（{version.get('latest_version') or str(version['behind']) + ' 处更新'}）。/update 看更新了什么[/]")
         todo = desk["todo"]
         if not desk["stocks"]:
-            self.console.print("[dim]还没有持仓和自选。/sample 载入一份示例数据先看看，或 /watch add 茅台 加一只自选。[/]")
+            self.console.print("[dim]还没有持仓和自选。/add 贵州茅台 100 1500 录入持仓，/watch add 茅台 加自选，或 /sample 载入一份示例数据先看看。[/]")
             return
         parts = [f"{len(desk['stocks'])} 只股票在盯"]
         if todo["proposals"]:
@@ -491,6 +525,45 @@ class App:
             parts.append(f"最近一次检查 {digest['day']}：{digest['summary']}（/digest）")
         self.console.print("[dim]" + " · ".join(parts) + ("  [示例数据，/sample clear 清除]" if desk.get("sample") else "") + "[/]")
 
+    async def setup(self, *, forced: bool = False) -> None:
+        """第一次用：配模型、放进股票、给出第一个问题。每一步都可以回车跳过；之后随时 /setup 重来。"""
+        c = self.console
+        try:
+            steps = {s["key"]: s["done"] for s in (await self.backend.request("GET", "/api/onboarding"))["steps"]}
+        except Exception:  # noqa: BLE001 — 引导出不来不该挡住使用
+            return
+        if not forced and steps.get("model") and steps.get("data"):
+            return
+        if not steps.get("model") or forced:
+            c.print("\n[bold]第 1 步 · 配置模型[/] [dim]（不配也能看行情、选股、管持仓，只是不能让 AI 研究）[/]")
+            choice = (await self.ask("用哪家的模型？1 DeepSeek  2 Claude  回车跳过：")).strip()
+            if choice in ("1", "2"):
+                provider, field = ("deepseek", "deepseek_api_key") if choice == "1" else ("anthropic", "anthropic_api_key")
+                key = (await self.ask_secret("粘贴 API Key（输入不会显示，只保存在本机）：")).strip()
+                if key:
+                    await self.backend.request("PUT", "/api/settings", json={"ai_provider": provider, field: key})
+                    with c.status("[dim]测试一下…", spinner="dots"):
+                        result = await self.backend.request("POST", "/api/settings/test")
+                    if result["ok"]:
+                        c.print(f"[green]✓ 模型可用[/] [dim]{result['provider']} / {result['model']}[/]")
+                        self.backend.label = f"本机 · {result['provider']} / {result['model']}"
+                    else:
+                        c.print(f"[red]✗ 调不通：{result.get('error', '')[:160]}[/]\n[dim]检查 Key 是否有效、账户是否有余额；/setup 可以重填[/]")
+        if not steps.get("data") or forced:
+            c.print("\n[bold]第 2 步 · 放进你的股票[/]")
+            line = (await self.ask("现在录入持仓（如：贵州茅台 100 1500; 600036 2000 35.2），或输入 s 用示例数据，回车跳过：")).strip()
+            if line.lower() == "s":
+                await self.cmd_sample("")
+            elif line:
+                await self.cmd_add(line)
+        c.print("\n[bold]第 3 步 · 问第一个问题[/] [dim]直接打字就行，比如：帮我诊断一下我的持仓 / 帮我深度分析一下招商银行[/]")
+        c.print("[dim]想在手机上收简报和提醒：网页版「设置 → 手机触达」。/help 看全部命令。[/]")
+
+    async def cmd_setup(self, _: str) -> None:
+        if not isinstance(self.backend, LocalBackend):
+            raise ValueError("首次配置要在运行后端的那台机器上做（那里才能改模型 Key）")
+        await self.setup(forced=True)
+
     async def cmd_sample(self, args: str) -> None:
         if args.strip() == "clear":
             r = await self.backend.request("DELETE", "/api/sample")
@@ -499,7 +572,36 @@ class App:
         await self.backend.request("POST", "/api/sample")
         self.console.print("已载入示例持仓和自选（都带示例标记，/sample clear 可以一键清掉）。试试 /holdings、/digest run，或直接问：帮我诊断一下我的持仓")
 
-    async def cmd_skills(self, _: str) -> None:
+    async def cmd_skills(self, args: str) -> None:
+        action, _, rest = args.partition(" ")
+        rest = rest.strip()
+        if action == "gallery":
+            t = self.table("方法", "名称", "做什么", "")
+            for s in await self.backend.request("GET", "/api/skills/gallery"):
+                t.add_row(s["label"], s["name"], s["description"][:50], Text("已装", style="green") if s["installed"] else "")
+            self.console.print(t)
+            self.console.print("[dim]/skills install <名称> 装上；装上后是你自己的文件，可以随便改[/]")
+            return
+        if action == "install" and rest:
+            s = await self.backend.request("POST", f"/api/skills/gallery/{rest}/install")
+            self.console.print(f"[green]已装上「{s['label']}」[/] [dim]触发词：{'、'.join(s['triggers'][:4])}[/]")
+            return
+        if action == "draft" and rest:
+            with self.console.status("[dim]起草中…", spinner="dots"):
+                d = await self.backend.request("POST", "/api/skills/draft", json={"description": rest})
+            self.console.print(d["content"], markup=False, highlight=False)
+            if d["problems"] or not d["skill"]:
+                self.console.print("[yellow]这份草稿还有问题，没有保存：" + "；".join(d["problems"]) + "[/]")
+                return
+            # 写给 Agent 的指示，要用户看过点头才落盘
+            if (await self.ask(f"保存为「{d['skill']['label']}」（{d['skill']['name']}）？(y/N) ")).strip().lower() in ("y", "yes", "是"):
+                await self.backend.request("PUT", f"/api/skills/{d['skill']['name']}", json={"content": d["content"]})
+                self.console.print("[green]已保存[/] [dim]在网页版「研究方法」里可以接着改[/]")
+            else:
+                self.console.print("[dim]没有保存[/]")
+            return
+        if action:
+            raise ValueError("用法：/skills [gallery | install <名称> | draft <一句描述>]")
         data = await self.backend.request("GET", "/api/skills")
         t = self.table("方法", "名称", "触发词", "派谁去查")
         for s in data["skills"]:
@@ -507,7 +609,7 @@ class App:
         self.console.print(t if data["skills"] else "[dim]还没有方法。[/]")
         for bad in data["invalid"]:
             self.console.print(f"[yellow]未加载 {bad['path']}：{'；'.join(bad['problems'])}[/]")
-        self.console.print(f"[dim]文件放在 {data['dirs'][0]}；话里带上触发词或方法名就会按它研究[/]")
+        self.console.print(f"[dim]文件放在 {data['dirs'][0]}；话里带上触发词或方法名就会按它研究。/skills gallery 看现成可装的[/]")
 
     async def cmd_memory(self, args: str) -> None:
         action, _, rest = args.partition(" ")
@@ -531,12 +633,152 @@ class App:
             t.add_row(e["at"][:16].replace("T", " "), e["kind"], {"user": "你", "agent": "AI", "system": "系统"}.get(e["actor"], e["actor"]), e["summary"][:60])
         self.console.print(t)
 
-    async def cmd_history(self, _: str) -> None:
-        t = self.table("时间", "问题", "结论", "证据", right=(3,))
+    async def cmd_history(self, args: str) -> None:
+        if args.strip().isdigit():
+            r = await self.backend.request("GET", f"/api/research/history/{args.strip()}")
+            self.console.print(f"[bold]{r['question']}[/] [dim]{r['created_at'][:16].replace('T', ' ')}[/]\n")
+            self.console.print(Markdown(cite(r["answer"])))
+            # 调出来就接着它聊：追问带上这次的上下文，/rewrite 用这次的证据
+            self.history = [{"role": "user", "content": r["question"]}, {"role": "assistant", "content": r["answer"]}]
+            self.evidence = (r.get("meta") or {}).get("evidence") or []
+            self.last_message_id = r["id"]
+            self.console.print("\n[dim]已调出这一次。可以直接追问，或 /rewrite <要求> 换个写法，/evidence 看证据[/]")
+            return
+        t = self.table("编号", "时间", "问题", "结论", "证据", right=(0, 4))
         for r in await self.backend.request("GET", "/api/research/history"):
             color, label = STATUS.get(r["status"], ("dim", r["status"]))
-            t.add_row(r["created_at"][:16].replace("T", " "), r["question"][:44], Text(label, style=color), str(r["evidence_count"]))
+            t.add_row(str(r["id"]), r["created_at"][:16].replace("T", " "), r["question"][:44], Text(label, style=color), str(r["evidence_count"]))
         self.console.print(t if t.row_count else "[dim]还没有研究记录[/]")
+        if t.row_count:
+            self.console.print("[dim]/history <编号> 调出某一次，接着追问[/]")
+
+    # —— 对话：深度与改写 ——
+
+    async def cmd_quick(self, args: str) -> None:
+        if not args:
+            raise ValueError("用法：/quick <问题>。想让之后的提问都走快速：/depth quick")
+        await self.research(args, depth="quick")
+
+    async def cmd_deep(self, args: str) -> None:
+        if not args:
+            raise ValueError("用法：/deep <问题>。想让之后的提问都走完整研究：/depth deep")
+        await self.research(args, depth="deep")
+
+    async def cmd_depth(self, args: str) -> None:
+        names = {"auto": "自动（按问题决定）", "quick": "快速", "deep": "深入"}
+        if args:
+            if args not in names:
+                raise ValueError("只能是 auto / quick / deep")
+            self.depth = args
+        self.console.print(f"之后的提问：{names[self.depth]}")
+
+    async def cmd_rewrite(self, args: str) -> None:
+        if self.last_message_id is None:
+            raise ValueError("这次会话里还没有可以改写的研究。先问一个问题，或 /history <编号> 调出以前的一次")
+        await self.research(args or "更短一点", rewrite_of=self.last_message_id)
+
+    # —— 上手：录入持仓 ——
+
+    async def cmd_add(self, args: str) -> None:
+        if not args:
+            raise ValueError("用法：/add 贵州茅台 100 1500; 600036 2000 35.2（名称或代码、数量、成本价；多只用分号隔开）")
+        text = "\n".join(part.strip() for part in re.split(r"[;；\n]", args) if part.strip())
+        rows = (await self.backend.request("POST", "/api/portfolio/parse", json={"text": text}))["rows"]
+        t = self.table("识别为", "代码", "数量", "成本价", "", right=(2, 3))
+        for r in rows:
+            if r["ok"]:
+                t.add_row(r["name"], r["code"], f"{r['shares']:g}", f"{r['cost']:g}", "")
+            else:
+                t.add_row(Text(r["line"], style="dim"), "", "", "", Text(r["problem"], style="red"))
+        self.console.print(t)
+        good = [r for r in rows if r["ok"]]
+        if not good:
+            self.console.print("[yellow]一条也没认出来，没有写入。[/]")
+            return
+        if (await self.ask(f"录入这 {len(good)} 条？(y/N) ")).strip().lower() not in ("y", "yes", "是"):
+            self.console.print("[dim]已取消[/]")
+            return
+        done = await self.backend.request("POST", "/api/portfolio/batch", json={"rows": good})
+        self.console.print(f"[green]已添加 {done['added']} 条[/]" + "".join(f"\n[dim]跳过：{s}[/]" for s in done["skipped"]))
+
+    # —— 自己干活：定时任务与提醒 ——
+
+    async def cmd_tasks(self, args: str) -> None:
+        action, _, rest = args.partition(" ")
+        rest = rest.strip()
+        if action == "add":
+            when, bar, prompt = rest.partition("|")
+            if not bar or not prompt.strip():
+                raise ValueError("用法：/tasks add <时间> | <问题>，如 /tasks add 工作日 08:30 | 诊断一下我的持仓")
+            a = await self.backend.request("POST", "/api/automations", json={"kind": "task", "schedule": when.strip(), "prompt": prompt.strip()})
+            self.console.print(f"[green]已建好[/] #{a['id']} {a['schedule']}：{a['prompt']} [dim]下次 {(a.get('next_run_at') or '')[5:16].replace('T', ' ')}[/]")
+            return
+        if action in ("run", "on", "off", "rm") and rest.isdigit():
+            if action == "run":
+                with self.console.status("[dim]正在跑，大约一分钟…", spinner="dots"):
+                    a = await self.backend.request("POST", f"/api/automations/{rest}/run")
+                self.console.print(f"[{'green' if a['last_status'] == 'ok' else 'red'}]{a['last_status']}[/] {a['last_result']}", highlight=False)
+            elif action == "rm":
+                await self.backend.request("DELETE", f"/api/automations/{rest}")
+            else:
+                await self.backend.request("PUT", f"/api/automations/{rest}", json={"enabled": action == "on"})
+        elif action:
+            raise ValueError("用法：/tasks [add <时间> | <问题>] [run|on|off|rm <编号>]")
+        data = await self.backend.request("GET", "/api/automations")
+        tasks = [a for a in data["items"] if a["kind"] == "task"]
+        t = self.table("编号", "时间", "问什么", "上次", "下次", right=(0,))
+        for a in tasks:
+            last = f"{a['last_status']} {(a['last_run_at'] or '')[5:16].replace('T', ' ')}" if a["last_run_at"] else "还没跑过"
+            t.add_row(str(a["id"]), a["schedule"], a["prompt"][:40], last, (a.get("next_run_at") or "已暂停")[5:16].replace("T", " ") or "已暂停")
+        self.console.print(t if tasks else "[dim]还没有定时任务。例：/tasks add 工作日 08:30 | 诊断一下我的持仓[/]")
+        self.console.print(f"[dim]只在 WealthPilot 开着时运行，错过的下次打开时补跑一次；每天最多自动跑 {data['daily_runs_max']} 次[/]")
+        if not data["running"]:
+            self.console.print("[yellow]自动盯盘是关着的，任务不会自己跑（在网页版「设置」里打开）[/]")
+
+    async def cmd_alert(self, args: str) -> None:
+        action, _, rest = args.partition(" ")
+        if action == "rm" and rest.strip().isdigit():
+            await self.backend.request("DELETE", f"/api/automations/{rest.strip()}")
+        elif args:
+            match = re.fullmatch(r"(.+?)\s+(price|chg|pe|pb)\s*(>=?|<=?)\s*(-?\d+(?:\.\d+)?)", args.strip())
+            if not match:
+                raise ValueError("用法：/alert <名称或代码> price<=1350（price 价格 / chg 当日涨跌幅 / pe、pb 历史分位），或 /alert rm <编号>")
+            s = await self.resolve(match.group(1))
+            a = await self.backend.request("POST", "/api/automations", json={
+                "kind": "alert", "code": s["code"], "name": s["name"], "metric": ALERT_KEYS[match.group(2)],
+                "op": ">=" if match.group(3).startswith(">") else "<=", "threshold": float(match.group(4))})
+            now = "" if a.get("current") is None else f"，现在是 {a['current']:g}{a.get('unit', '')}"
+            tail = "[yellow]现在就已经满足条件，下次检查时会提醒[/]" if a.get("hit") else "[dim]触发一次就停[/]"
+            self.console.print(f"[green]已建好[/] #{a['id']} {a['condition']}{now} {tail}")
+            return
+        alerts = [a for a in (await self.backend.request("GET", "/api/automations"))["items"] if a["kind"] == "alert"]
+        t = self.table("编号", "条件", "状态", right=(0,))
+        for a in alerts:
+            state = f"已触发 {(a['last_run_at'] or '')[5:16].replace('T', ' ')}" if a["last_status"] == "fired" else "盯着" if a["enabled"] else "已暂停"
+            t.add_row(str(a["id"]), a["condition"], state)
+        self.console.print(t if alerts else "[dim]还没有提醒。例：/alert 茅台 price<=1350，/alert 宁德时代 pe<=20[/]")
+
+    # —— 升级与自检 ——
+
+    async def cmd_doctor(self, _: str) -> None:
+        from wealthpilot.services import doctor
+
+        with self.console.status("[dim]逐项检查模型、数据源、数据库…", spinner="dots"):
+            items = (await self.backend.request("GET", "/api/settings/doctor", params={"model": 1}))["items"]
+        self.console.print(doctor.render(items), highlight=False)
+
+    async def cmd_update(self, _: str) -> None:
+        with self.console.status("[dim]检查更新…", spinner="dots"):
+            v = await self.backend.request("GET", "/api/settings/version", params={"refresh": 1})
+        if not v.get("behind"):
+            self.console.print(f"v{v['version']} {v.get('commit', '')} · " + ("已经是最新" if v.get("checked") else v.get("how") or "没能检查更新"))
+            return
+        self.console.print(f"[bold]有 {v['behind']} 处更新[/]（现在 v{v['version']}）")
+        for note in v.get("notes", []):
+            self.console.print(f"\nv{note['version']} [dim]{note['date']}[/]")
+            for item in note["items"]:
+                self.console.print(f"  · {item}", highlight=False)
+        self.console.print("\n退出后运行 [cyan]wealthpilot update[/]：先备份数据库，再拉代码、装依赖、重建网页版；仓库里有你自己的改动会停下来问。")
 
     async def cmd_evidence(self, args: str) -> None:
         if not self.evidence:
@@ -574,10 +816,12 @@ class App:
         self.console.print(f"已登录：{res['username']}")
 
     async def cmd_help(self, _: str) -> None:
-        t = self.table("命令", "说明")
-        for name, text in COMMANDS.items():
-            t.add_row(f"[cyan]{name}[/]", text)
-        self.console.print(t)
+        for title, names in HELP_GROUPS:
+            t = self.table(title, "")
+            for name in names:
+                t.add_row(f"[cyan]{name}[/]", escape(COMMANDS[name]))   # 说明里的 [可选参数] 不是样式标记
+            self.console.print(t)
+            self.console.print()
         self.console.print("[dim]直接输入问题就是一次研究，例如：帮我深度分析一下宁德时代 / 对比茅台和五粮液 / 复盘一下之前的研究[/]")
 
     # —— 主循环 ——
@@ -620,8 +864,11 @@ class App:
             self._scheduler = asyncio.ensure_future(watcher.scheduler())
         c.print("[dim]输入问题开始研究，/help 看命令，Ctrl-C 中断当前研究，/quit 退出[/]")
         await self.greet()
-        c.print()
         read = self._reader()
+        if isinstance(self.backend, LocalBackend) and sys.stdin.isatty():
+            with contextlib.suppress(EOFError, KeyboardInterrupt):
+                await self.setup()
+        c.print()
         while True:
             try:
                 line = await read()

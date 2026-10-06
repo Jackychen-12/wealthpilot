@@ -42,6 +42,7 @@ async def create_automation(body: dict, db: Session = Depends(get_session), user
     if auto.kind == "alert":
         # 建好就告诉用户现在是多少：离触发还有多远，一眼就知道阈值设得对不对
         out["current"] = await automations.current_value(auto.metric, auto.code)
+        out["hit"] = out["current"] is not None and automations.hit(auto, out["current"])
     return out
 
 

@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 
 from wealthpilot.models.automation import Automation
 from wealthpilot.models.broker import Digest
-from wealthpilot.services import cache, channels, memory, stocks
+from wealthpilot.services import cache, channels, memory, stocks, summary
 from wealthpilot.services.assets import fetch_sina_quotes
 from wealthpilot.settings import get_settings
 
@@ -255,7 +255,7 @@ async def run_task(db: Session, auto: Automation, *, manual: bool = False, ask=N
     card = meta.get("summary") or {}
     if answer and meta.get("status") in ("passed", "partial"):
         auto.last_status, auto.last_message_id = "ok", meta.get("message_id")
-        auto.last_result = (card.get("conclusion") or answer)[:600]
+        auto.last_result = card.get("conclusion") or summary.conclusion(answer, 300)
     else:
         auto.last_status = "failed"
         auto.last_result = (error or f"这次研究没有产出可发布的结论（{meta.get('status') or '无结果'}）")[:300]

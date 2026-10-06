@@ -77,9 +77,8 @@ async def version(request: Request, refresh: bool = False):
     from wealthpilot.services import upgrade
 
     _local_only(request)
-    if not get_settings().update_check and not refresh:
-        return {**upgrade.current(), "checked": False, "behind": 0, "notes": [], "how": "更新检查已关闭"}
-    return await asyncio.to_thread(upgrade.check, force=refresh)
+    # 平时只读缓存（后台每半天检查一次）；用户点了「检查更新」才去远端看
+    return await asyncio.to_thread(upgrade.check, force=True) if refresh else await asyncio.to_thread(upgrade.status)
 
 
 @router.get("/doctor")
@@ -89,7 +88,7 @@ async def doctor(request: Request, model: bool = False):
 
     _local_only(request)
     port = request.url.port or get_settings().port
-    return {"items": await checks.run(online=model, port=port)}
+    return {"items": await checks.run(online=model, port=port, serving=True)}
 
 
 @router.put("")

@@ -1,9 +1,9 @@
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, ListTree, Square, SquarePen } from 'lucide-react'
+import { ArrowUp, Check, ChevronRight, ListTree, Square, SquarePen } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { DEMO, api, runTool, useApi, type ValuationHistory } from '../api'
-import { research, useResearch, type Evidence, type Turn } from '../api/researchStore'
+import { DEMO, api, runTool, useApi, type Depth, type ValuationHistory } from '../api'
+import { askNotifyPermission, research, useResearch, type Evidence, type Turn } from '../api/researchStore'
 import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
 import { Sparkline } from '../components/charts'
@@ -22,7 +22,7 @@ const AGENT: Record<string, { label: string; tone: Tone }> = {
   fund: { label: '基金', tone: 'gray' },
   review: { label: '复盘', tone: 'green' },
 }
-export const PLAYBOOK: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '事后复盘' }
+export const PLAYBOOK: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '事后复盘', quick: '快速回答', rewrite: '基于已有证据改写' }
 export const STATUS: Record<string, { tone: Tone; label: string }> = {
   passed: { tone: 'green', label: '已通过校验' },
   partial: { tone: 'yellow', label: '部分证据缺失' },
@@ -40,6 +40,66 @@ const EXAMPLES = [
 ]
 const MORE_EXAMPLES = ['复盘一下之前的研究：验证点成立了多少，哪些判断被证伪了', '今天哪些行业领涨，大盘情绪如何', '宁德时代最近一期财报里管理层怎么解释业绩变化', '低市盈率高 ROE 这个选股条件过去两年表现如何']
 const PROCESS_KEY = 'wp_show_process'
+const DEPTH_KEY = 'wp_depth'
+const REPORT_KEY = 'wp_report_open'
+const DEPTHS: { key: Depth; label: string; hint: string }[] = [
+  { key: 'auto', label: '自动', hint: '按问题决定查多深' },
+  { key: 'quick', label: '快速', hint: '十几秒给个简短回答，不留验证点' },
+  { key: 'deep', label: '深入', hint: '完整研究：四个维度取证、逐条校验，约一分钟' },
+]
+// 改写不重新取数：只用这一轮已经拿到的证据换个写法，几秒钟
+const REWRITES = ['更短一点', '只讲风险', '换成给新手的说法', '列成要点']
+// 和个股页的判断卡同一套颜色：偏多用红、偏空用绿（A 股的习惯）
+const STANCE_TONE: Record<string, Tone> = { 看多: 'pink', 中性偏多: 'pink', 看空: 'green', 中性偏空: 'green', 中性: 'gray' }
+const STAGES = ['规划', '取证', '审核证据', '写结论', '核对'] as const
+
+/** 现在进行到哪一步（对应 STAGES 的下标）。 */
+function stageOf(t: Turn): number {
+  if (t.playbook === 'rewrite' || t.rewriteOf != null) return 3
+  if (!t.tasks.length) return 0
+  if (!t.tasks.every((x) => x.state === 'done' || x.state === 'failed')) return 1
+  const last = t.checks[t.checks.length - 1]
+  if (!last) return 2
+  if (last.tone === 'warn') return 1
+  if (last.text.startsWith('回答校验') || last.text.startsWith('按校验意见')) return 4
+  return 3
+}
+
+/** 等待中：告诉用户现在在干什么、大概还要多久，而不是只转一个圈。 */
+const Waiting: React.FC<{ t: Turn }> = ({ t }) => {
+  const stage = stageOf(t)
+  const rewrite = t.rewriteOf != null
+  const finished = t.tasks.filter((x) => x.state === 'done' || x.state === 'failed').length
+  const running = t.tasks.filter((x) => x.state === 'running').map((x) => AGENT[x.agent]?.label ?? x.agent)
+  const detail = rewrite ? '不重新取数，基于这次研究已有的证据重写'
+    : ['正在理解问题、安排要查什么', `正在取证${running.length ? `：${running.join('、')}` : ''}（${finished}/${t.tasks.length}）`,
+      '正在审核证据够不够', '证据齐了，正在写结论', '正在逐条核对数字和引用'][stage]
+  const left = t.eta ? Math.round(t.eta - t.seconds) : null
+  const pct = t.eta ? Math.min(96, (t.seconds / t.eta) * 100) : Math.min(90, stage * 20 + 8)
+  return (
+    <div className="rounded-lg border border-hairline p-4" role="status" aria-live="polite">
+      <div className="flex items-baseline justify-between gap-3 text-[13px]">
+        <span className="min-w-0 truncate font-medium text-ink">{detail}</span>
+        <span className="shrink-0 tabular-nums text-steel">
+          {left == null ? `已用 ${t.seconds.toFixed(0)} 秒` : left > 0 ? `大约还要 ${left} 秒` : '比平时久一点，快好了'}
+        </span>
+      </div>
+      <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface">
+        <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
+      </div>
+      {rewrite ? null : (
+        <ol className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          {STAGES.map((name, i) => (
+            <li key={name} className={cn('inline-flex items-center gap-1', i < stage ? 'text-steel' : i === stage ? 'font-medium text-ink' : 'text-stone')}>
+              {i < stage ? <Check className="h-3 w-3" /> : <Dot tone={i === stage ? 'purple' : 'gray'} pulse={i === stage} className="h-1.5 w-1.5" />}{name}
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="mt-3 text-xs text-stone">没通过核对的草稿不会显示。可以先去看别的页面，好了会提醒你。</p>
+    </div>
+  )
+}
 
 function phase(t: Turn) {
   if (!t.tasks.length) return '规划任务中'
@@ -60,6 +120,12 @@ const ResearchPage: React.FC = () => {
     if (!matchMedia('(min-width: 1280px)').matches) { setProcessOpen(true); return }
     setShowProcess((v) => { try { localStorage.setItem(PROCESS_KEY, v ? '0' : '1') } catch { /* 只在本次生效 */ } return !v })
   }
+  const [depth, setDepthState] = useState<Depth>(() => { try { return (localStorage.getItem(DEPTH_KEY) as Depth) || 'auto' } catch { return 'auto' } })
+  const setDepth = (d: Depth) => { setDepthState(d); try { localStorage.setItem(DEPTH_KEY, d) } catch { /* 只在本次生效 */ } }
+  // 长报告默认先看结论卡片；想每次都直接看全文，展开一次就记住
+  const [reportOpen, setReportOpen] = useState(() => { try { return localStorage.getItem(REPORT_KEY) === '1' } catch { return false } })
+  const [opened, setOpened] = useState<Record<number, boolean>>({})
+  const [reuse, setReuse] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const skillList = useApi(api.skills)
   const skillQuestions = (skillList.data?.skills ?? []).map((k) => `用「${k.label}」的方法看看贵州茅台`)
@@ -71,7 +137,21 @@ const ResearchPage: React.FC = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [turns.length, lastLength])
 
-  const send = (text: string) => { void research.ask(text); setDraft('') }
+  const lastDone = [...turns].reverse().find((t) => !t.running && t.messageId != null && (t.status === 'passed' || t.status === 'partial'))
+  const send = (text: string, rewriteOf?: number) => {
+    askNotifyPermission()
+    void research.ask(text, { depth, rewriteOf: rewriteOf ?? (reuse && lastDone ? lastDone.id : undefined) })
+    setDraft('')
+    setReuse(false)
+  }
+  const showReport = (t: Turn) => opened[t.id] ?? reportOpen
+  const toggleReport = (t: Turn) => {
+    const next = !showReport(t)
+    setOpened((o) => ({ ...o, [t.id]: next }))
+    setReportOpen(next)
+    try { localStorage.setItem(REPORT_KEY, next ? '1' : '0') } catch { /* 只在本次生效 */ }
+  }
+  const cite = (t: Turn, id: string) => { research.focus(t.id, id); if (matchMedia('(min-width: 1280px)').matches) { setShowProcess(true) } else { setProcessOpen(true) } }
 
   return (
     <div className="flex h-full min-w-0">
@@ -136,29 +216,56 @@ const ResearchPage: React.FC = () => {
                       {t.running
                         ? <Tag tone="purple"><Dot tone="purple" pulse className="h-1.5 w-1.5" />{phase(t)}</Tag>
                         : st ? <Tag tone={st.tone}>{st.label}</Tag> : null}
-                      {PLAYBOOK[t.playbook] || t.playbook.startsWith('skill:') ? <Tag tone="purple">{PLAYBOOK[t.playbook] ?? `方法：${t.intent}`}</Tag> : null}
+                      {t.rewriteOf != null || PLAYBOOK[t.playbook] || t.playbook.startsWith('skill:')
+                        ? <Tag tone="purple">{t.rewriteOf != null ? PLAYBOOK.rewrite : PLAYBOOK[t.playbook] ?? `方法：${t.intent}`}</Tag> : null}
                       {t.securities.map((s) => (
                         <Link key={s.code} to={securityPath(s)} onClick={(e) => e.stopPropagation()} title="已解析出的证券，点击查看详情"
                           className="rounded-sm bg-tint-gray px-1.5 py-0.5 text-xs text-on-gray hover:brightness-95">{s.name} <span className="font-mono">{s.code}</span></Link>
                       ))}
                       <span className="tabular-nums">{t.seconds.toFixed(0)} 秒</span>
                       <span>·</span>
-                      <span>{t.evidence.length} 条证据</span>
+                      {t.rewriteOf == null ? <span>{t.evidence.length} 条证据</span> : <span>沿用上一轮的证据</span>}
                       {t.usage?.input_tokens ? <span title={`输入 ${t.usage.input_tokens.toLocaleString()} token，其中 ${t.usage.cached_tokens.toLocaleString()} 命中缓存；输出 ${t.usage.output_tokens.toLocaleString()}`}>· {Math.round((t.usage.input_tokens + t.usage.output_tokens) / 1000)}k token（缓存 {t.usage.cache_hit_pct}%）</span> : null}
                       <Button size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); research.select(t.id); toggleProcess() }}>
                         <ListTree className="h-3.5 w-3.5" />过程
                       </Button>
                     </div>
-                    {t.securities.filter((x) => x.asset_type === 'stock').slice(0, 3).length > 0 ? (
+                    {t.rewriteOf == null && t.securities.filter((x) => x.asset_type === 'stock').slice(0, 3).length > 0 ? (
                       <div className="mt-4 grid gap-2 sm:grid-cols-3" onClick={(e) => e.stopPropagation()}>
                         {t.securities.filter((x) => x.asset_type === 'stock').slice(0, 3).map((x) => <StockSnapshot key={x.code} code={x.code} name={x.name} />)}
                       </div>
                     ) : null}
-                    <div className="mt-4">
-                      {t.answer
-                        ? <AnswerMarkdown content={t.answer} onCite={(id) => { research.focus(t.id, id); if (matchMedia('(min-width: 1280px)').matches) { setShowProcess(true) } else { setProcessOpen(true) } }} />
-                        : <p className="text-[15px] text-steel">{t.running ? '回答会在通过校验后出现，未过审的草稿不会显示。' : t.error || '没有生成回答。'}</p>}
+                    <div className="mt-4" onClick={(e) => e.stopPropagation()}>
+                      {t.running ? <Waiting t={t} />
+                        : !t.answer ? <p className="text-[15px] text-steel">{t.error || '没有生成回答。'}</p>
+                        : t.summary && t.rewriteOf == null ? (
+                          <>
+                            {/* 长报告先给结论：几句话 + 立场。要看论证再展开全文。改写是用户点名要的写法，直接给全文 */}
+                            <div className="rounded-lg border border-hairline bg-surface-soft p-4">
+                              <div className="mb-1.5 flex items-center gap-2">
+                                <span className="eyebrow">结论</span>
+                                {t.summary.stance ? <Tag tone={STANCE_TONE[t.summary.stance] ?? 'gray'}>{t.summary.stance}</Tag> : null}
+                              </div>
+                              <p className="text-[15px] leading-relaxed text-ink">{t.summary.conclusion}</p>
+                              <button type="button" onClick={() => toggleReport(t)} aria-expanded={showReport(t)}
+                                className="mt-3 inline-flex items-center gap-1 text-[13px] text-link hover:underline">
+                                <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', showReport(t) && 'rotate-90')} />
+                                {showReport(t) ? '收起完整报告' : `展开完整报告（${t.answer.length.toLocaleString()} 字，每个数字都带出处）`}
+                              </button>
+                            </div>
+                            {showReport(t) ? <div className="mt-5"><AnswerMarkdown content={t.answer} onCite={(id) => cite(t, id)} /></div> : null}
+                          </>
+                        ) : <AnswerMarkdown content={t.answer} onCite={(id) => cite(t, id)} />}
                     </div>
+                    {!DEMO && !t.running && t.messageId != null && (t.status === 'passed' || t.status === 'partial') && t.id === turns[turns.length - 1].id ? (
+                      <div className="mt-4 flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <span className="mr-1 text-xs text-stone" title="不重新取数，只用这一轮已经拿到的证据换个写法">换个写法</span>
+                        {REWRITES.map((r) => (
+                          <button key={r} type="button" disabled={busy} onClick={() => send(r, t.rewriteOf ?? t.id)}
+                            className="rounded-full border border-hairline px-2.5 py-0.5 text-[13px] text-slate transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">{r}</button>
+                        ))}
+                      </div>
+                    ) : null}
                     {t.checkpoints.length > 0 ? (
                       <details className="mt-6" onClick={(e) => e.stopPropagation()}>
                         <summary className="cursor-pointer select-none text-[13px] text-steel hover:text-ink">{t.checkpoints.length} 个验证点 · 到期后自动核对这次的判断对不对</summary>
@@ -204,6 +311,23 @@ const ResearchPage: React.FC = () => {
               ? <Button variant="secondary" size="sm" onClick={research.stop}><Square className="h-3.5 w-3.5" />停止</Button>
               : <Button type="submit" size="sm" disabled={!draft.trim()} aria-label="发送"><ArrowUp className="h-4 w-4" />发送</Button>}
           </form>
+          {DEMO ? null : (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-steel">
+              <div className="inline-flex overflow-hidden rounded-md border border-hairline" role="radiogroup" aria-label="研究深度">
+                {DEPTHS.map((d) => (
+                  <button key={d.key} type="button" role="radio" aria-checked={depth === d.key} title={d.hint} onClick={() => setDepth(d.key)}
+                    className={cn('px-2.5 py-1 transition-colors', depth === d.key ? 'bg-surface font-medium text-ink' : 'hover:bg-hover hover:text-ink')}>{d.label}</button>
+                ))}
+              </div>
+              <span className="hidden sm:inline">{DEPTHS.find((d) => d.key === depth)?.hint}</span>
+              {lastDone ? (
+                <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5" title="不重新取数，几秒钟。适合追问“那风险呢”“换个说法”这类问题；要查新的数据就别勾">
+                  <input type="checkbox" checked={reuse} onChange={(e) => setReuse(e.target.checked)} className="accent-[var(--color-primary)]" />
+                  只用上一轮的证据回答
+                </label>
+              ) : null}
+            </div>
+          )}
           <p className="mt-2 text-center text-xs text-stone">内容由 AI 基于工具数据生成，不构成投资建议</p>
         </div>
       </div>

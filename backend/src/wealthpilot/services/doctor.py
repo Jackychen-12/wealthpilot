@@ -85,12 +85,14 @@ def _storage() -> list[dict]:
     return out
 
 
-def _web(port: int) -> list[dict]:
+def _web(port: int, serving: bool) -> list[dict]:
     from wealthpilot.main import WEB_DIR
 
     built = (WEB_DIR / "index.html").is_file()
     out = [_item("网页版", "ok" if built else "warn", "已构建" if built else "还没有构建",
                  "" if built else "在仓库目录运行 make setup（需要 Node.js）。没有它终端照样能用。")]
+    if serving:   # 这次自检就是从正在运行的服务里发起的，不用再去探自己的端口
+        return [*out, _item(f"端口 {port}", "ok", "WealthPilot 正在运行")]
     try:
         resp = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2)
         mine = resp.status_code == 200 and resp.json().get("status") == "ok"
@@ -138,13 +140,14 @@ def _extras() -> list[dict]:
     return out
 
 
-async def run(*, online: bool = True, port: int = 8000) -> list[dict]:
-    """跑一遍自检。online=False 时不调用模型（其余检查照做）。"""
+async def run(*, online: bool = True, port: int = 8000, serving: bool = False) -> list[dict]:
+    """跑一遍自检。online=False 时不调用模型（其余检查照做）；serving=True 表示是从运行中的服务里发起的。"""
     items = [_item("Python", "ok" if sys.version_info >= (3, 11) else "fail", sys.version.split()[0],
                    "" if sys.version_info >= (3, 11) else "需要 Python 3.11 或更高")]
     items += _storage()
-    model, sources, reach = await asyncio.gather(asyncio.to_thread(_model, online), _sources(), _reach())
-    items += [model, *sources, *(_web(port)), reach, *(await asyncio.to_thread(_extras))]
+    model, sources, reach, web, extras = await asyncio.gather(
+        asyncio.to_thread(_model, online), _sources(), _reach(), asyncio.to_thread(_web, port, serving), asyncio.to_thread(_extras))
+    items += [model, *sources, *web, reach, *extras]
     if os.environ.get("WATCH_ENABLED", "").lower() == "false" or not get_settings().watch_enabled:
         items.append(_item("每日盯盘", "warn", "已关闭", "盯盘、定时任务和提醒都不会自己跑。到网页版「设置」里打开。"))
     return items
