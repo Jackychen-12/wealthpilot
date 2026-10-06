@@ -24,7 +24,7 @@ from wealthpilot.settings import get_settings
 if TYPE_CHECKING:
     from wealthpilot.services.ai_client import AIClient
 
-VALID_AGENTS = ("fundamental", "valuation", "price", "industry", "screener", "portfolio", "fund")
+VALID_AGENTS = ("fundamental", "valuation", "price", "industry", "capital", "expectation", "screener", "portfolio", "fund")
 INTENTS = ("stock_deep", "stock_compare", "holding_review", "screen", "review", "free")
 # 有固定流程、不需要模型拆任务的意图
 _PLAYBOOK_INTENTS = INTENTS[:5]
@@ -36,6 +36,9 @@ KEYWORD_RULES: list[tuple[list[str], str]] = [
     (["营收", "净利润", "利润", "财报", "业绩", "ROE", "毛利率", "负债", "现金流", "分红", "基本面"], "fundamental"),
     (["估值", "市盈率", "市净率", "PE", "PB", "贵不贵", "便宜", "分位"], "valuation"),
     (["股价", "走势", "涨跌", "行情", "均线", "K线", "波动", "高位", "低位", "回测", "分批"], "price"),
+    (["资金", "主力", "流入", "流出", "融资", "融券", "两融", "股东户数", "筹码", "十大股东", "机构持仓", "北向", "增持", "减持",
+      "回购", "解禁", "大宗", "龙虎榜"], "capital"),
+    (["预期", "一致预期", "研报", "评级", "目标价", "券商怎么看", "机构怎么看", "业绩预告", "业绩快报", "超预期", "调研", "消息", "利好", "利空"], "expectation"),
     (["行业", "板块", "同行", "公告", "新闻", "大盘", "指数", "市场"], "industry"),
     (["持仓", "组合", "收益", "归因", "回撤", "相关性", "集中度", "穿透", "调仓", "配置", "健康"], "portfolio"),
     (["基金", "净值", "基金经理"], "fund"),

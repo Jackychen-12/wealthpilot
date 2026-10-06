@@ -75,6 +75,7 @@ def build_synthesizer_prompt(
             "\n## 回答结构（必须遵守）\n用二级标题（## ）依次写出以下章节，标题里要包含这些词：\n"
             + "\n".join(f"{i}. {s}" for i, s in enumerate(sections, 1))
             + "\n第一节的结论用三到五句话说清，后面各节给依据。某一节没有证据，照样保留标题并写明缺什么数据。\n"
+            "各节先给一句判断，再给支撑它的两三个数字，不要把证据逐条复述一遍；除结论外每节不超过五句话或一张小表。\n"
         )
 
     from wealthpilot.settings import get_settings

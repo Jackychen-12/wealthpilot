@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from wealthpilot.models.schemas import IndexInfo, NewsItem
 from wealthpilot.services.market_data import (
@@ -85,6 +85,27 @@ async def get_valuation_series(code: str):
     from wealthpilot.services.stocks import fetch_valuation_history
     rows = list(reversed(await fetch_valuation_history(code)))
     return {"code": code, "data": [{"date": r["date"], "pe": r["pe_ttm"], "pb": r["pb"]} for r in rows[::5] + rows[-1:]]}
+
+
+@router.get("/stock/{code}/minute")
+async def get_stock_minute(code: str, days: int = 1):
+    """分时：每分钟的价格、均价与成交量。days=1 最近一个交易日，days=5 最近五个交易日。"""
+    from wealthpilot.services.stocks import fetch_minute
+    data = await fetch_minute(code, 5 if days > 1 else 1)
+    if not data:
+        raise HTTPException(404, f"没有取到 {code} 的分时数据")
+    return data
+
+
+@router.get("/stock/{code}/capital-series")
+async def get_capital_series(code: str):
+    """画图用的完整序列：近 30 日资金流向、近 120 日融资余额、近 8 期股东户数。和 Agent 的资金工具是同一份数据。"""
+    import asyncio
+
+    from wealthpilot.services import capital
+    flow, margin, holders = await asyncio.gather(
+        capital.fetch_fund_flow(code, 30), capital.fetch_margin(code, 120), capital.fetch_holder_counts(code, 8))
+    return {"code": code, "flow": flow, "margin": list(reversed(margin)), "holders": list(reversed(holders))}
 
 
 @router.get("/crypto/{symbol}")

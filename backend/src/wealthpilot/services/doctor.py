@@ -32,13 +32,19 @@ async def _timed(call) -> tuple[bool, float]:
 
 
 async def _sources() -> list[dict]:
-    from wealthpilot.services import stocks
+    from wealthpilot.services import capital, stocks
     from wealthpilot.services.assets import fetch_sina_quotes
+
+    async def consensus():   # 直接问数据中心，不走缓存：要测的是现在通不通
+        rows, _ = await stocks.datacenter("RPT_WEB_RESPREDICT", filter='(SECURITY_CODE="600519")', page_size=1)
+        return rows
 
     probes = [("行情（新浪）", lambda: fetch_sina_quotes(["600519"]), "报价、当日涨跌、提醒"),
               ("日线（腾讯 / 东方财富）", lambda: stocks.fetch_stock_kline("600519", 5), "走势、回撤、回测"),
               ("财务与估值（东方财富数据中心）", lambda: stocks.fetch_financial_indicators("600519", 1), "基本面、估值分位、选股"),
-              ("公告（东方财富）", lambda: stocks.fetch_announcements("600519", 1), "公告与财报正文")]
+              ("公告（东方财富）", lambda: stocks.fetch_announcements("600519", 1), "公告与财报正文"),
+              ("资金流向（新浪）", lambda: capital._sina_json("MoneyFlow.ssi_ssfx_flzjtj", {"daima": "sh600519"}), "资金流向"),
+              ("一致预期与筹码（东方财富数据中心）", consensus, "一致预期、融资融券、股东与机构持仓、增减持")]
     results = await asyncio.gather(*[_timed(call) for _, call, _ in probes])
     return [_item(name, "ok" if ok else "fail", f"{seconds:.1f} 秒" if ok else "取不到数据",
                   "" if ok else f"影响：{used}。多半是网络或对方限流，过几分钟再试；公司网络可能需要代理。")

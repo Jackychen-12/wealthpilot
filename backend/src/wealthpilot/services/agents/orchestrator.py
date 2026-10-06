@@ -29,8 +29,15 @@ from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services import checkpoints, memory, summary
+from wealthpilot.services.agents import debate
 from wealthpilot.services.agents.base import AgentResult
-from wealthpilot.services.agents.critic_agent import CriticAgent, Verdict, rewrite_instruction
+from wealthpilot.services.agents.critic_agent import (
+    CriticAgent,
+    Verdict,
+    number_only,
+    repairable,
+    rewrite_instruction,
+)
 from wealthpilot.services.agents.planner_agent import (
     KEYWORD_RULES,
     VALID_AGENTS,
@@ -133,6 +140,37 @@ def light_model_for(settings, default: str) -> str:
     return getattr(settings, "light_model", "") or default
 
 
+# 这句话是接着上一个话题说的："和五粮液比呢""它们哪个便宜"——要把上一轮的对象一起带上
+_FOLLOW_UP_RE = re.compile(r"相比|对比|比较|比一下|比呢|比起来|哪个|哪只|哪家|谁更|[和跟与同]它|它们|这两|这几")
+
+
+async def _named_in(text: str, known: list[dict], planner) -> list[dict]:
+    """一句话里点了名的证券：先按全称和代码直接匹配，匹配不到再让模型认简称（"茅台""宁王"）。"""
+    found = await resolve_text(text, known)
+    if not found:
+        found = await resolve_names(await asyncio.to_thread(planner.extract_names, text), [])
+    return found
+
+
+async def resolve_for_turn(message: str, history: list[dict], known: list[dict], planner) -> list[dict]:
+    """这一轮问的是哪些证券。
+
+    只认当前这句话点了名的：之前聊过宁德时代，现在问茅台，对象就只有茅台。
+    只有两种情况才往回找上一轮的对象：这句话没有点任何名（"那它的估值呢"），或者明显是接着比（"和五粮液比呢"）。
+    往回找时只看用户自己说过的话，不看回答 —— 回答里会顺带提到同行，把它们算进来就会研究错对象。
+    """
+    current = await _named_in(message, known, planner)
+    if current and not _FOLLOW_UP_RE.search(message):
+        return current
+    earlier: list[dict] = []
+    for text in reversed([m["content"] for m in history if m["role"] == "user" and isinstance(m["content"], str)][-3:]):
+        earlier = await resolve_text(text, known)
+        if earlier:
+            break
+    merged = {s["code"]: s for s in [*earlier, *current]}   # 上一轮的对象在前，这一句新点名的在后
+    return list(merged.values())
+
+
 async def _run_pipeline(
     message, history, holdings, nav_data, nav_history,
     conversation_id, db_session, profile, user_id, emit,
@@ -163,10 +201,7 @@ async def _run_pipeline(
     # 证券解析在规划之前完成：代码由程序查出来，不让模型凭记忆写
     known = [{"code": h.fund_code, "name": h.fund_name, "asset_type": h.asset_type or "fund"} for h in holdings]
     try:
-        securities = await resolve_text(f"{context}\n{message}" if context else message, known)
-        if not securities:
-            names = await asyncio.to_thread(planner.extract_names, message, context)
-            securities = await resolve_names(names, securities)
+        securities = await resolve_for_turn(message, base_messages, known, planner)
     except Exception:  # noqa: BLE001 — 解析失败不该让整轮研究失败，退回让 Agent 自己调 resolve_security
         securities = []
     if securities:
@@ -265,6 +300,7 @@ async def _run_pipeline(
         results.extend(await asyncio.gather(*[run_task(t) for t in extra]))
 
     status = "passed"
+    debate_result: dict | None = None
     if all_failed:
         status = "failed"
         final_text = "研究任务全部执行失败，未能得出结论。请检查模型服务配置或稍后重试。"
@@ -289,6 +325,17 @@ async def _run_pipeline(
                     + "\n".join(f"- {g}" for g in gaps)) if gaps else ""
         if gaps:
             status = "partial"
+        # 个股深度研究：撰写之前先让多空两方就同一批证据各打各的
+        if plan.playbook == "stock_deep" and not quick and getattr(settings, "debate_enabled", True) and plan.securities:
+            subject = f"{plan.securities[0]['name']}（{plan.securities[0]['code']}）"
+            debate_result = await debate.run(client, light_model_for(settings, model), subject, message, results)
+            if debate_result:
+                await emit({"type": "debate", **debate_result})
+                method = "\n\n".join(filter(None, [method, debate.brief(debate_result)]))
+        # 没做风险测评：一开始就讲明只能给方向，免得写出具体仓位再被打回重写
+        no_sizing = ("用户还没有做风险测评：建议里只能写方向（买入 / 加仓 / 持有 / 减仓 / 卖出），"
+                     "不能出现任何具体的比例、股数、金额或价位。") if profile is None and getattr(settings, "advice_mode", False) else ""
+        gap_note = "\n\n".join(filter(None, [gap_note, no_sizing]))
         instruction = gap_note
         best: tuple[float, str, Verdict] | None = None
         repair_from: tuple[str, Verdict] | None = None
@@ -310,14 +357,17 @@ async def _run_pipeline(
             if not critic_on:
                 final_text = draft or "本轮未能生成回答，请换个问法再试。"
                 break
+            draft = SynthesizerAgent.fix_citations(draft, results)
             verdict = critic.review_answer(draft, results, message, holdings_context, plan.sections)
             await emit({**verdict.as_event("answer"), "attempt": attempt + 1})
             if verdict.passed and draft.strip():
                 final_text = draft
                 break
-            # 只剩"个别数字对不上"这一类问题的草稿留作候选（越过画像约束、乱引证据的不留）
-            if draft.strip() and all(i.startswith("以下数字未出现在工具返回中") for i in verdict.issues):
+            # 问题都是局部的（个别数字对不上、没做风险测评却写了具体仓位）：下一步只改那几处
+            if draft.strip() and repairable(verdict.issues):
                 repair_from = (draft, verdict)
+            # 只有"个别数字对不上"的草稿才留作兜底发布的候选（越过画像约束、乱引证据的不留）
+            if draft.strip() and number_only(verdict.issues):
                 if best is None or verdict.grounding_rate > best[0]:
                     best = (verdict.grounding_rate, draft, verdict)
             instruction = "\n\n".join(filter(None, [gap_note, rewrite_instruction(verdict)]))
@@ -350,7 +400,7 @@ async def _run_pipeline(
                   conversation_id, db_session, user_id, [r.agent for r in results],
                   status=status, results=results,
                   missing=evidence_verdict.missing_evidence if status == "partial" else None,
-                  client=client, model=light_model_for(settings, model), started=started, depth=depth)
+                  client=client, model=light_model_for(settings, model), started=started, depth=depth, debate_result=debate_result)
 
 
 async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, profile, user_id, emit, client, model, settings, started) -> None:
@@ -435,7 +485,7 @@ async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, pro
 async def _finish(
     emit, final_text, grounding, plan, message, holdings,
     conversation_id, db_session, user_id, agents, status="passed", results=None, missing=None,
-    client=None, model="", started=None, depth="auto",
+    client=None, model="", started=None, depth="auto", debate_result=None,
 ) -> None:
     usage = client.usage.as_dict() if isinstance(getattr(client, "usage", None), Usage) else {}
     seconds = round(time.monotonic() - started, 1) if started is not None else None
@@ -464,7 +514,7 @@ async def _finish(
                 "securities": plan.securities,
                 "agents": agents,
                 "grounding_rate": round(grounding["rate"], 3),
-                "usage": usage, "seconds": seconds, "depth": depth, "summary": card,
+                "usage": usage, "seconds": seconds, "depth": depth, "summary": card, "debate": debate_result,
             },
         )
         memory.record(db_session, user_id or 0, "research/published" if status in ("passed", "partial") else "research/withheld",
@@ -485,7 +535,7 @@ async def _finish(
             "intent": plan.intent,
             "agents": agents,
             "grounding_rate": round(grounding["rate"], 3),
-            "usage": usage, "seconds": seconds, "depth": depth, "summary": card,
+            "usage": usage, "seconds": seconds, "depth": depth, "summary": card, "debate": debate_result,
             "message_id": message_id,
         },
     })

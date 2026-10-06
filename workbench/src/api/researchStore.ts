@@ -3,7 +3,7 @@
  * 切到别的页面再回来，对话和正在跑的研究都还在。
  */
 import { useSyncExternalStore } from 'react'
-import { streamChat, type Checkpoint, type Depth, type Proposal, type Security, type StreamEvent, type SummaryCard, type Usage } from '../api'
+import { streamChat, type Checkpoint, type Debate, type Depth, type Proposal, type Security, type StreamEvent, type SummaryCard, type Usage } from '../api'
 
 export interface Evidence { id: string; tool: string; agent: string; taskId: string; ok: boolean; input: string; output: string; asOf: string; source: string }
 export interface Task { id: string; agent: string; goal: string; state: 'pending' | 'running' | 'done' | 'failed' }
@@ -16,6 +16,8 @@ export interface Turn {
   /** 预计用时（秒，来自同类研究的历史耗时）；0 表示还不知道 */
   eta: number
   depth: Depth; summary: SummaryCard | null
+  /** 多空辩论：看多、看空两方就同一批证据各自给出的理由 */
+  debate: Debate | null
   /** 后端存下的消息 ID —— 之后“更短一点”这类改写靠它找到这次研究的证据 */
   messageId: number | null
   /** 这是基于哪一次回答改写的（界面上显示成“改写”而不是新的研究） */
@@ -69,6 +71,8 @@ function apply(turn: Turn, e: StreamEvent): Turn {
         ? { tone: 'ok', text: `${name}通过` }
         : { tone: 'bad', text: `${name}打回：${(e.issues || []).join('；')}` }] }
     }
+    case 'debate':
+      return e.bull && e.bear ? { ...turn, debate: { bull: e.bull, bear: e.bear }, checks: [...turn.checks, { tone: 'info', text: '多空两方已各自陈述，开始撰写' }] } : turn
     case 'replan':
       return { ...turn, checks: [...turn.checks, { tone: 'warn', text: `补充查证：${(e.tasks || []).map(t => t.goal.replace(/^补充查证：/, '')).join('；')}` }] }
     case 'synthesizing':
@@ -104,7 +108,7 @@ export const research = {
     const turn: Turn = { id, question: question.trim(), answer: '', status: '', running: true, intent: '', fallbackPlan: false,
       tasks: [], criteria: [], evidence: [], checks: [], missing: [], followUps: [], seconds: 0, error: '', playbook: '',
       securities: source?.securities ?? [], checkpoints: [], proposals: [], usage: null,
-      eta: 0, depth: options.depth ?? 'auto', summary: null, messageId: null, rewriteOf: source?.messageId ? source.id : null }
+      eta: 0, depth: options.depth ?? 'auto', summary: null, debate: null, messageId: null, rewriteOf: source?.messageId ? source.id : null }
     emit({ turns: [...state.turns, turn], selected: id, focusEvidence: '' })
     const wasHidden = () => typeof document !== 'undefined' && document.hidden
 

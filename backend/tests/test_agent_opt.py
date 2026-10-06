@@ -192,3 +192,132 @@ def test_last_resort_trim_drops_only_the_clause_with_the_unverifiable_number():
     assert "| 元件 | — |" in out and "## 50 这个标题不动" in out             # 表格换成"—"，标题不碰
     assert "2567" in strip_ungrounded("上涨 2567 家，占 50%。", ["50"])      # 2567 里的 "5" 不会被误伤
     assert strip_ungrounded(answer, []) == answer
+
+
+# ── 多空辩论 ────────────────────────────────────────────
+
+def _debate_results():
+    from wealthpilot.services.agents.base import AgentResult
+    ev = [{"id": "E-aaaaaaaaaaaa", "tool": "get_valuation_history", "input": {"code": "600519"}, "status": "ok",
+           "output": '{"pe": {"current": 19.32, "percentile": 4.1}}'},
+          {"id": "E-bbbbbbbbbbbb", "tool": "get_financial_indicators", "input": {"code": "600519"}, "status": "ok",
+           "output": '{"reports": [{"report_date": "2026-06-30", "revenue_yoy_pct": 1.47, "net_profit_yoy_pct": -1.95}]}'}]
+    return [AgentResult("valuation", "研究估值", "PE 19.32", ev)]
+
+
+def test_debate_drops_points_with_fake_evidence_or_invented_numbers():
+    from wealthpilot.services.agents import debate
+    raw = {"points": [
+        {"text": "PE 分位只有 4.1%，是近几年最便宜的时候", "evidence": ["E-aaaaaaaaaaaa"]},
+        {"text": "明年利润会增长 30%", "evidence": ["E-bbbbbbbbbbbb"]},          # 30 不在任何证据里
+        {"text": "机构都在抢筹", "evidence": ["E-cccccccccccc"]},               # 证据编号是编的
+        {"text": "没有证据的话", "evidence": []},
+    ], "weakness": "净利润同比 -1.95%，增长还没恢复"}
+    out = debate.validate(raw, _debate_results())
+    assert [p["text"] for p in out["points"]] == ["PE 分位只有 4.1%，是近几年最便宜的时候"]
+    assert out["points"][0]["evidence"] == ["E-aaaaaaaaaaaa"] and "1.95" in out["weakness"]
+
+
+def test_debate_runs_both_sides_and_briefs_the_writer():
+    import asyncio
+    from types import SimpleNamespace
+
+    from wealthpilot.services.agents import debate
+
+    class Model:
+        def __init__(self):
+            self.systems = []
+
+        def create(self, **kw):
+            self.systems.append(kw["system"])
+            if "看多方" in kw["system"]:
+                return SimpleNamespace(text='{"points":[{"text":"PE 分位 4.1%，很便宜","evidence":["E-aaaaaaaaaaaa"]}],"weakness":"增长停了"}')
+            return SimpleNamespace(text='{"points":[{"text":"净利润同比 -1.95%，还在掉","evidence":["E-bbbbbbbbbbbb"]}],"weakness":"估值已经很低"}')
+
+    model = Model()
+    out = asyncio.run(debate.run(model, "m", "贵州茅台（600519）", "分析茅台", _debate_results()))
+    assert len(model.systems) == 2 and out["bull"]["points"] and out["bear"]["points"]
+    text = debate.brief(out)
+    assert "看多方" in text and "看空方" in text and "[E-aaaaaaaaaaaa]" in text and "不要各打五十大板" in text
+
+    class Broken:
+        def create(self, **kw):
+            raise RuntimeError("offline")
+    assert asyncio.run(debate.run(Broken(), "m", "x", "q", _debate_results())) is None      # 辩论失败不影响研究
+
+    class Empty:
+        def create(self, **kw):
+            return SimpleNamespace(text='{"points":[],"weakness":""}')
+    assert asyncio.run(debate.run(Empty(), "m", "x", "q", _debate_results())) is None
+
+
+def test_broker_target_price_can_be_quoted_but_not_asserted():
+    from wealthpilot.services.agents.critic_agent import CriticAgent
+    check = CriticAgent._check_research_rules
+    assert not [i for i in check("## 预期\n券商给出的目标价区间是 1430 到 2030 元。", []) if "目标价" in i]
+    assert [i for i in check("## 结论\n我们给出目标价 1800 元。", []) if "目标价" in i]
+
+
+def test_playbook_evidence_is_judged_by_code_not_by_the_model():
+    from unittest.mock import Mock
+
+    from wealthpilot.services.agents.base import AgentResult
+    from wealthpilot.services.agents.critic_agent import CriticAgent
+    from wealthpilot.services.agents.playbooks import PLAYBOOKS
+
+    def result(*tools):
+        return AgentResult("x", "g", "", [{"id": f"E-{i:012d}", "tool": t, "input": {}, "output": "{}", "status": "ok"} for i, t in enumerate(tools)])
+
+    client = Mock()
+    critic = CriticAgent(client, "m")
+    criteria = list(PLAYBOOKS["stock_deep"].criteria)
+    full = result("get_financial_indicators", "get_valuation_history", "get_stock_kline", "get_industry_peers",
+                  "get_capital_flow", "get_consensus_forecast")
+    assert critic.review_evidence("q", criteria, [full]).passed
+    client.create.assert_not_called()                      # 固定模板：取到了就是取到了，不再问模型
+    partial = result("get_financial_indicators", "get_valuation_history", "get_stock_kline")
+    verdict = critic.review_evidence("q", criteria, [partial])
+    assert not verdict.passed and verdict.missing_evidence == ["所属行业与同行对比", "资金流向或股东、机构持仓的变化", "卖方一致预期或公司的业绩预告"]
+    client.create.assert_not_called()
+
+
+def test_sizing_violation_is_repairable_but_never_published_as_is():
+    from wealthpilot.services.agents.critic_agent import number_only, repairable
+    numbers = "以下数字未出现在工具返回中，可能是编造的：12.4"
+    sizing = "用户尚未完成风险测评，不得给出具体仓位或价位，但回答中出现：减仓5%"
+    assert repairable([numbers, sizing]) and not number_only([numbers, sizing])
+    assert number_only([numbers]) and not repairable([numbers, "回答缺少必须的章节（需作为标题出现）：多空"])
+    assert not repairable([])
+
+
+def test_miscopied_evidence_ids_are_fixed_by_code():
+    from wealthpilot.services.agents.synthesizer_agent import SynthesizerAgent
+    results = _debate_results()
+    draft = "PE 19.32 [E-aaaaaaaaaaa]，营收同比 1.47% [E-bbbbbbbbbbbb]，还有一句乱引 [E-123456789abc]。"
+    fixed = SynthesizerAgent.fix_citations(draft, results)
+    assert "[E-aaaaaaaaaaaa]" in fixed           # 少抄一位：能唯一对上，补全
+    assert "[E-bbbbbbbbbbbb]" in fixed           # 本来就对的不动
+    assert "E-123456789abc" not in fixed and "还有一句乱引" in fixed   # 对不上的只删标记，不删话
+
+
+def test_repair_applies_what_it_can():
+    import asyncio
+    from types import SimpleNamespace
+
+    from wealthpilot.services.agents.synthesizer_agent import SynthesizerAgent
+    reply = '{"edits":[{"find":"减仓 5%","replace":"适当减仓"},{"find":"这一段原文里没有","replace":"x"}]}'
+    client = SimpleNamespace(create=lambda **kw: SimpleNamespace(text=reply), supports_json_mode=False)
+    out = asyncio.run(SynthesizerAgent(client, "m").repair("建议减仓 5%，其余不动。", ["x"], []))
+    assert out == "建议适当减仓，其余不动。"
+
+
+def test_third_party_actions_are_facts_not_advice():
+    from wealthpilot.services.agents.critic_agent import user_actions
+    # 别人做了什么：事实
+    assert user_actions("公募基金二季度减仓 33.27%，筹码在松动。") == []
+    assert user_actions("| 基金 | 减仓 | -31.58% |") == []
+    assert user_actions("大宗交易里机构专用席位卖出 1299.52 元，平价成交。") == []
+    # 让用户做什么：建议
+    assert user_actions("基金都在减仓，建议你也减仓 30%。") == [("减仓", "30", "%")]
+    assert user_actions("跌破均线就止损，卖出价 1475 元。") == [("卖出", "1475", "元")]
+    assert user_actions("仓位控制在 2 成以内。") == [("仓位", "2", "成")]

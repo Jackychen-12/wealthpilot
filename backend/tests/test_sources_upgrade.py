@@ -102,7 +102,7 @@ def test_draft_route_needs_a_model_and_a_description():
 
 CHANGELOG = """# 更新记录
 
-## 0.3.0 — 2026-11-01
+## 9.9.0 — 2026-11-01
 
 - 新功能甲
 - 新功能乙
@@ -119,8 +119,8 @@ CHANGELOG = """# 更新记录
 
 def test_release_notes_only_newer_versions():
     notes = upgrade.release_notes(CHANGELOG, "0.2.0")
-    assert [n["version"] for n in notes] == ["0.3.0"] and notes[0]["items"] == ["新功能甲", "新功能乙"] and notes[0]["date"] == "2026-11-01"
-    assert [n["version"] for n in upgrade.release_notes(CHANGELOG)] == ["0.3.0", "0.2.0", "0.1.0"]
+    assert [n["version"] for n in notes] == ["9.9.0"] and notes[0]["items"] == ["新功能甲", "新功能乙"] and notes[0]["date"] == "2026-11-01"
+    assert [n["version"] for n in upgrade.release_notes(CHANGELOG)] == ["9.9.0", "0.2.0", "0.1.0"]
     assert upgrade.release_notes("没有版本标题") == []
 
 
@@ -146,8 +146,8 @@ def test_check_reports_behind_and_caches(monkeypatch):
     _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "abc1234"), ("rev-parse", "--abbrev-ref"): (0, "main"),
                             ("status",): (0, ""), ("rev-list",): (0, "3"), ("show",): (0, CHANGELOG)}, calls)
     status = upgrade.check(force=True)
-    assert status["behind"] == 3 and status["latest_version"] == "0.3.0" and "wealthpilot update" in status["how"]
-    assert "0.3.0" in upgrade.notice()
+    assert status["behind"] == 3 and status["latest_version"] == "9.9.0" and "wealthpilot update" in status["how"]
+    assert "9.9.0" in upgrade.notice()
     calls.clear()
     assert upgrade.check()["cached"] and not any(c[0] == "fetch" for c in calls)      # 第二次读缓存，不再联网
     assert upgrade.status()["behind"] == 3 and not any(c[0] == "fetch" for c in calls)  # 页面用的接口从不联网

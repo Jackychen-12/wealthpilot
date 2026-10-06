@@ -261,6 +261,12 @@ class App:
                     else:
                         c.print(f"[dim]◆ {gate}[/] [yellow]打回[/] [dim]{'；'.join(e.get('issues', []))[:110]}[/]")
                     status.update("[dim]撰写并校验回答…")
+                elif kind == "debate":
+                    c.print("[dim]◆ 多空辩论[/]")
+                    for side, color, label in (("bull", "red", "看多"), ("bear", "green", "看空")):
+                        for p in e.get(side, {}).get("points", []):
+                            c.print(f"  [{color}]{label}[/] {p['text']} [dim]{' '.join(i[2:6] for i in p['evidence'])}[/]", highlight=False)
+                    status.update("[dim]撰写并校验回答…")
                 elif kind == "synthesizing":
                     status.update("[dim]整合各方证据…")
                 elif kind == "checkpoints":

@@ -444,3 +444,67 @@ def summarize_kline(records: list[dict]) -> dict:
         "range_position_pct": round((latest - low) / (high - low) * 100, 1) if high > low else None,
         "price_basis": "前复权收盘价",
     }
+
+
+async def fetch_business_segments(code: str) -> dict | None:
+    """最新一期的主营构成：按产品、按地区、按行业各自的收入占比与毛利率。"""
+    rows, _ = await datacenter("RPT_F10_FN_MAINOP", filter=f'(SECURITY_CODE="{plain_code(code)}")', page_size=60, sort="REPORT_DATE")
+    if not rows:
+        return None
+    latest = rows[0].get("REPORT_DATE")
+    kinds = {"1": "by_industry", "2": "by_product", "3": "by_region"}
+    out: dict = {"report_date": str(latest or "")[:10], "report_name": rows[0].get("REPORT_NAME") or "",
+                 "by_industry": [], "by_product": [], "by_region": []}
+    for r in rows:
+        if r.get("REPORT_DATE") != latest or str(r.get("MAINOP_TYPE")) not in kinds:
+            continue
+        ratio, margin = r.get("MBI_RATIO"), r.get("GROSS_RPOFIT_RATIO")
+        out[kinds[str(r["MAINOP_TYPE"])]].append({
+            "name": r.get("ITEM_NAME") or "", "revenue_yi": _r((r.get("MAIN_BUSINESS_INCOME") or 0) / 1e8),
+            "revenue_ratio_pct": _r(ratio * 100) if isinstance(ratio, (int, float)) else None,
+            "gross_margin_pct": _r(margin * 100) if isinstance(margin, (int, float)) else None,
+        })
+    for key in kinds.values():
+        out[key].sort(key=lambda i: -(i["revenue_ratio_pct"] or 0))
+    return out
+
+
+async def fetch_minute(code: str, days: int = 1) -> dict | None:
+    """分时：每分钟的价格、当日均价与成交量。days=1 是最近一个交易日，days=5 是最近五个交易日。"""
+    symbol = market_symbol(code)
+    path = "minute/query" if days <= 1 else "day/query"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers=_HEADERS) as client:
+            resp = await client.get(f"https://web.ifzq.gtimg.cn/appstock/app/{path}", params={"code": symbol})
+        node = (resp.json().get("data") or {}).get(symbol) or {}
+    except Exception:
+        return None
+    quote = (node.get("qt") or {}).get(symbol) or []
+    sessions = [{"date": str((node.get("data") or {}).get("date") or ""), "data": (node.get("data") or {}).get("data") or []}] if days <= 1 \
+        else [{"date": str(d.get("date") or ""), "data": d.get("data") or [], "prev_close": d.get("prec")} for d in reversed(node.get("data") or [])]
+    points: list[dict] = []
+    for session in sessions:
+        last_volume = 0.0
+        for line in session["data"]:
+            parts = str(line).split()
+            if len(parts) < 3:
+                continue
+            price, volume = _f(parts[1]), _f(parts[2]) or 0.0
+            amount = _f(parts[3]) if len(parts) > 3 else None
+            if price is None:
+                continue
+            day = session["date"]
+            points.append({
+                "time": f"{day[:4]}-{day[4:6]}-{day[6:8]} {parts[0][:2]}:{parts[0][2:]}" if len(day) == 8 else f"{parts[0][:2]}:{parts[0][2:]}",
+                "price": price,
+                # 接口给的是累计成交量（手）和累计成交额：均价 = 累计额 / 累计量，每分钟的量 = 两个累计值之差
+                "avg": round(amount / (volume * 100), 3) if amount and volume else None,
+                "volume": max(0.0, volume - last_volume),
+            })
+            last_volume = volume
+    if not points:
+        return None
+    prev_close = _f(quote[4]) if len(quote) > 4 else None
+    if days > 1 and sessions and sessions[0].get("prev_close"):
+        prev_close = _f(sessions[0]["prev_close"])
+    return {"code": plain_code(code), "name": quote[1] if len(quote) > 1 else "", "prev_close": prev_close, "days": 1 if days <= 1 else len(sessions), "points": points}
