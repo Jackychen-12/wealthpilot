@@ -38,6 +38,59 @@ def list_skills():
     return {"skills": [s.summary() for s in found], "invalid": invalid, "dirs": [str(r) for r in skills.roots()], "template": TEMPLATE}
 
 
+@router.get("/gallery")
+def list_gallery():
+    """随项目带的现成方法，标出哪些已经装上了。"""
+    return skills.gallery()
+
+
+@router.post("/gallery/{name}/install")
+def install_gallery_skill(name: str, request: Request):
+    _local_only(request)
+    try:
+        return skills.install_from_gallery(name).summary()
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+def _preview(content: str) -> dict:
+    skill, problems = skills.parse(content)
+    return {"content": content, "skill": skill.summary() if skill else None, "problems": problems}
+
+
+@router.post("/import")
+async def import_skill(body: dict, request: Request):
+    """从一个链接取回别人分享的技能文件。只取回并校验，不保存 —— 这是写给 Agent 的指示，要用户自己看过再存。"""
+    _local_only(request)
+    try:
+        return _preview(await skills.fetch_remote(str(body.get("url") or "")))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@router.post("/draft")
+async def draft_skill(body: dict, request: Request):
+    """按一段描述让模型起草一个技能。同样只返回草稿，不保存。"""
+    import asyncio
+
+    from wealthpilot.services.ai_client import create_ai_client
+    from wealthpilot.settings import get_settings
+
+    _local_only(request)
+    description = str(body.get("description") or "").strip()
+    if len(description) < 6:
+        raise HTTPException(422, "多说两句：这个方法用来看什么、重点关注哪些东西")
+    settings = get_settings()
+    try:
+        client = create_ai_client(settings)
+        content, problems = await asyncio.to_thread(skills.draft, client, settings.active_model, description, str(body.get("base") or ""))
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001 — 模型那边的错误原样告诉用户
+        raise HTTPException(502, f"模型没有返回可用的结果：{str(e)[:200]}") from e
+    return {**_preview(content), "problems": problems}
+
+
 @router.get("/{name}")
 def read_skill(name: str):
     skill = skills.get(name)

@@ -244,6 +244,26 @@ def cmd_watch(_args: argparse.Namespace) -> None:
         print(f"  - {e['name']} {e['code']}：{e['text']}".replace("  ：", "："))
 
 
+def cmd_update(_args: argparse.Namespace) -> None:
+    """把 WealthPilot 升到最新：备份数据库、拉代码、装依赖、重建网页版。"""
+    from wealthpilot.services import upgrade
+
+    sys.exit(0 if upgrade.update() else 1)
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    """自检：哪一环不通、怎么修。"""
+    import asyncio
+
+    from wealthpilot import __version__
+    from wealthpilot.services import doctor
+
+    print(f"WealthPilot v{__version__} 自检" + ("" if not args.offline else "（不实测模型）"))
+    items = asyncio.run(doctor.run(online=not args.offline, port=args.port))
+    print(doctor.render(items))
+    sys.exit(1 if any(i["status"] == "fail" for i in items) else 0)
+
+
 def cmd_mcp(_args: argparse.Namespace) -> None:
     from wealthpilot.mcp_server import main as mcp_main
     mcp_main()
@@ -283,6 +303,8 @@ def main() -> None:
         prog="wealthpilot",
         description="WealthPilot — AI 智能投顾 Agent CLI",
     )
+    from wealthpilot import __version__
+    parser.add_argument("-V", "--version", action="version", version=f"wealthpilot {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     run_p = sub.add_parser("run", help="启动 API 服务")
@@ -298,6 +320,10 @@ def main() -> None:
         p.add_argument("--no-web", action="store_true", help="只用终端，不在后台启动网页版")
         p.add_argument("--port", type=int, default=8000, help="网页版和接口的端口，默认 8000")
     sub.add_parser("watch", help="跑一次每日盯盘并打印简报（可挂 cron）")
+    sub.add_parser("update", help="升级到最新版本（先备份数据库；有本地改动会停下来问）")
+    doctor_p = sub.add_parser("doctor", help="自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修")
+    doctor_p.add_argument("--offline", action="store_true", help="不实测模型调用")
+    doctor_p.add_argument("--port", type=int, default=8000)
     sub.add_parser("mcp", help="启动 MCP Server (stdio, for Claude Code)")
 
     ask_p = sub.add_parser("ask", help="非交互式 AI 查询（支持管道输入）")
@@ -312,6 +338,8 @@ def main() -> None:
         "chat": cmd_chat,
         "tui": cmd_tui,
         "watch": cmd_watch,
+        "update": cmd_update,
+        "doctor": cmd_doctor,
         "mcp": cmd_mcp,
         "ask": cmd_ask,
     }

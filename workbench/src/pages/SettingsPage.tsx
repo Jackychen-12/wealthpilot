@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import { DEMO, api, useApi } from '../api'
+import { DEMO, api, useApi, type AppSettings, type DoctorItem } from '../api'
 import { Button, Callout, Input, Select, Tag } from '../components/kit'
 import { DataState, Page, Section } from '../components/ui'
 
@@ -15,6 +15,127 @@ const Toggle: React.FC<{ label: string; hint: string; checked: boolean; onChange
     </span>
   </label>
 )
+
+/**
+ * 手机触达：绑定一个 Telegram 机器人。令牌和其他设置一起保存；绑定哪个聊天靠配对码 ——
+ * 在这里生成，在 Telegram 里发给机器人，谁发对了谁就是主人。
+ */
+const Reach: React.FC<{ data: AppSettings; token: string; onToken: (v: string) => void; base: string; onBase: (v: string) => void }> = ({ data, token, onToken, base, onBase }) => {
+  const channel = useApi(api.channel)
+  const [code, setCode] = useState('')
+  const [note, setNote] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const [busy, setBusy] = useState('')
+  const saved = data.secrets.telegram_bot_token?.set
+  const paired = channel.data?.paired
+  const reload = channel.reload
+  // 配对码亮着的时候每 3 秒看一眼：用户在手机上发完，这里自己变成“已绑定”
+  useEffect(() => {
+    if (!code || paired) return undefined
+    const timer = setInterval(reload, 3000)
+    return () => clearInterval(timer)
+  }, [code, paired, reload])
+  useEffect(() => { if (paired) setCode('') }, [paired])
+  const act = async (key: string, work: () => Promise<void>) => {
+    setBusy(key); setNote(null)
+    try { await work() } catch (e) { setNote({ tone: 'danger', text: e instanceof Error ? e.message : '操作失败' }) } finally { setBusy('') }
+  }
+  return (
+    <Section title="手机触达" hint="在手机上收每日简报和提醒、直接提问、处理建议单">
+      <div className="grid max-w-2xl gap-3">
+        <Input id="s-tg" label="Telegram 机器人令牌" type="password" autoComplete="off"
+          placeholder={saved ? `已配置（${data.secrets.telegram_bot_token.hint}），留空表示不改` : '粘贴令牌，然后点页面底部的「保存」'}
+          hint="在 Telegram 里找 @BotFather，发 /newbot，按提示起个名字，它会回你一串令牌。这个机器人只属于你。"
+          value={token} onChange={(e) => onToken(e.target.value)} />
+        <details className="text-[13px] text-steel">
+          <summary className="cursor-pointer select-none hover:text-ink">本机连不上 Telegram？</summary>
+          <div className="mt-2"><Input id="s-tgbase" label="接口地址" value={base} onChange={(e) => onBase(e.target.value)} hint="默认 https://api.telegram.org。需要走中转时改成你的中转地址，保存后生效。" /></div>
+        </details>
+        {!saved ? null : paired ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-hairline p-4 text-sm">
+            <Tag tone="green">已绑定</Tag>
+            <span className="text-charcoal">每日简报、定时任务的结论和提醒会推到这个聊天。发 /help 看它能做什么。</span>
+            <span className="ml-auto flex gap-2">
+              <Button size="xs" variant="secondary" loading={busy === 'test'} onClick={() => void act('test', async () => {
+                const r = await api.testChannel()
+                setNote(r.ok ? { tone: 'success', text: '测试消息已发出，看一下手机' } : { tone: 'danger', text: r.error })
+              })}>发一条测试消息</Button>
+              <Button size="xs" variant="ghost" loading={busy === 'unpair'} onClick={() => void act('unpair', async () => { await api.unpairChannel(); reload() })}>解除绑定</Button>
+            </span>
+          </div>
+        ) : code ? (
+          <div className="rounded-lg border border-hairline p-4 text-sm">
+            <p className="text-charcoal">在 Telegram 里打开你的机器人，给它发这条消息（10 分钟内有效）：</p>
+            <p className="mt-2 select-all font-mono text-xl font-semibold tracking-wider text-ink">/pair {code}</p>
+            <p className="mt-2 text-[13px] text-steel">发完这里会自动变成“已绑定”。之后只有这个聊天能指挥它，别人给机器人发消息不会有回应。</p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-hairline p-4 text-sm">
+            <span className="text-charcoal">令牌已保存，还差一步：告诉机器人谁是它的主人。</span>
+            <Button size="sm" variant="secondary" loading={busy === 'pair'} onClick={() => void act('pair', async () => setCode((await api.pairChannel()).code))}>生成配对码</Button>
+          </div>
+        )}
+        {note ? <Callout tone={note.tone}>{note.text}</Callout> : null}
+      </div>
+    </Section>
+  )
+}
+
+const DOCTOR_MARK: Record<DoctorItem['status'], { mark: string; cls: string }> = {
+  ok: { mark: '✓', cls: 'text-on-mint' }, warn: { mark: '!', cls: 'text-on-yellow' }, fail: { mark: '✗', cls: 'text-on-rose' },
+}
+
+/** 版本与自检：现在是哪一版、有没有新的；哪一环不通、怎么修。 */
+const VersionAndDoctor: React.FC = () => {
+  const version = useApi(() => api.version())
+  const [checking, setChecking] = useState(false)
+  const [fresh, setFresh] = useState<Awaited<ReturnType<typeof api.version>> | null>(null)
+  const [items, setItems] = useState<DoctorItem[] | null>(null)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+  const v = fresh ?? version.data
+  const check = async () => {
+    setChecking(true); setError('')
+    try { setFresh(await api.version(true)) } catch (e) { setError(e instanceof Error ? e.message : '检查失败') } finally { setChecking(false) }
+  }
+  const diagnose = async () => {
+    setRunning(true); setError('')
+    try { setItems((await api.doctor(true)).items) } catch (e) { setError(e instanceof Error ? e.message : '自检失败') } finally { setRunning(false) }
+  }
+  return (
+    <Section title="版本与自检" hint={v ? `v${v.version}${v.commit ? ` · ${v.commit}` : ''}` : undefined}>
+      <div className="grid max-w-2xl gap-3">
+        {v?.behind ? (
+          <Callout tone="info" title={`有${v.latest_version && v.latest_version !== v.version ? `新版本 ${v.latest_version}` : ` ${v.behind} 处更新`}`}>
+            在终端里运行 <code className="rounded-xs bg-canvas/60 px-1 font-mono text-xs">wealthpilot update</code>。它会先备份数据库；仓库里有你自己的改动时会停下来，不会覆盖。
+            {v.notes.map((n) => (
+              <div key={n.version} className="mt-2">
+                <p className="font-medium">v{n.version} <span className="font-normal opacity-70">{n.date}</span></p>
+                <ul className="list-disc pl-4">{n.items.map((i) => <li key={i}>{i}</li>)}</ul>
+              </div>
+            ))}
+          </Callout>
+        ) : v ? <p className="text-sm text-charcoal">{v.checked ? '已经是最新。' : v.how || '还没有检查过更新。'}</p> : null}
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" loading={checking} onClick={() => void check()}>检查更新</Button>
+          <Button size="sm" variant="secondary" loading={running} onClick={() => void diagnose()}>自检</Button>
+          {running ? <span className="self-center text-[13px] text-steel">正在逐项检查模型、数据源、数据库…</span> : null}
+        </div>
+        {error ? <Callout tone="danger">{error}</Callout> : null}
+        {items ? (
+          <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline text-sm">
+            {items.map((i) => (
+              <li key={i.name} className="flex items-baseline gap-3 px-4 py-2">
+                <span className={`w-4 shrink-0 text-center font-mono font-semibold ${DOCTOR_MARK[i.status].cls}`}>{DOCTOR_MARK[i.status].mark}</span>
+                <span className="w-28 shrink-0 text-ink sm:w-44">{i.name}</span>
+                <span className="min-w-0 text-charcoal [overflow-wrap:anywhere]">{i.detail}{i.fix ? <span className="mt-0.5 block text-[13px] text-steel">{i.fix}</span> : null}</span>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="text-[13px] text-steel">自检会实际调用一次模型、各取一次行情和财务数据，告诉你哪一环不通、怎么修。终端里对应的命令是 <code className="font-mono text-xs">wealthpilot doctor</code>。</p>}
+      </div>
+    </Section>
+  )
+}
 
 /** 设置：在网页上改配置，不用编辑 .env。保存后立即生效。 */
 const SettingsPage: React.FC = () => {
@@ -37,7 +158,8 @@ const SettingsPage: React.FC = () => {
     e.preventDefault()
     setBusy(true); setMessage(null)
     try {
-      await api.saveSettings({ ...form, ...keys, paper_initial_cash: Number(form.paper_initial_cash), watch_move_pct: Number(form.watch_move_pct) })
+      await api.saveSettings({ ...form, ...keys, paper_initial_cash: Number(form.paper_initial_cash), watch_move_pct: Number(form.watch_move_pct),
+        auto_daily_runs_max: Number(form.auto_daily_runs_max) })
       setKeys({})
       settings.reload()
       setMessage({ tone: 'success', text: '已保存，立即生效' })
@@ -59,7 +181,7 @@ const SettingsPage: React.FC = () => {
     return <Page title="设置" description="模型、研究方式、模拟盘和每日盯盘"><Callout tone="info">在线演示没有后端，这一页在本地运行后可用。</Callout></Page>
   }
   return (
-    <Page title="设置" description="模型、研究方式、模拟盘和每日盯盘。保存后立即生效，不用重启">
+    <Page title="设置" description="模型、研究方式、手机触达、模拟盘和每日盯盘。保存后立即生效，不用重启">
       <DataState loading={settings.loading && !data} error={settings.error} onRetry={settings.reload}>
         {data ? (
           <form onSubmit={save} className="flex flex-col gap-10">
@@ -88,6 +210,9 @@ const SettingsPage: React.FC = () => {
               </div>
             </Section>
 
+            <Reach data={data} token={keys.telegram_bot_token ?? ''} onToken={(v) => setKeys((k) => ({ ...k, telegram_bot_token: v }))}
+              base={String(form.telegram_api_base ?? '')} onBase={(v) => set('telegram_api_base', v)} />
+
             <Section title="模拟盘">
               <div className="grid max-w-2xl gap-3">
                 <Toggle label="开启模拟盘" locked={locked('broker')} checked={form.broker === 'paper'} onChange={(v) => set('broker', v ? 'paper' : 'none')}
@@ -105,6 +230,9 @@ const SettingsPage: React.FC = () => {
                   <Input id="s-move" label="涨跌超过多少算异动（%）" type="number" min="0.1" step="0.1" value={String(form.watch_move_pct ?? '')} onChange={(e) => set('watch_move_pct', e.target.value)} />
                 </div>
                 <Input id="s-hook" label="推送地址（可选）" placeholder="企业微信 / 飞书 / Slack 机器人的 webhook 地址" value={String(form.alert_webhook_url ?? '')} onChange={(e) => set('alert_webhook_url', e.target.value)} hint="有事才推送；留空则只在「今日」页显示" />
+                <div className="max-w-xs"><Input id="s-auto" label="定时任务每天最多自动跑几次" type="number" min="0" step="1" value={String(form.auto_daily_runs_max ?? '')} onChange={(e) => set('auto_daily_runs_max', e.target.value)} hint="每次都会调用模型。手动点「现在跑一次」不算在内" /></div>
+                <Toggle label="启动时检查更新" locked={locked('update_check')} checked={Boolean(form.update_check)} onChange={(v) => set('update_check', v)}
+                  hint="只读取本仓库的远端有没有新提交，不上传任何东西。关掉后仍可以手动点「检查更新」。" />
               </div>
             </Section>
 
@@ -115,6 +243,7 @@ const SettingsPage: React.FC = () => {
           </form>
         ) : null}
       </DataState>
+      {data ? <VersionAndDoctor /> : null}
     </Page>
   )
 }

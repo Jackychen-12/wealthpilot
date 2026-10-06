@@ -37,6 +37,8 @@ async def chat(
             db_session=db,
             profile=load_profile(db, user_id),
             user_id=user_id,
+            depth=req.depth,
+            rewrite_of=req.rewrite_of,
         ),
         media_type="text/event-stream",
         headers={

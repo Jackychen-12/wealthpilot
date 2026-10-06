@@ -100,7 +100,7 @@ class PlannerAgent:
         self.profile = profile
 
     def plan(self, message: str, context: str = "", securities: list[dict] | None = None,
-             holdings: list | None = None, nav_data: dict | None = None) -> Plan:
+             holdings: list | None = None, nav_data: dict | None = None, depth: str = "auto") -> Plan:
         """规划一轮研究。
 
         先识别意图：命中研究模板就由代码生成任务图（稳定、可预期），否则用模型拆解的任务。
@@ -108,6 +108,8 @@ class PlannerAgent:
         securities 是规划之前已经解析出来的证券 —— 代码不让模型猜。
         """
         securities = securities or []
+        if depth == "quick":
+            return self._quick_plan(message, context, securities, holdings or [])
         # 用户自己写的方法优先：话里点到了某个技能的触发词，就按它来，不再让模型另外规划
         skill = skills.match(message)
         if skill:
@@ -118,6 +120,10 @@ class PlannerAgent:
                             playbook=skill.key, sections=list(skill.sections), securities=securities, method=skill.body)
         decision = self._decide(message, context, securities)
         intent = decision.intent if decision else self.classify_by_rules(message, securities, bool(holdings))
+        if depth == "deep" and intent not in _PLAYBOOK_INTENTS:
+            # 用户点了"深入"：问题里有股票就走完整的研究模板，哪怕问法很随意
+            stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
+            intent = "stock_compare" if len(stocks) >= 2 else "stock_deep" if stocks else intent
 
         from wealthpilot.services.agents.playbooks import PLAYBOOKS, build_tasks
         if intent in PLAYBOOKS:
@@ -135,6 +141,30 @@ class PlannerAgent:
         plan = decision if decision and decision.tasks else self._keyword_fallback(message)
         plan.securities = securities
         return plan
+
+    def _quick_plan(self, message: str, context: str, securities: list[dict], holdings: list) -> Plan:
+        """快速回答：最多派两个 Agent，不走完整模板、不留验证点，十来秒给一个带证据的短结论。"""
+        from wealthpilot.services.agents.playbooks import _stock_tasks
+
+        stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
+        decision = self._decide(message, context, securities)
+        intent = decision.intent if decision else self.classify_by_rules(message, securities, bool(holdings))
+        if decision and decision.tasks:
+            tasks = decision.tasks[:1]
+        elif intent in ("stock_deep", "stock_compare") and stocks:
+            dims = ("valuation",) if len(stocks) > 1 else ("fundamental", "valuation")
+            tasks = [t for i, s in enumerate(stocks[:2]) for t in _stock_tasks(s, dims, f"q{i + 1}_")][:2]
+        elif intent == "holding_review" and holdings:
+            tasks = [Task("portfolio", "portfolio", "概括用户持仓的市值与收益、最大的一个风险点，并做画像约束校验")]
+        elif intent == "screen":
+            tasks = [Task("screen", "screener", f"按用户的要求筛选股票：{message}")]
+        elif intent == "review":
+            tasks = [Task("review", "review", "概括验证点成绩单：成立、被证伪、待核对各多少")]
+        else:
+            tasks = self._keyword_fallback(message).tasks[:1]
+        for t in tasks:
+            t.deps = []
+        return Plan(intent="快速回答", tasks=tasks, source="llm" if decision else "fallback", securities=securities)
 
     def extract_names(self, message: str, context: str = "") -> list[str]:
         """让模型列出问题里提到的证券名称（简称、基金名），供解析环节去查代码。失败返回 []。"""

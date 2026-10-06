@@ -109,6 +109,8 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="用户消息")
     history: list[dict[str, str]] = Field(default_factory=list, description="对话历史")
     conversation_id: str | None = Field(default=None, description="会话 ID")
+    depth: str = Field(default="auto", pattern="^(auto|quick|deep)$", description="quick 快速回答 / deep 完整研究 / auto 自动判断")
+    rewrite_of: int | None = Field(default=None, description="基于哪一次研究（回答的消息 ID）已有的证据来回答，不重新取证")
 
 
 # === Investor Profile ===

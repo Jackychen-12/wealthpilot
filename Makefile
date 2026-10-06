@@ -1,4 +1,4 @@
-.PHONY: setup start install uninstall dev backend workbench demo-build record-demo test docker clean
+.PHONY: setup start install uninstall update doctor dev backend workbench demo-build record-demo test docker clean
 
 setup:           ## 首次配置：复制 .env、安装依赖
 	@test -f backend/.env || cp backend/.env.example backend/.env
@@ -31,6 +31,12 @@ install:         ## 把 wealthpilot 装成全局命令（任意目录可用；�
 
 uninstall:       ## 移除全局命令
 	@rm -f $(HOME)/.local/bin/wealthpilot && echo "已移除 ~/.local/bin/wealthpilot"
+
+update:          ## 升级到最新版本（先备份数据库；有本地改动会停下来问）
+	cd backend && uv run wealthpilot update
+
+doctor:          ## 自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修
+	cd backend && uv run wealthpilot doctor
 
 dev:             ## 开发：后端热重载 + 网页版改了自动重新构建，只有一个地址 http://localhost:8000
 	@echo "开发模式：http://localhost:8000 （改了前端代码会自动重新构建，刷新页面即可）"

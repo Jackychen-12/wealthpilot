@@ -18,12 +18,13 @@ from wealthpilot.storage.db import get_engine
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "telegram_bot_token")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
     "advice_mode", "checkpoints_enabled", "broker", "paper_initial_cash",
     "watch_enabled", "watch_time", "watch_move_pct", "alert_webhook_url",
+    "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -66,6 +67,28 @@ def _write_env(updates: dict[str, str]) -> None:
     lines += [f"{k}={v}" for k, v in left.items()]
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
     ENV_FILE.chmod(0o600)
+
+
+@router.get("/version")
+async def version(request: Request, refresh: bool = False):
+    """现在是哪一版、有没有新的。默认读缓存；refresh=1 时去远端看一眼。"""
+    import asyncio
+
+    from wealthpilot.services import upgrade
+
+    _local_only(request)
+    # 平时只读缓存（后台每半天检查一次）；用户点了「检查更新」才去远端看
+    return await asyncio.to_thread(upgrade.check, force=True) if refresh else await asyncio.to_thread(upgrade.status)
+
+
+@router.get("/doctor")
+async def doctor(request: Request, model: bool = False):
+    """自检：数据源、模型、数据库、手机触达、版本，各自通不通、不通怎么修。model=1 时实测一次模型调用。"""
+    from wealthpilot.services import doctor as checks
+
+    _local_only(request)
+    port = request.url.port or get_settings().port
+    return {"items": await checks.run(online=model, port=port, serving=True)}
 
 
 @router.put("")

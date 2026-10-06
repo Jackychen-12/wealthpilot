@@ -161,6 +161,25 @@ export const api = {
   skill: (name: string) => request<SkillInfo>(`/api/skills/${name}`),
   saveSkill: (name: string, content: string) => request<SkillInfo>(`/api/skills/${name}`, json('PUT', { content })),
   removeSkill: (name: string) => request<unknown>(`/api/skills/${name}`, { method: 'DELETE' }),
+  skillGallery: () => request<(SkillInfo & { installed: boolean })[]>('/api/skills/gallery'),
+  installGallerySkill: (name: string) => request<SkillInfo>(`/api/skills/gallery/${name}/install`, { method: 'POST' }),
+  importSkill: (url: string) => request<SkillPreview>('/api/skills/import', json('POST', { url })),
+  draftSkill: (description: string, base = '') => request<SkillPreview>('/api/skills/draft', json('POST', { description, base })),
+  onboarding: () => request<Onboarding>('/api/onboarding'),
+  dismissOnboarding: () => request<unknown>('/api/onboarding/dismiss', { method: 'POST' }),
+  parseHoldings: (text: string) => request<{ rows: ParsedHolding[] }>('/api/portfolio/parse', json('POST', { text })),
+  addHoldings: (rows: ParsedHolding[]) => request<{ added: number; skipped: string[] }>('/api/portfolio/batch', json('POST', { rows })),
+  channel: () => request<{ channel: string; configured: boolean; paired: boolean }>('/api/channel'),
+  pairChannel: () => request<{ code: string; ttl_seconds: number }>('/api/channel/pair', { method: 'POST' }),
+  unpairChannel: () => request<unknown>('/api/channel/pair', { method: 'DELETE' }),
+  testChannel: () => request<{ ok: boolean; error: string }>('/api/channel/test', { method: 'POST' }),
+  automations: () => request<{ items: Automation[]; metrics: { key: string; label: string; unit: string }[]; daily_runs_max: number; running: boolean }>('/api/automations'),
+  saveAutomation: (body: Record<string, unknown>, id?: number) => request<Automation & { current?: number | null; hit?: boolean }>(id ? `/api/automations/${id}` : '/api/automations', json(id ? 'PUT' : 'POST', body)),
+  removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
+  runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
+  parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
+  version: (refresh = false) => request<VersionInfo>(`/api/settings/version${refresh ? '?refresh=1' : ''}`),
+  doctor: (model = false) => request<{ items: DoctorItem[] }>(`/api/settings/doctor${model ? '?model=1' : ''}`),
   connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
   testConnector: (name: string) => request<ConnectorTest>(`/api/connectors/${name}/test`, { method: 'POST' }),
   fundNav: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/fund/${code}/nav?days=${days}`),
@@ -244,7 +263,7 @@ export interface Scorecard extends ScoreRow { unverifiable: number; hold_rate_pc
 export interface BrokerPosition { code: string; name: string; asset_type: string; shares: number; cost_price: number; price: number | null; market_value: number; pnl: number | null; pnl_pct: number | null }
 export interface BrokerOverview { mode: 'none' | 'paper'; cash: number; initial_cash: number; market_value: number; total_assets: number; total_pnl: number; total_pnl_pct: number; positions: BrokerPosition[]; rules: string }
 export interface BrokerOrder { id: number; code: string; name: string; side: 'buy' | 'sell'; shares: number; price: number | null; amount: number; fee: number; status: 'filled' | 'rejected'; reason: string; proposal_id: number | null; created_at: string }
-export interface DigestEvent { kind: string; code: string; name: string; held: boolean; text: string; url?: string }
+export interface DigestEvent { kind: string; code: string; name: string; held: boolean; text: string; url?: string; message_id?: number | null }
 export interface Digest { id: number; day: string; summary: string; events: DigestEvent[]; created_at: string }
 export interface FilingText { art_code: string; title: string; date: string; total_chars: number; page?: number; pages?: number; text: string }
 export interface ReportExcerpts { title: string; date: string; category: string; art_code: string; url: string; total_chars: number; note: string; sections: { topic: string; heading: string; excerpt: string }[] }
@@ -260,6 +279,17 @@ export interface Mover { code: string; name: string; industry: string; price: nu
 export interface MemoryItem { id: number; kind: 'preference' | 'decision' | 'note'; code: string; content: string; source: string; created_at: string }
 export interface AuditEntry { id: number; at: string; kind: string; actor: string; summary: string; payload: Record<string, unknown>; hash: string }
 export interface SkillInfo { name: string; label: string; description: string; when_to_use: string; triggers: string[]; needs: string; agents: string[]; sections: string[]; criteria: string[]; path: string; content?: string }
+export interface SkillPreview { content: string; skill: SkillInfo | null; problems: string[] }
+export interface Onboarding { steps: { key: string; title: string; done: boolean; to: string; hint: string; optional?: boolean }[]; complete: boolean; dismissed: boolean }
+export interface ParsedHolding { line: string; query: string; shares: number | null; cost: number | null; code: string; name: string; asset_type: string; problem: string; ok: boolean }
+export interface Automation { id: number; kind: 'task' | 'alert'; title: string; enabled: boolean; last_run_at: string | null; last_status: string; last_result: string; created_at: string
+  schedule?: string; prompt?: string; depth?: string; last_message_id?: number | null; next_run_at?: string | null
+  code?: string; name?: string; metric?: string; op?: '>=' | '<='; threshold?: number; repeat?: boolean; condition?: string; unit?: string }
+export interface VersionInfo { version: string; git: boolean; commit: string; branch: string; dirty: string[]; checked: boolean; behind: number; latest_version?: string; how?: string
+  notes: { version: string; date: string; items: string[] }[] }
+export interface DoctorItem { name: string; status: 'ok' | 'warn' | 'fail'; detail: string; fix: string }
+export interface SummaryCard { conclusion: string; stance: string; truncated: boolean }
+export type Depth = 'auto' | 'quick' | 'deep'
 export interface Usage { calls: number; input_tokens: number; cached_tokens: number; output_tokens: number; cache_hit_pct: number }
 export interface ConnectorInfo { name: string; label: string; kind: string; transport: string; endpoint: string; enabled: boolean; description: string; auth: string }
 export interface ConnectorTest { ok: boolean; error?: string; allowed_count?: number; blocked_count?: number
@@ -295,19 +325,21 @@ export interface StreamEvent {
   tasks?: { id: string; agent: string; goal: string }[]
   evidence?: { id: string; tool: string; status: string; input: unknown; output: unknown; provenance?: { as_of?: Record<string, string | null>; sources?: { url?: string }[] } }
   gate?: string; passed?: boolean; issues?: string[]; attempt?: number
-  agents?: string[]; ungrounded?: string[]; follow_ups?: string[]
-  meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string; usage?: Usage }
+  agents?: string[]; ungrounded?: string[]; follow_ups?: string[]; eta_seconds?: number; depth?: string; mode?: string
+  meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string; usage?: Usage
+    summary?: SummaryCard | null; message_id?: number | null; seconds?: number; depth?: string }
 }
 
 export async function* streamChat(
   message: string, history: { role: string; content: string }[], signal: AbortSignal, conversationId = '',
+  options: { depth?: Depth; rewriteOf?: number | null } = {},
 ): AsyncGenerator<StreamEvent> {
   if (DEMO) {
     const { demoChat } = await import('../demo')
     yield* demoChat(message, signal)
     return
   }
-  const resp = await fetch(`${API_BASE}/api/chat`, { ...json('POST', { message, history, conversation_id: conversationId || undefined }), headers: { 'Content-Type': 'application/json', ...authHeaders() }, signal })
+  const resp = await fetch(`${API_BASE}/api/chat`, { ...json('POST', { message, history, conversation_id: conversationId || undefined, depth: options.depth ?? 'auto', rewrite_of: options.rewriteOf ?? undefined }), headers: { 'Content-Type': 'application/json', ...authHeaders() }, signal })
   if (!resp.ok || !resp.body) throw new ApiError(`对话请求失败（${resp.status}）`)
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()

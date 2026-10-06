@@ -1,7 +1,7 @@
 /** Agent 的三个"可调教、可追责"的页面：研究方法（技能）、AI 记住的事（记忆）、审计日志。 */
 import type React from 'react'
 import { useState } from 'react'
-import { DEMO, api, useApi, type MemoryItem, type SkillInfo } from '../api'
+import { DEMO, api, useApi, type MemoryItem, type SkillInfo, type SkillPreview } from '../api'
 import { AskAi } from '../components/AskAi'
 import { Button, Callout, ConfirmDialog, Drawer, Input, Tag, type Tone } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
@@ -11,11 +11,36 @@ const NEEDS: Record<string, string> = { stock: '一只股票', stocks: '多只�
 
 export const SkillsPage: React.FC = () => {
   const list = useApi(api.skills)
-  const [editing, setEditing] = useState<{ name: string; content: string; isNew: boolean } | null>(null)
+  const [editing, setEditing] = useState<{ name: string; content: string; isNew: boolean; origin?: string } | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [removing, setRemoving] = useState<SkillInfo | null>(null)
   const data = list.data
+
+  const gallery = useApi(api.skillGallery)
+  const [url, setUrl] = useState('')
+  const [want, setWant] = useState('')
+  const [working, setWorking] = useState('')
+  const [notice, setNotice] = useState('')
+  // 外面来的方法（链接、AI 起草）都是写给 Agent 的指示：先放进编辑器让用户看过，他点保存才落盘
+  const review = (preview: SkillPreview, origin: string) => {
+    setError(preview.problems.length ? `这份文件还有问题，改好才能保存：${preview.problems.join('；')}` : '')
+    setEditing({ name: preview.skill?.name ?? 'my-method', content: preview.content, isNew: true, origin })
+  }
+  const fetchLink = async () => {
+    setWorking('link'); setError('')
+    try { review(await api.importSkill(url.trim()), `来自 ${url.trim()}`); setUrl('') } catch (e) { setError(e instanceof Error ? e.message : '导入失败') } finally { setWorking('') }
+  }
+  const draft = async () => {
+    setWorking('draft'); setError('')
+    try { review(await api.draftSkill(want.trim()), 'AI 起草'); setWant('') } catch (e) { setError(e instanceof Error ? e.message : '起草失败') } finally { setWorking('') }
+  }
+  const install = async (name: string, label: string) => {
+    setWorking(name); setError(''); setNotice('')
+    try { await api.installGallerySkill(name); list.reload(); gallery.reload(); setNotice(`已装上「${label}」。在提问时说出它的触发词就会用上，也可以点「编辑」改成你自己的做法。`) }
+    catch (e) { setError(e instanceof Error ? e.message : '安装失败') } finally { setWorking('') }
+  }
+  const available = (gallery.data ?? []).filter((g) => !g.installed)
 
   const open = async (name: string) => {
     setError('')
@@ -33,6 +58,7 @@ export const SkillsPage: React.FC = () => {
     <Page title="研究方法" description="把你自己的方法写成一个文件教给 AI：什么时候用、派谁去查、各自查什么、报告分哪几节"
       actions={DEMO || !data ? undefined : <Button size="sm" onClick={() => { setError(''); setEditing({ name: 'my-method', content: data.template, isNew: true }) }}>新建方法</Button>}>
       {error && !editing ? <Callout tone="danger">{error}</Callout> : null}
+      {notice ? <Callout tone="success">{notice}</Callout> : null}
       <Section title="已有的方法" hint="话里出现触发词或方法名时，AI 会按它来研究，而不是自己另行规划">
         <DataState loading={list.loading} error={list.error} onRetry={list.reload}
           empty={data && data.skills.length === 0 ? '还没有方法。点右上角「新建方法」，或把 .md 文件放进技能目录。' : undefined}>
@@ -65,9 +91,48 @@ export const SkillsPage: React.FC = () => {
         {data ? <p className="mt-3 text-[13px] text-steel">文件放在 <code className="font-mono text-xs">{data.dirs[0]}</code>。格式与 DeepSeek Harness 的 skill 相同（YAML frontmatter + Markdown 正文），编排信息写在 <code className="font-mono text-xs">metadata.wealthpilot</code> 下。</p> : null}
       </Section>
 
-      <Drawer open={editing != null} onClose={() => setEditing(null)} title={editing?.isNew ? '新建方法' : `编辑 ${editing?.name ?? ''}`} width="max-w-3xl">
+      {DEMO ? null : (
+        <Section title="添加方法" hint="不用从空白文件写起">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-lg border border-hairline p-4">
+              <p className="text-sm font-medium text-ink">说一句，让 AI 起草</p>
+              <p className="mt-0.5 text-[13px] text-steel">描述你买一只股票前固定要看什么。起草出来的文件会先给你看，改完再保存。</p>
+              <textarea value={want} onChange={(e) => setWant(e.target.value)} rows={3} aria-label="描述你的方法"
+                placeholder="比如：我买消费股之前固定看三件事——毛利率稳不稳、渠道有没有压货、估值是不是在历史低位"
+                className="mt-3 w-full resize-y rounded-md border border-hairline-strong bg-canvas px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-primary focus:ring-1 focus:ring-primary" />
+              <Button size="sm" className="mt-2" loading={working === 'draft'} disabled={want.trim().length < 6} onClick={() => void draft()}>起草</Button>
+            </div>
+            <div className="rounded-lg border border-hairline p-4">
+              <p className="text-sm font-medium text-ink">从链接导入</p>
+              <p className="mt-0.5 text-[13px] text-steel">别人分享的方法文件（.md）。支持 GitHub 上的文件地址；格式和 DeepSeek Harness 的 skill 相同。</p>
+              <div className="mt-3"><Input id="skill-url" aria-label="方法文件的链接" placeholder="https://github.com/…/blob/main/skills/xxx.md" value={url} onChange={(e) => setUrl(e.target.value)} /></div>
+              <Button size="sm" variant="secondary" className="mt-2" loading={working === 'link'} disabled={!/^https:\/\//.test(url.trim())} onClick={() => void fetchLink()}>取回并查看</Button>
+              <p className="mt-2 text-xs text-stone">方法文件是写给 AI 的指示。取回后先给你看内容，你点保存才会生效。</p>
+            </div>
+          </div>
+          {available.length > 0 ? (
+            <div className="mt-4">
+              <p className="mb-2 text-[13px] font-medium text-steel">现成的方法 · 点一下就装上，之后可以随便改</p>
+              <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
+                {available.map((g) => (
+                  <li key={g.name} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-ink"><span className="font-medium">{g.label}</span><Tag className="ml-2 !py-0">{NEEDS[g.needs] ?? g.needs}</Tag></p>
+                      <p className="mt-0.5 truncate text-[13px] text-steel">{g.description.startsWith(g.label) ? g.description.slice(g.label.length).replace(/^[\s—–\-:：]+/, '') : g.description}</p>
+                    </div>
+                    <Button size="xs" variant="secondary" loading={working === g.name} disabled={working !== ''} onClick={() => void install(g.name, g.label)}>装上</Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </Section>
+      )}
+
+      <Drawer open={editing != null} onClose={() => setEditing(null)} title={editing?.isNew ? (editing.origin ? `查看并保存 · ${editing.origin.startsWith('来自') ? '导入的方法' : editing.origin}` : '新建方法') : `编辑 ${editing?.name ?? ''}`} width="max-w-3xl">
         {editing ? (
           <form className="flex h-full flex-col gap-3" onSubmit={save}>
+            {editing.origin ? <Callout tone="warning">{editing.origin.startsWith('来自') ? `${editing.origin}。` : '这是 AI 按你的描述起草的。'}它会决定 AI 以后怎么研究：读一遍，确认是你想要的做法再保存。</Callout> : null}
             <p className="text-[13px] text-steel">上半部分（两条 --- 之间）是配置，下半部分是写给 AI 的做法。正文里 <code className="font-mono text-xs">- fundamental: ……</code> 这样的行是给对应 Agent 的具体指示。</p>
             <textarea value={editing.content} onChange={(e) => setEditing({ ...editing, content: e.target.value })} spellCheck={false} aria-label="方法文件内容"
               className="min-h-[420px] flex-1 resize-y rounded-md border border-hairline bg-surface-soft p-3 font-mono text-[13px] leading-relaxed text-ink outline-none focus:border-primary" />
