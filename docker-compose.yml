@@ -1,39 +1,36 @@
-# WealthPilot — 一键启动前后端
-# 用法: docker compose up --build
-# 工作台: http://localhost:5180
-# 后端: http://localhost:8000/docs
+# WealthPilot — 一个容器、一个端口
+# 用法: docker compose up --build -d
+# 网页版和接口都在 http://localhost:8000 （接口文档 /docs）
+#
+# 配置通过 backend/.env 以环境变量传入。容器里不能用网页上的「设置」页改配置
+# （那个接口只允许本机访问，而且环境变量优先级更高）：改 backend/.env 后 docker compose up -d 即可。
 
 services:
-  backend:
+  wealthpilot:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
-    container_name: wealthpilot-backend
+    container_name: wealthpilot
     restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    environment:
+      # 这几项固定指向数据卷，优先于 backend/.env 里写的相对路径
+      WEALTHPILOT_HOME: /data
+      DB_PATH: /data/wealthpilot.db
+      SKILLS_DIR: /data/skills
+      CONNECTORS_FILE: /data/connectors.json
     volumes:
-      - wealthpilot-data:/app/data
+      - wealthpilot-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      # 镜像里没有 curl，用 Python 自带的库探活
+      test: ["CMD", "uv", "run", "--no-sync", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 30s
-      timeout: 3s
+      timeout: 5s
       retries: 3
-      start_period: 10s
-
-  workbench:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: wealthpilot-workbench
-    restart: unless-stopped
-    ports:
-      - "5180:80"
-    depends_on:
-      backend:
-        condition: service_healthy
+      start_period: 15s
 
 volumes:
   wealthpilot-data:

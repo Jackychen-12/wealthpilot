@@ -138,7 +138,7 @@ git clone https://github.com/Jackychen-12/wealthpilot.git && cd wealthpilot
 cp backend/.env.example backend/.env
 # 编辑 backend/.env 填入 API Key
 docker compose up --build -d
-# 工作台: http://localhost:5180  |  Backend API: http://localhost:8000/docs
+# 网页版和接口都在 http://localhost:8000 （接口文档 /docs）
 ```
 
 ### 在网页上配置（推荐）
@@ -1007,12 +1007,21 @@ cp backend/.env.example backend/.env
 docker compose up --build -d
 ```
 
-启动后工作台在 http://localhost:5180，由 nginx 托管并把 `/api` 反代到后端容器。
+一个容器、一个端口：镜像里先构建网页版，再由后端把页面和接口一起发出去，打开 http://localhost:8000 即可（和本机运行是同一个地址，不再有单独的前端容器和 nginx）。适合放在一台不休眠的机器上全天候跑盯盘，再从自己的电脑用 `wealthpilot --server http://那台机器:8000` 连过去。
+
+- **数据**都在 `wealthpilot-data` 这个卷里（挂在容器的 `/data`）：数据库、技能文件、缓存。自带的两个示例技能第一次启动时会放进去，已有的不覆盖。
+- **配置**通过 `backend/.env` 以环境变量传入，改完 `docker compose up -d` 生效。容器里不能用网页上的「设置」页改配置：那个接口只允许本机访问，而且环境变量的优先级更高。
+- **从旧版升级**：以前是 `backend` 和 `workbench` 两个容器（页面在 5180）。数据卷沿用同一个，数据库位置不变；第一次请加 `--remove-orphans` 清掉旧容器：`docker compose up --build -d --remove-orphans`。
+- **谁能访问**：端口默认对本机所有网卡开放，而未登录时用的是匿名档。放在有别人能连到的网络上时，请在前面加一层带认证的反向代理，或把端口映射改成 `127.0.0.1:8000:8000`。
+
+这套 Docker 配置是按本机实际跑通的目录结构写的（用同样的布局和环境变量在本机模拟过：页面、接口、技能目录、数据库位置都对），但镜像本身没有在 Docker 里构建和运行过。
 
 ### 后端与工作台分开部署
 
 1. 后端：任意能跑容器的平台（如 Railway），Root Directory = `backend`，设置模型 Key 与 `JWT_SECRET`，并把 `FRONTEND_URL` 设为工作台的域名（CORS 白名单）
 2. 工作台：`cd workbench && VITE_API_URL=https://你的后端域名 npm run build`，把 `dist/` 放到任意静态托管
+
+只部署后端时用 `backend/Dockerfile`（只有接口，不含页面）；仓库根目录的 `Dockerfile` 是页面和接口合一的那个。
 
 ### GitHub Pages 在线演示
 
