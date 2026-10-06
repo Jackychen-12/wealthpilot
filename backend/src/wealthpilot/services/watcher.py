@@ -141,22 +141,29 @@ async def run(db: Session, user_id: int, *, today: date | None = None, push: boo
     if open_count:
         events.append({"kind": "proposal", "code": "", "name": "", "held": True, "text": f"有 {open_count} 条操作建议单等你决定"})
 
-    order = {"checkpoint": 0, "report": 1, "filing": 2, "valuation": 3, "move": 4, "proposal": 5, "sync": 6}
+    # 5) 今天早些时候跑过的定时任务、触发过的提醒：还没有简报时记在待并入的位置，有了之后直接写在简报里
+    from wealthpilot.services import automations  # 放在这里导入：automations 也要用到简报表
+    events += automations.pending_events(user_id, today)
+    digest = db.exec(select(Digest).where(Digest.user_id == user_id, Digest.day == str(today))).first() \
+        or Digest(user_id=user_id, day=str(today))
+    with contextlib.suppress(ValueError):
+        events += [e for e in json.loads(digest.events_json) if e.get("kind") in ("task", "alert") and e not in events]
+
+    order = {"checkpoint": 0, "alert": 1, "report": 2, "filing": 3, "valuation": 4, "move": 5, "task": 6, "proposal": 7, "sync": 8}
     events.sort(key=lambda e: (order.get(e["kind"], 9), not e["held"]))
     notable = [e for e in events if e["kind"] not in ("sync", "proposal")]
     summary = (f"盯了 {len(watch)} 只，{len(notable)} 件事值得看" if notable else f"盯了 {len(watch)} 只，今日无事") if watch \
         else "还没有持仓和自选，没有可盯的对象"
 
-    digest = db.exec(select(Digest).where(Digest.user_id == user_id, Digest.day == str(today))).first() \
-        or Digest(user_id=user_id, day=str(today))
     digest.events_json, digest.summary, digest.created_at = json.dumps(events, ensure_ascii=False), summary, datetime.now()
     db.add(digest)
     db.commit()
     db.refresh(digest)
     result = serialize(digest)
-    if push and notable:
+    fresh = [e for e in notable if e["kind"] not in ("task", "alert")]   # 任务与提醒发生时已经单独推过
+    if push and fresh:
         from wealthpilot.services import channels  # 放在这里导入：channels 也要用到本模块
-        result["pushed"] = await channels.notify(channels.digest_text({**result, "events": notable}))
+        result["pushed"] = await channels.notify(channels.digest_text({**result, "events": fresh}))
         if settings.alert_webhook_url:
             result["pushed"] = await _push(settings.alert_webhook_url, result) or result["pushed"]
     return result
@@ -206,19 +213,24 @@ def due_day(now: datetime, hour: int, minute: int):
 
 async def scheduler() -> None:
     """后台循环：最近一个该跑的交易日还没有简报，就给每个有持仓或自选的用户跑一次（含错过后的补跑）。"""
+    from wealthpilot.services import automations
     from wealthpilot.storage.db import get_engine
 
+    rounds = 0
     while True:
         try:
             settings = get_settings()   # 每轮重读：在网页上改了时间或关掉盯盘，不用重启
-            hour, minute = (int(x) for x in settings.watch_time.split(":"))
-            due = due_day(datetime.now(), hour, minute)
             if settings.watch_enabled:
                 with Session(get_engine()) as db:
-                    for uid in _users(db):
-                        last = db.exec(select(Digest).where(Digest.user_id == uid).order_by(Digest.day.desc()).limit(1)).first()
-                        if last is None or last.day < str(due):
-                            await run(db, uid)
+                    await automations.tick(db)   # 到点的任务、盘中的提醒：每分钟看一眼
+                    if rounds % 10 == 0:         # 盯盘本身十分钟看一次就够
+                        hour, minute = (int(x) for x in settings.watch_time.split(":"))
+                        due = due_day(datetime.now(), hour, minute)
+                        for uid in _users(db):
+                            last = db.exec(select(Digest).where(Digest.user_id == uid).order_by(Digest.day.desc()).limit(1)).first()
+                            if last is None or last.day < str(due):
+                                await run(db, uid)
         except Exception:  # noqa: BLE001 — 调度循环不能因为一次失败就停
             pass
-        await asyncio.sleep(600)
+        rounds += 1
+        await asyncio.sleep(60)

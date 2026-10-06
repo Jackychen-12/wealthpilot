@@ -24,7 +24,7 @@ EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
     "advice_mode", "checkpoints_enabled", "broker", "paper_initial_cash",
     "watch_enabled", "watch_time", "watch_move_pct", "alert_webhook_url",
-    "telegram_bot_token", "telegram_api_base",
+    "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -67,6 +67,29 @@ def _write_env(updates: dict[str, str]) -> None:
     lines += [f"{k}={v}" for k, v in left.items()]
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
     ENV_FILE.chmod(0o600)
+
+
+@router.get("/version")
+async def version(request: Request, refresh: bool = False):
+    """现在是哪一版、有没有新的。默认读缓存；refresh=1 时去远端看一眼。"""
+    import asyncio
+
+    from wealthpilot.services import upgrade
+
+    _local_only(request)
+    if not get_settings().update_check and not refresh:
+        return {**upgrade.current(), "checked": False, "behind": 0, "notes": [], "how": "更新检查已关闭"}
+    return await asyncio.to_thread(upgrade.check, force=refresh)
+
+
+@router.get("/doctor")
+async def doctor(request: Request, model: bool = False):
+    """自检：数据源、模型、数据库、手机触达、版本，各自通不通、不通怎么修。model=1 时实测一次模型调用。"""
+    from wealthpilot.services import doctor as checks
+
+    _local_only(request)
+    port = request.url.port or get_settings().port
+    return {"items": await checks.run(online=model, port=port)}
 
 
 @router.put("")

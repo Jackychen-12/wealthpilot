@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from wealthpilot.routes.alerts import router as alerts_router
 from wealthpilot.routes.analysis import router as analysis_router
 from wealthpilot.routes.auth import router as auth_router
+from wealthpilot.routes.automations import router as automations_router
 from wealthpilot.routes.broker import router as broker_router
 from wealthpilot.routes.chat import router as chat_router
 from wealthpilot.routes.config import router as config_router
@@ -40,3 +41,4 @@ api_router.include_router(broker_router)
 api_router.include_router(config_router)
 api_router.include_router(onboarding_router)
 api_router.include_router(skills_router)
+api_router.include_router(automations_router)

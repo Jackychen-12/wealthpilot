@@ -39,5 +39,12 @@ def card(answer: str, limit: int = 240) -> dict | None:
     """结论卡。短回答本身就是结论，不需要卡片。"""
     if len(answer) < 500:
         return None
-    text = conclusion(answer, limit)
-    return {"conclusion": text, "stance": stance(answer), "truncated": len(text) >= limit} if text else None
+    full = conclusion(answer, 2000)
+    if not full:
+        return None
+    text = full[:limit]
+    if len(full) > limit:
+        # 停在一句话的末尾，而不是从句子中间截断
+        end = max(text.rfind("。"), text.rfind("；"), text.rfind("！"), text.rfind("？"))
+        text = text[:end + 1] if end >= 60 else text
+    return {"conclusion": text, "stance": stance(answer), "truncated": len(full) > len(text)}

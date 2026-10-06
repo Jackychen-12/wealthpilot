@@ -17,6 +17,7 @@ COPY backend/pyproject.toml backend/uv.lock* ./
 RUN uv sync --no-dev --frozen --no-install-project 2>/dev/null || uv sync --no-dev --no-install-project
 COPY backend/src/ src/
 COPY backend/skills/ skills/
+COPY backend/skills-gallery/ skills-gallery/
 RUN uv sync --no-dev --frozen 2>/dev/null || uv sync --no-dev
 COPY --from=web /web/dist-app /app/workbench/dist-app
 

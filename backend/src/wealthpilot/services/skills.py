@@ -158,3 +158,125 @@ def delete(name: str) -> bool:
         return False
     file.unlink()
     return True
+
+
+# ── 技能从哪来：现成的、别人分享的、让 AI 起草的 ──────────
+
+GALLERY = Path(__file__).resolve().parents[3] / "skills-gallery"
+MAX_REMOTE_BYTES = 64 * 1024
+
+
+def gallery() -> list[dict]:
+    """随项目带的一批现成方法。装上就是把文件复制进技能目录，之后可以随便改。"""
+    installed = {s.name for s in discover()[0]}
+    items = []
+    for file in sorted(GALLERY.glob("*.md")) if GALLERY.is_dir() else []:
+        skill, _ = parse(file.read_text(encoding="utf-8"), str(file))
+        if skill:
+            items.append({**skill.summary(), "installed": skill.name in installed})
+    return items
+
+
+def install_from_gallery(name: str) -> Skill:
+    file = GALLERY / f"{name}.md"
+    if not _NAME_RE.match(name) or not file.is_file():
+        raise ValueError("没有这个现成的方法")
+    return save(name, file.read_text(encoding="utf-8"))
+
+
+def raw_url(url: str) -> str:
+    """GitHub 网页上的文件地址换成原始文件地址，其余原样返回。"""
+    match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)/blob/(.+)", url.strip())
+    return f"https://raw.githubusercontent.com/{match.group(1)}/{match.group(2)}/{match.group(3)}" if match else url.strip()
+
+
+async def fetch_remote(url: str) -> str:
+    """把别人分享的技能文件取回来。只取不存：返回文本，由调用方校验、给用户看过之后再保存。"""
+    import httpx
+
+    target = raw_url(url)
+    if not target.startswith("https://"):
+        raise ValueError("只支持 https 链接")
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(target)
+    except httpx.HTTPError as e:
+        raise ValueError(f"取不到这个链接：{type(e).__name__}") from e
+    if resp.status_code != 200:
+        raise ValueError(f"取不到这个链接：返回 {resp.status_code}")
+    if len(resp.content) > MAX_REMOTE_BYTES:
+        raise ValueError("文件太大，不像是一个技能文件")
+    try:
+        return resp.content.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError("不是文本文件") from e
+
+
+def _draft_prompt() -> str:
+    from wealthpilot.services.agents.registry import AGENTS
+    from wealthpilot.services.agents.tools import AGENT_TOOLS
+
+    agents = "\n".join(f"- {name}：{spec.summary}（可用工具：{'、'.join(t['name'] for t in AGENT_TOOLS[name])}）"
+                       for name, spec in AGENTS.items() if name != "review")
+    return f"""你在帮用户把他的投资研究方法写成一个技能文件，供一个多 Agent 的投研系统使用。
+
+## 文件格式
+```
+---
+name: 小写字母、数字、连字符，如 bank-check
+description: 一句话说明这个方法做什么
+whenToUse: 什么时候该用它
+user-invocable: true
+metadata:
+  wealthpilot:
+    label: 中文短名
+    triggers: [用户的话里出现这些词就用这个方法，3 到 6 个，要具体，不要用“分析”“看看”这种太宽的词]
+    needs: stock          # stock 一只股票 / stocks 多只 / holdings 用户的持仓 / none 不需要标的
+    agents: [从下面的可用 Agent 里选 1 到 4 个]
+    sections: [报告的章节标题，4 到 6 节，第一节是 结论]
+    criteria:
+      - 必须取得的证据（2 到 4 条）
+---
+
+# 方法名
+
+一两句话讲清这个方法要回答什么问题。
+
+- <agent 名>: 让这个 Agent 具体查什么、重点看什么、什么情况要指出来（每个选中的 Agent 一行）
+
+成文时的要求。
+```
+
+## 可用 Agent
+{agents}
+
+## 规则
+1. 只能让 Agent 做它的工具做得到的事。结构化数据里没有的指标（比如银行的净息差），只能让它用 read_latest_report 从报告正文里找，并写明“没找到就直说”。
+2. 不要求预测股价，不要求给出收益承诺。
+3. 写给 Agent 的指示要具体到“查什么、比什么、出现什么情况要点出来”，不要写空话。
+4. 只输出技能文件本身，不要解释，不要用代码块包起来。"""
+
+
+def _strip_fence(text: str) -> str:
+    text = text.strip()
+    match = re.fullmatch(r"```[a-z]*\n(.*?)\n```", text, re.DOTALL)
+    return (match.group(1) if match else text).strip() + "\n"
+
+
+def draft(client, model: str, description: str, base: str = "") -> tuple[str, list[str]]:
+    """让模型按用户的描述起草一个技能。起草的东西照样要过校验；不合格就把问题告诉它重写一次。
+    返回（文件内容, 仍然存在的问题）——保存与否由用户看过之后决定。"""
+    ask = f"我想要的方法：{description.strip()}"
+    if base.strip():
+        ask += f"\n\n这是我手头已有的一份（可能是别的系统的格式，或者不完整），请改写成上面的格式并保留它的意思：\n{base.strip()[:6000]}"
+    messages = [{"role": "user", "content": ask}]
+    content, problems = "", ["模型没有返回内容"]
+    for _ in range(2):
+        result = client.create(model=model, max_tokens=4000, system=_draft_prompt(), messages=messages)
+        content = _strip_fence(result.text or "")
+        skill, problems = parse(content)
+        if skill is not None:
+            return content, []
+        messages += [{"role": "assistant", "content": content},
+                     {"role": "user", "content": "这份文件有这些问题，请改正后重新输出完整文件：\n" + "\n".join(f"- {p}" for p in problems)}]
+    return content, problems

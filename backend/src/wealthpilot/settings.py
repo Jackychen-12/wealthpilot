@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     watch_enabled: bool = Field(default=True, description="后端运行时，交易日收盘后自动跑一次盯盘")
     watch_time: str = Field(default="15:30", pattern=r"^\d{2}:\d{2}$", description="每日盯盘时间（本机时区）")
     watch_move_pct: float = Field(default=5.0, gt=0, description="当日涨跌幅超过多少算异动")
+    auto_daily_runs_max: int = Field(default=6, ge=0, description="定时任务每天最多自动跑几次研究（会调用模型）；手动点“现在跑”不受限")
+    update_check: bool = Field(default=True, description="启动时看一眼有没有新版本（只读取本仓库的远端，不上传任何东西）")
 
     # 手机触达：Telegram 机器人。令牌在网页「设置」里填；绑定哪个聊天由配对码决定，存在数据库里
     telegram_bot_token: str = Field(default="", description="Telegram 机器人令牌（@BotFather 给的）")
