@@ -9,7 +9,7 @@ import { securityPath } from '../components/SecuritySearch'
 import { Drawer, Tag } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
 import { cn } from '../utils/cn'
-import { PLAYBOOK, STATUS } from './ResearchPage'
+import { DebateCard, PLAYBOOK, STATUS } from './ResearchPage'
 
 const clip = (v: unknown) => {
   const s = typeof v === 'string' ? v : JSON.stringify(v, null, 1)
@@ -36,6 +36,7 @@ const Detail: React.FC<{ id: number }> = ({ id }) => {
               <span className="font-mono">{d.created_at.slice(0, 16).replace('T', ' ')}</span>
             </p>
           </div>
+          {d.meta.debate ? <div className="mb-4"><DebateCard debate={d.meta.debate} /></div> : null}
           <AnswerMarkdown content={d.answer} onCite={cite} />
           {d.checkpoints?.length ? (
             <section>

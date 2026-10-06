@@ -103,7 +103,7 @@ def summarize_flow(flow: dict) -> dict:
     for n in (5, 10, 20):
         window = [d["net_yi"] for d in daily[:n] if d["net_yi"] is not None]
         if len(window) == n:
-            out[f"net_{n}d_yi"] = round(sum(window), 2)
+            out[f"net_{n}d_yi"] = round(sum(window), 2) + 0.0   # 加 0.0 是为了不出现 -0.0
     streak = 0
     for d in daily:
         if d["net_yi"] is None or d["net_yi"] == 0 or (streak and (d["net_yi"] > 0) != (streak > 0)):

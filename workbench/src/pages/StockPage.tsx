@@ -4,35 +4,29 @@ import { Star } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
-  DEMO, api, runTool, useApi, type Announcement, type Dividend, type Indicator, type PeerValuation, type Peers, type ReportExcerpts,
+  DEMO, api, useApi, type Announcement, type Dividend, type Indicator, type PeerValuation, type Peers, type ReportExcerpts,
   type StockProfile, type StockQuote, type StockValuation, type Technicals, type ValuationBand, type ValuationHistory,
 } from '../api'
+import { useTool } from '../api/tools'
 import { AskAi } from '../components/AskAi'
-import { Candles, SeriesLine, aggregate } from '../components/charts'
+import { Candles, MinuteChart, SeriesLine, aggregate } from '../components/charts'
 import { CheckpointTable } from '../components/Checkpoints'
 import { SecuritySearch, securityPath } from '../components/SecuritySearch'
 import { DEMO_DEFAULTS } from '../demo/defaults'
 import { Button, Callout, Drawer, Segmented, Tag } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
+import { CapitalTab, ExpectationTab, QuarterBars, SegmentsSection } from './stock/InsightTabs'
 
 const RANGES = [['63', '近 3 月'], ['125', '近半年'], ['250', '近 1 年'], ['500', '近 2 年']] as const
-const PERIODS = [['day', '日 K'], ['week', '周 K'], ['month', '月 K']] as const
-const TABS = [['overview', '概览与走势'], ['financials', '财务'], ['valuation', '估值'], ['peers', '同行'], ['news', '公告']] as const
+const PERIODS = [['minute', '分时'], ['five', '五日'], ['day', '日 K'], ['week', '周 K'], ['month', '月 K']] as const
+type Period = (typeof PERIODS)[number][0]
+const TABS = [['overview', '走势'], ['financials', '财务'], ['valuation', '估值'], ['capital', '资金与筹码'], ['expectation', '预期与消息'], ['peers', '同行'], ['news', '公告']] as const
 const num = (v: number | null | undefined, digits = 2) => (v == null ? '—' : v.toFixed(digits))
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${v}%`)
 const TOOLTIP = { background: 'var(--canvas)', border: '1px solid var(--hairline)', borderRadius: 8, fontSize: 13, boxShadow: 'rgba(15,15,15,0.08) 0 4px 12px' }
 const AXIS = { fill: 'var(--steel)', fontSize: 11 }
 
-/**
- * 调一个只读工具。工具返回字符串表示"没取到"（原样当作空状态的说明），返回对象才是数据。
- * 这些工具就是 Agent 用的那一批，页面上的数和 AI 引用的证据对得上。
- */
-function useTool<T>(name: string, code: string, extra: Record<string, unknown> = {}) {
-  const res = useApi(() => runTool<T | string>(name, { code, ...extra }), [name, code])
-  const missing = typeof res.data?.data === 'string' ? res.data.data : ''
-  return { ...res, value: res.data && !missing ? (res.data.data as T) : null, missing }
-}
 
 const StockPage: React.FC = () => {
   const code = useParams().code ?? ''
@@ -112,6 +106,8 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
           {tab === 'overview' ? <OverviewTab code={code} /> : null}
           {tab === 'financials' ? <FinancialsTab code={code} /> : null}
           {tab === 'valuation' ? <ValuationTab code={code} /> : null}
+          {tab === 'capital' ? <CapitalTab code={code} price={q.price} /> : null}
+          {tab === 'expectation' ? <ExpectationTab code={code} /> : null}
           {tab === 'peers' ? <PeersTab code={code} /> : null}
           {tab === 'news' ? <NewsTab code={code} /> : null}
         </>
@@ -187,7 +183,10 @@ const OverviewTab: React.FC<{ code: string }> = ({ code }) => {
   const kline = useApi(() => api.stockKline(code, Number(days)), [code, days])
   const valuation = useTool<StockValuation>('get_stock_valuation', code)
   const tech = useTool<Technicals>('get_technical_indicators', code)
-  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day')
+  const [period, setPeriod] = useState<Period>('day')
+  const [showMacd, setShowMacd] = useState(false)
+  const intraday = period === 'minute' || period === 'five'
+  const minute = useApi(() => (intraday ? api.stockMinute(code, period === 'five' ? 5 : 1) : Promise.resolve(null)), [code, period])
   const thesis = useApi(() => api.thesis(code), [code])
   const points = kline.data ? [...kline.data.data].reverse() : []
   const marks = points.length ? (thesis.data?.research_dates ?? []).filter((d) => d >= points[0].nav_date).map((date) => ({ date, label: '研究' })) : []
@@ -199,12 +198,28 @@ const OverviewTab: React.FC<{ code: string }> = ({ code }) => {
 
   return (
     <>
-      <Section title="日线走势" hint={points.length ? `${(kline.data?.price_basis ?? '前复权收盘价').replace('收盘价', '')}日 K · ${points[0].nav_date} 至 ${points[points.length - 1].nav_date} · 区间 ${signed(periodReturn, 2, '%')}` : undefined}
-        actions={<Segmented value={days} onChange={setDays} options={RANGES} />}>
-        <DataState loading={kline.loading && !points.length} error={kline.error} onRetry={kline.reload} empty={!kline.loading && points.length === 0 ? '没有取到日线数据' : undefined}>
-          <div className="mb-2 flex"><Segmented value={period} onChange={(v) => setPeriod(v as 'day' | 'week' | 'month')} options={PERIODS} /></div>
-          <Candles data={aggregate(points, period)} marks={marks} />
-        </DataState>
+      <Section title="走势"
+        hint={intraday ? (minute.data ? `${minute.data.points[0]?.time.slice(0, 10)}${period === 'five' ? ` 至 ${minute.data.points[minute.data.points.length - 1]?.time.slice(0, 10)}` : ''} · 每分钟一个点` : undefined)
+          : points.length ? `${(kline.data?.price_basis ?? '前复权收盘价').replace('收盘价', '')} · ${points[0].nav_date} 至 ${points[points.length - 1].nav_date} · 区间 ${signed(periodReturn, 2, '%')}` : undefined}
+        actions={intraday ? undefined : <Segmented value={days} onChange={setDays} options={RANGES} />}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <Segmented value={period} onChange={(v) => setPeriod(v as Period)} options={PERIODS} />
+          {intraday ? null : (
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-steel">
+              <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} className="accent-[var(--primary)]" />MACD
+            </label>
+          )}
+        </div>
+        {intraday ? (
+          <DataState loading={minute.loading && !minute.data} error={minute.error} onRetry={minute.reload}>
+            {minute.data ? <MinuteChart points={minute.data.points} prevClose={minute.data.prev_close} multiDay={period === 'five'} /> : null}
+          </DataState>
+        ) : (
+          <DataState loading={kline.loading && !points.length} error={kline.error} onRetry={kline.reload} empty={!kline.loading && points.length === 0 ? '没有取到日线数据' : undefined}>
+            <Candles data={aggregate(points, period as 'day' | 'week' | 'month')} marks={marks} showMacd={showMacd} />
+            {showMacd ? <p className="mt-2 text-[13px] text-steel">MACD 是两条均线之间的距离：柱子由绿转红说明短期涨得比长期快了，反之是慢了。它只描述已经发生的走势。</p> : null}
+          </DataState>
+        )}
         {range?.range_position_pct != null ? (
           <div className="mt-4 max-w-[560px]">
             <div className="flex justify-between text-[13px] text-steel"><span>近一年最低 {num(range.period_low)}</span><span>近一年最高 {num(range.period_high)}</span></div>
@@ -305,6 +320,8 @@ const FinancialsTab: React.FC<{ code: string }> = ({ code }) => {
         </Section>
       ) : null}
 
+      <QuarterBars reports={reports} />
+      <SegmentsSection code={code} />
       <ReportExcerptSection code={code} />
 
       <Section title="分红记录" hint="股息率为方案公布时按当时股价计算的数值">

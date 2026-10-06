@@ -123,8 +123,10 @@ class SynthesizerAgent:
         校验没过、且问题只是"个别数字对不上"时用：让模型给出若干处"原文片段 → 改后片段"，由代码套上去。
         这样不用重发全部证据，输出也只有几百字。任何一处套不上、或者一处都没改成，返回空串，由调用方退回完整重写。
         """
-        system = ("你在修订一份已经写好的研究回答。校验发现其中有些数字在证据里找不到。\n"
-                  "只做最小改动：对每个找不到出处的数字，删掉它所在的短语，或改成不含这个数字的说法（例如把“约占三成（31.2%）”改成“约占三成”）。\n"
+        system = ("你在修订一份已经写好的研究回答。校验发现了下面列出的问题，都是局部的。\n"
+                  "只做最小改动：\n"
+                  "- 找不到出处的数字：删掉它所在的短语，或改成不含这个数字的说法（例如把“约占三成（31.2%）”改成“约占三成”）。\n"
+                  "- 用户没做风险测评却给了具体仓位或价位：把具体的比例、股数、金额、价位去掉，只保留方向（例如把“减仓 5%”改成“适当减仓”）。\n"
                   "不要引入任何新的数字，不要改动其它内容，不要增删证据标记。\n"
                   '只返回 JSON：{"edits":[{"find":"回答里逐字出现的一小段原文","replace":"改后的写法"}]}。find 要足够长以保证只匹配一处。')
         user = "需要处理的问题：\n" + "\n".join(f"- {i}" for i in issues) + f"\n\n找不到出处的数字：{'、'.join(numbers)}\n\n回答全文：\n{draft}"
@@ -140,10 +142,26 @@ class SynthesizerAgent:
         text = draft
         for edit in edits:
             find, replace = str((edit or {}).get("find") or ""), str((edit or {}).get("replace") or "")
-            if not find or find not in text:
-                return ""   # 套不上就整体放弃，不做一半
-            text = text.replace(find, replace, 1)
+            if find and find in text:   # 套不上的那一处跳过：改掉几处算几处，剩下的由下一轮校验再报出来
+                text = text.replace(find, replace, 1)
         return text if text != draft else ""
+
+    @staticmethod
+    def fix_citations(draft: str, results: list[AgentResult]) -> str:
+        """证据编号抄错了的引用，由代码直接修：少抄或多抄了一位、能唯一对上的补全，对不上的把这个引用标记删掉。
+
+        模型偶尔会把 12 位的编号抄成 11 位。为这种笔误把几千字重写一遍不值得；删掉一个指不到任何证据的标记，
+        也比留着它更诚实。数字本身对不对，仍然由后面的溯源检查来管。
+        """
+        known = {e["id"] for r in results for e in r.evidence}
+
+        def fix(match: re.Match) -> str:
+            cited = match.group(1)
+            if cited in known:
+                return match.group()
+            close = [k for k in known if k.startswith(cited) or cited.startswith(k)]
+            return f"[{close[0]}]" if len(close) == 1 else ""
+        return re.sub(r"\[(E-[A-Za-z0-9]{4,20})\]", fix, draft)
 
     @staticmethod
     def _fallback_merge(results: list[AgentResult]) -> str:

@@ -144,6 +144,8 @@ export const api = {
   runDigest: () => request<Digest>('/api/digest/run', { method: 'POST' }),
   filing: (artCode: string, page = 1) => request<FilingText>(`/api/filings/${artCode}?page=${page}`),
   screenBacktest: (criteria: Record<string, unknown>) => request<ScreenBacktest>('/api/screener/backtest', json('POST', { criteria, top_n: 20, years: 2 })),
+  stockMinute: (code: string, days: 1 | 5) => request<{ code: string; name: string; prev_close: number | null; days: number; points: { time: string; price: number; avg: number | null; volume: number }[] }>(`/api/market/stock/${code}/minute?days=${days}`),
+  capitalSeries: (code: string) => request<CapitalSeries>(`/api/market/stock/${code}/capital-series`),
   valuationSeries: (code: string) => request<{ data: { date: string; pe: number | null; pb: number | null }[] }>(`/api/market/stock/${code}/valuation-history`),
   settings: () => request<AppSettings>('/api/settings'),
   saveSettings: (values: Record<string, unknown>) => request<AppSettings>('/api/settings', json('PUT', values)),
@@ -248,7 +250,7 @@ export interface MarketOverview { indices: IndexQuote[]; breadth: { trade_date: 
 export interface ResearchRecord { id: number; created_at: string; question: string; status: string; playbook: string; intent: string; securities: Security[]; evidence_count: number }
 export interface ResearchDetail { id: number; created_at: string; question: string; answer: string
   checkpoints?: Checkpoint[]; proposals?: Proposal[]
-  meta: { status?: string; evidence?: { id: string; tool: string; input: unknown; output: unknown; status: string }[]; tasks?: { agent: string; goal: string }[] } }
+  meta: { status?: string; evidence?: { id: string; tool: string; input: unknown; output: unknown; status: string }[]; tasks?: { agent: string; goal: string }[]; debate?: Debate | null } }
 export interface Checkpoint { id: number; message_id: number | null; question: string; playbook: string; code: string; name: string
   metric: string; metric_label: string; group: 'financial' | 'valuation' | 'market'; op: '>=' | '<='; threshold: number; statement: string
   baseline_value: number | null; baseline_as_of: string; due: string; due_date: string; status: 'pending' | 'held' | 'broken' | 'unverifiable'
@@ -279,6 +281,39 @@ export interface Mover { code: string; name: string; industry: string; price: nu
 export interface MemoryItem { id: number; kind: 'preference' | 'decision' | 'note'; code: string; content: string; source: string; created_at: string }
 export interface AuditEntry { id: number; at: string; kind: string; actor: string; summary: string; payload: Record<string, unknown>; hash: string }
 export interface SkillInfo { name: string; label: string; description: string; when_to_use: string; triggers: string[]; needs: string; agents: string[]; sections: string[]; criteria: string[]; path: string; content?: string }
+export interface FlowDay { date: string; close: number | null; change_pct: number | null; net_yi: number | null; net_ratio_pct: number | null; xlarge_net_yi: number | null }
+export interface FlowBucket { buy_yi: number | null; sell_yi: number | null; net_yi: number | null }
+export interface MainForce { date: string; main_net_yi: number | null; xlarge_net_yi: number | null; large_net_yi: number | null; main_cost: number | null; main_cost_20d: number | null; main_cost_60d: number | null; close: number | null }
+export interface MarginDay { date: string; close: number | null; financing_balance_yi: number | null; financing_buy_yi: number | null; financing_net_buy_yi: number | null; short_balance_yi: number | null; financing_to_float_mv_pct: number | null }
+export interface HolderCount { end_date: string; holders: number | null; change_pct: number | null; avg_shares: number | null; avg_value_wan: number | null; price_change_pct: number | null; close: number | null; notice_date: string }
+export interface CapitalSeries { code: string; flow: { daily: FlowDay[]; breakdown?: Record<string, FlowBucket>; main?: MainForce } | null; margin: MarginDay[]; holders: HolderCount[] }
+export interface CapitalFlow { as_of: string; net_5d_yi?: number; net_10d_yi?: number; net_20d_yi?: number; streak_days: number; main_force?: MainForce | null }
+export interface MarginSummary { as_of: string; financing_balance_yi: number | null; short_balance_yi: number | null; financing_to_float_mv_pct: number | null
+  financing_balance_change_5d_pct?: number; financing_balance_change_20d_pct?: number; financing_balance_change_60d_pct?: number }
+export interface TopHolder { rank: number; name: string; type: string; shares_wan: number | null; float_ratio_pct: number | null; change: string; change_shares_wan: number | null }
+export interface OrgHolding { type: string; count: number | null; shares_wan: number | null; float_ratio_pct: number | null; value_yi: number | null; change: string; change_shares_wan: number | null }
+export interface ShareholderStructure { holder_counts: HolderCount[]; top_float_holders: { end_date: string; report: string; holders: TopHolder[] } | null
+  institutions: { latest: { report_date: string; by_type: OrgHolding[] }; previous: { report_date: string; by_type: OrgHolding[] } | null } | null
+  northbound: { date: string; shares_wan: number | null; value_yi: number | null; float_ratio_pct: number | null }[] }
+export interface InsiderActivity { window: string
+  holder_trades: { notice_date: string; holder: string; direction: string; shares_wan: number | null; float_ratio_pct: number | null; avg_price: number | null }[]
+  executive_trades: { date: string; person: string; position: string; relation: string; shares: number | null; avg_price: number | null; amount_wan: number | null; reason: string }[]
+  buybacks: { notice_date: string; amount_lower_yi: number | null; amount_upper_yi: number | null; price_cap: number | null; start: string; end: string; finished: string }[]
+  unlocks: { date: string; type: string; shares_wan: number | null; value_yi: number | null; float_ratio_pct: number | null; upcoming: boolean }[] }
+export interface LargeTrades { block_trades_6m: { date: string; price: number | null; close: number | null; premium_pct: number | null; amount_yi: number | null; buyer: string; seller: string }[]
+  billboard_12m: { date: string; reason: string; change_pct: number | null; net_buy_yi: number | null; summary: string }[] }
+export interface Consensus { name: string; price: number | null; org_count: number; ratings: Record<string, number>
+  eps_forecast: { year: number; eps: number | null; actual: boolean; growth_pct?: number; pe_at_current_price?: number }[]
+  broker_target_price_low: number | null; broker_target_price_high: number | null; broker_target_vs_price_pct?: [number, number] }
+export interface ResearchReport { date: string; org: string; title: string; rating: string; rating_change: string; eps_this_year: number | null; eps_next_year: number | null; url: string }
+export interface Guidance { forecast?: { notice_date: string; report_date: string; items: { metric: string; type: string; lower_yi: number | null; upper_yi: number | null; yoy_lower_pct: number | null; yoy_upper_pct: number | null; content: string; reason: string }[] }
+  express?: { notice_date: string; report_date: string; period: string; revenue_yi: number | null; revenue_yoy_pct: number | null; net_profit_yi: number | null; net_profit_yoy_pct: number | null } }
+export interface StockNews { date: string; title: string; summary: string; media: string; url: string }
+export interface Survey { notice_date: string; date: string; way: string; place: string; participants: number; content: string }
+export interface Segment { name: string; revenue_yi: number | null; revenue_ratio_pct: number | null; gross_margin_pct: number | null }
+export interface Segments { report_date: string; report_name: string; by_industry: Segment[]; by_product: Segment[]; by_region: Segment[] }
+export interface DebateSide { points: { text: string; evidence: string[] }[]; weakness: string }
+export interface Debate { bull: DebateSide; bear: DebateSide }
 export interface SkillPreview { content: string; skill: SkillInfo | null; problems: string[] }
 export interface Onboarding { steps: { key: string; title: string; done: boolean; to: string; hint: string; optional?: boolean }[]; complete: boolean; dismissed: boolean }
 export interface ParsedHolding { line: string; query: string; shares: number | null; cost: number | null; code: string; name: string; asset_type: string; problem: string; ok: boolean }
@@ -326,8 +361,9 @@ export interface StreamEvent {
   evidence?: { id: string; tool: string; status: string; input: unknown; output: unknown; provenance?: { as_of?: Record<string, string | null>; sources?: { url?: string }[] } }
   gate?: string; passed?: boolean; issues?: string[]; attempt?: number
   agents?: string[]; ungrounded?: string[]; follow_ups?: string[]; eta_seconds?: number; depth?: string; mode?: string
+  bull?: DebateSide; bear?: DebateSide
   meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string; usage?: Usage
-    summary?: SummaryCard | null; message_id?: number | null; seconds?: number; depth?: string }
+    summary?: SummaryCard | null; message_id?: number | null; seconds?: number; depth?: string; debate?: Debate | null }
 }
 
 export async function* streamChat(

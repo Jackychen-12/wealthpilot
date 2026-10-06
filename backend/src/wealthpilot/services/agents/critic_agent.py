@@ -36,8 +36,23 @@ if TYPE_CHECKING:
 
 # 操作类措辞 + 紧跟的数字 —— 未完成风险测评时不允许出现
 _ACTION_NUMBER_RE = re.compile(
-    r"(加仓|减仓|买入|卖出|建仓|清仓|止损|止盈|仓位)[^。；\n]{0,12}?(\d+(?:\.\d+)?)\s*(%|％|元|成)"
+    r"(加仓|减仓|买入|卖出|建仓|清仓|止损|止盈|仓位)[^。；，,\n]{0,12}?(\d+(?:\.\d+)?)\s*(%|％|元|成)"
 )
+# "基金减仓 31.58%""机构卖出""主力净买入"说的是别人已经做了什么，是事实，不是给用户的操作建议
+_THIRD_PARTY_RE = re.compile(r"基金|公募|私募|机构|北向|外资|股东|高管|董事|监事|社保|保险|险资|QFII|券商|主力|资金|融资|融券|大宗|龙虎榜|"
+                             r"营业部|席位|中央结算|集团|产业资本|主动|特大单|大单|散户|游资")
+
+
+def user_actions(answer: str) -> list[tuple[str, str, str]]:
+    """回答里给用户的带具体数字的操作（动作, 数字, 单位）。主语是第三方的不算。"""
+    hits = []
+    for match in _ACTION_NUMBER_RE.finditer(answer):
+        before = answer[answer.rfind("\n", 0, match.start()) + 1:match.start()]
+        if not before.lstrip().startswith("|"):          # 表格行看整行，正文只看这个分句
+            before = re.split(r"[，,。；;：:（(]", before)[-1]
+        if not _THIRD_PARTY_RE.search(before):
+            hits.append(match.groups())
+    return hits
 
 
 # 确定性的涨跌预测与目标价 —— 研究只陈述事实和推断，不做这类承诺
@@ -49,6 +64,19 @@ _ATTRIBUTED_RE = re.compile(r"(券商|卖方|机构|研报|分析师|一致预�
 _NEGATION_RE = re.compile(r"(不|无|没有|未|非|避免|拒绝|不会|不得|不应)[^，。；\n]{0,8}$")
 _FINANCIAL_RE = re.compile(r"营收|营业收入|净利润|ROE|毛利率|净利率|每股收益")
 _PERIOD_RE = re.compile(r"\d{4}[-/年]\d{1,2}|年报|中报|半年报|季报|一季|三季|前三季|上半年|报告期")
+
+
+# 这两类问题都是局部的：删掉或改写出问题的那个短语就行，不值得把几千字重写一遍
+_NUMBER_ISSUE = "以下数字未出现在工具返回中"
+_SIZING_ISSUE = "用户尚未完成风险测评，不得给出具体仓位或价位"
+
+
+def number_only(issues: list[str]) -> bool:
+    return bool(issues) and all(i.startswith(_NUMBER_ISSUE) for i in issues)
+
+
+def repairable(issues: list[str]) -> bool:
+    return bool(issues) and all(i.startswith((_NUMBER_ISSUE, _SIZING_ISSUE)) for i in issues)
 
 
 @dataclass
@@ -114,6 +142,16 @@ class CriticAgent:
                 missing_evidence=list(success_criteria),
             )
 
+        # 固定模板的要求：对应的工具取到了数据就算有证据，不问模型
+        from wealthpilot.services.agents.playbooks import CRITERIA_TOOLS
+        got = {e["tool"] for r in results for e in r.evidence if e.get("status", "ok") == "ok"}
+        settled = [c for c in success_criteria if c in CRITERIA_TOOLS]
+        lacking = [c for c in settled if not got.intersection(CRITERIA_TOOLS[c])]
+        success_criteria = [c for c in success_criteria if c not in CRITERIA_TOOLS]
+        if not success_criteria:
+            return Verdict(passed=True) if not lacking else Verdict(
+                passed=False, issues=[f"证据不足：{m}" for m in lacking], missing_evidence=lacking)
+
         system = (
             "你是投研流程的证据审核员。判断已收集的证据能否支撑给定的每一条要求。\n"
             "严格但务实：证据里能直接读到或直接推出的，算覆盖；需要额外查询才能知道的，算未覆盖。\n"
@@ -139,9 +177,9 @@ class CriticAgent:
             if not isinstance(data.get("missing"), list):
                 raise ValueError("审核缺少 missing 列表")
             missing = data["missing"]
-            missing = [str(m) for m in missing if str(m).strip()][:4]
+            missing = lacking + [str(m) for m in missing if str(m).strip()][:4]
         except Exception:
-            return Verdict(passed=True, issues=["证据审核未完成"], missing_evidence=list(success_criteria), review_complete=False)
+            return Verdict(passed=True, issues=["证据审核未完成"], missing_evidence=lacking + list(success_criteria), review_complete=False)
 
         if not missing:
             return Verdict(passed=True)
@@ -215,7 +253,7 @@ class CriticAgent:
                     if e.get("tool") == "backtest_rule" and e.get("status", "ok") == "ok":
                         described |= {str(abs(float(m.group()))).rstrip("0").rstrip(".") for m in
                                       re.finditer(r"\d+(?:\.\d+)?", f"{e.get('input')} {e['output']}")}
-            hits = [h for h in _ACTION_NUMBER_RE.findall(answer)
+            hits = [h for h in user_actions(answer)
                     if h[1] not in described and h[1].rstrip("0").rstrip(".") not in described]
             if hits:
                 sample = "、".join(f"{a}{n}{u}" for a, n, u in hits[:3])

@@ -6,7 +6,7 @@ import { AskAi } from '../components/AskAi'
 import { Button, Callout, ConfirmDialog, Drawer, Input, Tag, type Tone } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
 
-const AGENT_LABEL: Record<string, string> = { fundamental: '基本面', valuation: '估值', price: '走势', industry: '行业与市场', screener: '选股', portfolio: '组合与风险', fund: '基金' }
+const AGENT_LABEL: Record<string, string> = { fundamental: '基本面', valuation: '估值', price: '走势', industry: '行业与市场', capital: '资金与筹码', expectation: '预期与消息', screener: '选股', portfolio: '组合与风险', fund: '基金' }
 const NEEDS: Record<string, string> = { stock: '一只股票', stocks: '多只股票', holdings: '我的持仓', none: '不需要标的' }
 
 export const SkillsPage: React.FC = () => {

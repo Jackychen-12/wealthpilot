@@ -2,7 +2,7 @@ import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, Check, ChevronRight, ListTree, Square, SquarePen } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { DEMO, api, runTool, useApi, type Depth, type ValuationHistory } from '../api'
+import { DEMO, api, runTool, useApi, type Debate, type Depth, type ValuationHistory } from '../api'
 import { askNotifyPermission, research, useResearch, type Evidence, type Turn } from '../api/researchStore'
 import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
@@ -17,6 +17,8 @@ const AGENT: Record<string, { label: string; tone: Tone }> = {
   valuation: { label: '估值', tone: 'purple' },
   price: { label: '走势', tone: 'pink' },
   industry: { label: '行业与市场', tone: 'yellow' },
+  capital: { label: '资金与筹码', tone: 'orange' },
+  expectation: { label: '预期与消息', tone: 'blue' },
   screener: { label: '选股', tone: 'orange' },
   portfolio: { label: '组合与风险', tone: 'green' },
   fund: { label: '基金', tone: 'gray' },
@@ -51,7 +53,7 @@ const DEPTHS: { key: Depth; label: string; hint: string }[] = [
 const REWRITES = ['更短一点', '只讲风险', '换成给新手的说法', '列成要点']
 // 和个股页的判断卡同一套颜色：偏多用红、偏空用绿（A 股的习惯）
 const STANCE_TONE: Record<string, Tone> = { 看多: 'pink', 中性偏多: 'pink', 看空: 'green', 中性偏空: 'green', 中性: 'gray' }
-const STAGES = ['规划', '取证', '审核证据', '写结论', '核对'] as const
+const STAGES = ['规划', '取证', '审核证据', '辩论与撰写', '核对'] as const
 
 /** 现在进行到哪一步（对应 STAGES 的下标）。 */
 function stageOf(t: Turn): number {
@@ -63,6 +65,40 @@ function stageOf(t: Turn): number {
   if (last.tone === 'warn') return 1
   if (last.text.startsWith('回答校验') || last.text.startsWith('按校验意见')) return 4
   return 3
+}
+
+/**
+ * 多空辩论：同一批证据，看多和看空两方各自最硬的理由，左右摆开。
+ * 一篇报告容易把话说圆；先把两边的道理分开看，再去读它最后采信了哪一方。
+ */
+export const DebateCard: React.FC<{ debate: Debate; onCite?: (id: string) => void }> = ({ debate, onCite }) => {
+  const side = (key: 'bull' | 'bear', title: string, tint: string, mark: string) => (
+    <div className={cn('min-w-0 flex-1 rounded-lg p-4', tint)}>
+      <p className={cn('mb-2 text-[13px] font-semibold', mark)}>{title}</p>
+      {debate[key].points.length ? (
+        <ol className="space-y-2">
+          {debate[key].points.map((p, i) => (
+            <li key={i} className="flex gap-2 text-sm leading-relaxed text-ink">
+              <span className={cn('mt-px shrink-0 font-semibold tabular-nums', mark)}>{i + 1}</span>
+              <span className="min-w-0">{p.text}
+                {onCite ? p.evidence.map((id) => (
+                  <button key={id} type="button" onClick={() => onCite(id)} title="看这条理由依据的数据"
+                    className="ml-1.5 rounded-xs bg-canvas/70 px-1 align-baseline font-mono text-[11px] text-steel hover:text-ink">{id.slice(2, 6)}</button>
+                )) : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : <p className="text-sm text-steel">没有拿出站得住的理由。</p>}
+      {debate[key].weakness ? <p className="mt-3 border-t border-current/10 pt-2 text-[13px] leading-relaxed text-slate"><span className="text-steel">自认的软肋：</span>{debate[key].weakness}</p> : null}
+    </div>
+  )
+  return (
+    <div className="flex flex-col gap-3 md:flex-row">
+      {side('bull', '看多的理由', 'bg-tint-rose/60', 'text-up')}
+      {side('bear', '看空的理由', 'bg-tint-mint/60', 'text-down')}
+    </div>
+  )
 }
 
 /** 等待中：告诉用户现在在干什么、大概还要多久，而不是只转一个圈。 */
@@ -253,6 +289,12 @@ const ResearchPage: React.FC = () => {
                                 {showReport(t) ? '收起完整报告' : `展开完整报告（${t.answer.length.toLocaleString()} 字，每个数字都带出处）`}
                               </button>
                             </div>
+                            {t.debate ? (
+                              <div className="mt-3">
+                                <DebateCard debate={t.debate} onCite={(id) => cite(t, id)} />
+                                <p className="mt-1.5 text-xs text-stone">两位“辩手”拿到的是同一批证据，各自只替一方说话。最后采信哪一方、为什么，在完整报告的「多空」一节。</p>
+                              </div>
+                            ) : null}
                             {showReport(t) ? <div className="mt-5"><AnswerMarkdown content={t.answer} onCite={(id) => cite(t, id)} /></div> : null}
                           </>
                         ) : <AnswerMarkdown content={t.answer} onCite={(id) => cite(t, id)} />}

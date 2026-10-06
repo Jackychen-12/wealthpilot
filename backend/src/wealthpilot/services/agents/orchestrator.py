@@ -31,7 +31,13 @@ from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services import checkpoints, memory, summary
 from wealthpilot.services.agents import debate
 from wealthpilot.services.agents.base import AgentResult
-from wealthpilot.services.agents.critic_agent import CriticAgent, Verdict, rewrite_instruction
+from wealthpilot.services.agents.critic_agent import (
+    CriticAgent,
+    Verdict,
+    number_only,
+    repairable,
+    rewrite_instruction,
+)
 from wealthpilot.services.agents.planner_agent import (
     KEYWORD_RULES,
     VALID_AGENTS,
@@ -292,12 +298,16 @@ async def _run_pipeline(
         if gaps:
             status = "partial"
         # 个股深度研究：撰写之前先让多空两方就同一批证据各打各的
-        if plan.playbook == "stock_deep" and not quick and settings.debate_enabled and plan.securities:
+        if plan.playbook == "stock_deep" and not quick and getattr(settings, "debate_enabled", True) and plan.securities:
             subject = f"{plan.securities[0]['name']}（{plan.securities[0]['code']}）"
             debate_result = await debate.run(client, light_model_for(settings, model), subject, message, results)
             if debate_result:
                 await emit({"type": "debate", **debate_result})
                 method = "\n\n".join(filter(None, [method, debate.brief(debate_result)]))
+        # 没做风险测评：一开始就讲明只能给方向，免得写出具体仓位再被打回重写
+        no_sizing = ("用户还没有做风险测评：建议里只能写方向（买入 / 加仓 / 持有 / 减仓 / 卖出），"
+                     "不能出现任何具体的比例、股数、金额或价位。") if profile is None and getattr(settings, "advice_mode", False) else ""
+        gap_note = "\n\n".join(filter(None, [gap_note, no_sizing]))
         instruction = gap_note
         best: tuple[float, str, Verdict] | None = None
         repair_from: tuple[str, Verdict] | None = None
@@ -319,14 +329,17 @@ async def _run_pipeline(
             if not critic_on:
                 final_text = draft or "本轮未能生成回答，请换个问法再试。"
                 break
+            draft = SynthesizerAgent.fix_citations(draft, results)
             verdict = critic.review_answer(draft, results, message, holdings_context, plan.sections)
             await emit({**verdict.as_event("answer"), "attempt": attempt + 1})
             if verdict.passed and draft.strip():
                 final_text = draft
                 break
-            # 只剩"个别数字对不上"这一类问题的草稿留作候选（越过画像约束、乱引证据的不留）
-            if draft.strip() and all(i.startswith("以下数字未出现在工具返回中") for i in verdict.issues):
+            # 问题都是局部的（个别数字对不上、没做风险测评却写了具体仓位）：下一步只改那几处
+            if draft.strip() and repairable(verdict.issues):
                 repair_from = (draft, verdict)
+            # 只有"个别数字对不上"的草稿才留作兜底发布的候选（越过画像约束、乱引证据的不留）
+            if draft.strip() and number_only(verdict.issues):
                 if best is None or verdict.grounding_rate > best[0]:
                     best = (verdict.grounding_rate, draft, verdict)
             instruction = "\n\n".join(filter(None, [gap_note, rewrite_instruction(verdict)]))

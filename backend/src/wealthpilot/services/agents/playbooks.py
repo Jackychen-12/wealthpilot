@@ -52,6 +52,19 @@ PLAYBOOKS: dict[str, Playbook] = {
     ),
 }
 
+# 模板里的证据要求各自由哪些工具满足：其中一个取到了数据，这条要求就算有证据。
+# 固定模板的证据够不够由代码判定 —— 让模型凭印象审几十条证据，偶尔会把明明取到的说成没取到，白白多补查一轮。
+CRITERIA_TOOLS: dict[str, tuple[str, ...]] = {
+    "最近几期营收、净利润及同比，ROE 与负债率": ("get_financial_indicators", "get_stock_financials"),
+    "当前 PE/PB 及其历史分位": ("get_valuation_history",),
+    "近期走势与所处区间位置": ("get_stock_kline", "get_stock_valuation", "get_technical_indicators"),
+    "所属行业与同行对比": ("get_industry_peers", "compare_peers_valuation"),
+    "资金流向或股东、机构持仓的变化": ("get_capital_flow", "get_shareholder_structure", "get_margin_trading"),
+    "卖方一致预期或公司的业绩预告": ("get_consensus_forecast", "get_research_reports", "get_earnings_guidance"),
+    "验证点的总数与各状态（成立 / 被证伪 / 待核对）的数量": ("get_research_track_record", "list_checkpoints"),
+    "筛选条件与匹配到的股票名单": ("screen_stocks",),
+}
+
 _DIMENSIONS = {
     "fundamental": "研究{name}（{code}）的基本面：最近几期营收、净利润及同比、ROE、毛利率、负债率、现金流与分红；并读最新定期报告里管理层对业绩变动的解释与风险提示",
     "valuation": "研究{name}（{code}）的估值：当前 PE/PB/PS、各自的历史分位、与同行业公司的对比",
