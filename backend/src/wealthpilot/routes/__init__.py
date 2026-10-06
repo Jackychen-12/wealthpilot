@@ -11,6 +11,7 @@ from wealthpilot.routes.config import router as config_router
 from wealthpilot.routes.connectors import router as connectors_router
 from wealthpilot.routes.import_portfolio import router as import_router
 from wealthpilot.routes.market import router as market_router
+from wealthpilot.routes.onboarding import router as onboarding_router
 from wealthpilot.routes.portfolio import router as portfolio_router
 from wealthpilot.routes.profile import router as profile_router
 from wealthpilot.routes.report import router as report_router
@@ -37,4 +38,5 @@ api_router.include_router(research_router)
 api_router.include_router(review_router)
 api_router.include_router(broker_router)
 api_router.include_router(config_router)
+api_router.include_router(onboarding_router)
 api_router.include_router(skills_router)

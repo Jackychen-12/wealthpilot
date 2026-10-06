@@ -154,8 +154,11 @@ async def run(db: Session, user_id: int, *, today: date | None = None, push: boo
     db.commit()
     db.refresh(digest)
     result = serialize(digest)
-    if push and notable and settings.alert_webhook_url:
-        result["pushed"] = await _push(settings.alert_webhook_url, result)
+    if push and notable:
+        from wealthpilot.services import channels  # 放在这里导入：channels 也要用到本模块
+        result["pushed"] = await channels.notify(channels.digest_text({**result, "events": notable}))
+        if settings.alert_webhook_url:
+            result["pushed"] = await _push(settings.alert_webhook_url, result) or result["pushed"]
     return result
 
 

@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from wealthpilot import __version__
 from wealthpilot.routes import api_router
-from wealthpilot.services import watcher
+from wealthpilot.services import background
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_engine
 
@@ -25,8 +25,8 @@ async def lifespan(app: FastAPI):
     if not os.environ.get("WEALTHPILOT_QUIET"):   # 终端入口在后台带起服务时不打这两行，免得搅乱界面
         print(f"🚀 WealthPilot Backend v{__version__}")
         print(f"📂 DB: {settings.db_path.resolve()}")
-    # 每日盯盘：后端开着就自己跑，不需要另配 cron
-    task = asyncio.create_task(watcher.scheduler()) if os.environ.get("WATCH_ENABLED", "").lower() != "false" else None
+    # 每日盯盘、自动任务、手机渠道：后端开着就自己跑，不需要另配 cron
+    task = asyncio.create_task(background.run_all()) if os.environ.get("WATCH_ENABLED", "").lower() != "false" else None
     yield
     if task:
         task.cancel()

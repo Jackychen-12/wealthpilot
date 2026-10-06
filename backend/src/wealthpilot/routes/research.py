@@ -11,7 +11,7 @@ from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.research import WatchItem
 from wealthpilot.models.review import TradeProposal
-from wealthpilot.services import cache, checkpoints, screener, watcher
+from wealthpilot.services import cache, checkpoints, screener, summary, watcher
 from wealthpilot.services.assets import fetch_sina_quotes
 from wealthpilot.services.deps import current_user_id
 from wealthpilot.services.securities import search
@@ -172,28 +172,7 @@ def research_stats(db: Session = Depends(get_session), user_id: int = Depends(cu
 # ── 工作台：围绕"我的股票"的汇总 ─────────────────────────
 
 _THESIS_PLAYBOOKS = ("stock_deep", "stock_compare", "holding_review")
-_STANCES = "看多|中性偏多|中性偏空|中性|看空"
-_STANCE_RE = re.compile(rf"立场[^\n]{{0,6}}?({_STANCES})")
-
-
-def _stance(answer: str, name: str = "") -> str:
-    """从回答里取立场。对比研究里一行写了几只股票的立场，按名字取对应的那一个。"""
-    if name:
-        named = re.search(rf"立场[^\n]*?{re.escape(name)}[^\n，；。]{{0,6}}?({_STANCES})", answer)
-        if named:
-            return named.group(1)
-    match = _STANCE_RE.search(answer)
-    return match.group(1) if match else ""
-
-
-def _conclusion(answer: str) -> str:
-    """取回答里「结论」一节的正文，去掉证据标记和 Markdown 符号，给判断卡用。"""
-    match = re.search(r"^#{1,3}[^\n]*结论[^\n]*\n(.*?)(?=^#{1,3} |\Z)", answer, re.DOTALL | re.MULTILINE)
-    text = match.group(1) if match else answer
-    # 去掉证据标记和 Markdown 符号；">" 只在行首是引用符号，句子里的"茅台 > 五粮液"要留着
-    text = re.sub(r"\[E-[a-f0-9]+\]|[*`#|]|^\s*>\s?", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\s+", " ", text).strip()
-    return re.sub(r" ([，。；：、）])", r"\1", text)[:320]
+_conclusion, _stance = summary.conclusion, summary.stance
 
 
 def _research_by_code(db: Session, user_id: int, limit: int = 150) -> dict[str, list[dict]]:

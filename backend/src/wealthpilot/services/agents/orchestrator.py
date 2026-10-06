@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import statistics
+import time
 from collections.abc import AsyncGenerator
 
 from sqlmodel import Session, select
@@ -26,7 +28,7 @@ from sqlmodel import Session, select
 from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services import checkpoints, memory
+from wealthpilot.services import checkpoints, memory, summary
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.critic_agent import CriticAgent, Verdict, rewrite_instruction
 from wealthpilot.services.agents.planner_agent import (
@@ -60,6 +62,8 @@ async def chat_stream(
     db_session: Session | None = None,
     profile: InvestorProfile | None = None,
     user_id: int = 0,
+    depth: str = "auto",
+    rewrite_of: int | None = None,
 ) -> AsyncGenerator[str, None]:
     """多 Agent 协调入口，产出 SSE 文本流。"""
     queue: asyncio.Queue = asyncio.Queue()
@@ -74,6 +78,7 @@ async def chat_stream(
                 _run_pipeline(
                     message, history, holdings, nav_data, nav_history,
                     conversation_id, db_session, profile, user_id, emit,
+                    depth=depth, rewrite_of=rewrite_of,
                 ),
                 timeout,
             )
@@ -100,6 +105,29 @@ async def chat_stream(
         await asyncio.gather(task, return_exceptions=True)
 
 
+_ETA_DEFAULT = {"stock_deep": 55, "stock_compare": 55, "holding_review": 50, "screen": 30, "review": 15, "rewrite": 15}
+
+
+def estimate_eta(db_session, user_id, playbook: str, task_count: int) -> int:
+    """这一轮大概要多久：同类研究最近几次的中位数；次数不够时用经验值。"""
+    samples: list[float] = []
+    if db_session is not None:
+        try:
+            rows = db_session.exec(select(ChatMessage).where(ChatMessage.user_id == (user_id or 0), ChatMessage.role == "assistant")
+                                   .order_by(ChatMessage.created_at.desc()).limit(40)).all()
+            for row in rows:
+                meta = json.loads(row.metadata_json) if row.metadata_json else {}
+                if meta.get("playbook", "") == playbook and meta.get("seconds") and len(meta.get("tasks") or []) == task_count:
+                    samples.append(float(meta["seconds"]))
+        except Exception:  # noqa: BLE001 — 估不出来就用经验值
+            samples = []
+    if len(samples) >= 3:
+        return round(statistics.median(samples[:10]))
+    if playbook in _ETA_DEFAULT:
+        return _ETA_DEFAULT[playbook]
+    return 45 if playbook.startswith("skill:") else max(10, 12 * task_count)
+
+
 def light_model_for(settings, default: str) -> str:
     """提取证券名、审核证据、提出验证点这类轻活用的模型；没配就和主模型一样。"""
     return getattr(settings, "light_model", "") or default
@@ -108,7 +136,9 @@ def light_model_for(settings, default: str) -> str:
 async def _run_pipeline(
     message, history, holdings, nav_data, nav_history,
     conversation_id, db_session, profile, user_id, emit,
+    depth="auto", rewrite_of=None,
 ) -> None:
+    started = time.monotonic()
     settings = get_settings()
     try:
         client = create_ai_client(settings)
@@ -117,6 +147,10 @@ async def _run_pipeline(
         await emit({"type": "done", "content": "模型服务不可用，本次研究未完成。", "meta": {"status": "failed"}})
         return
     model = settings.active_model
+    if rewrite_of is not None:
+        # 追问或改写：只用上一次研究已经取得的证据，不重新取证
+        await _run_rewrite(message, rewrite_of, conversation_id, db_session, profile, user_id, emit, client, model, settings, started)
+        return
     if not history and conversation_id and db_session:
         history = _load_history(db_session, conversation_id, user_id)
     base_messages = [{"role": "assistant" if m["role"] == "ai" else m["role"], "content": m["content"]}
@@ -147,7 +181,8 @@ async def _run_pipeline(
         except Exception:  # noqa: BLE001 — 复盘信息取不到，不影响本轮研究
             prior = ""
 
-    plan = await asyncio.to_thread(planner.plan, message, context, securities, holdings, nav_data)
+    plan = await asyncio.to_thread(planner.plan, message, context, securities, holdings, nav_data, depth)
+    quick = depth == "quick"
     resolved_note = ("已解析出的证券（只使用这里的代码）：\n"
                      + "\n".join(f"- {s['name']}：{s['code']}（{s['asset_type']}）" for s in securities) + "\n\n"
                      ) if securities else ""
@@ -165,7 +200,8 @@ async def _run_pipeline(
             remembered = ""
     resolved_note += prior + remembered
     prior += remembered   # 记忆里的数字同样算"交给模型的上下文"
-    await emit({"type": "plan", "intent": plan.intent, "source": plan.source, "playbook": plan.playbook,
+    await emit({"type": "plan", "intent": plan.intent, "source": plan.source, "playbook": plan.playbook, "depth": depth,
+                "eta_seconds": estimate_eta(db_session, user_id, plan.playbook, len(plan.tasks)),
                 "tasks": [{"id": t.id, "agent": t.agent, "goal": t.goal, "deps": t.deps,
                            "label": AGENT_LABELS.get(t.agent, t.agent)} for t in plan.tasks],
                 "success_criteria": plan.success_criteria})
@@ -185,6 +221,7 @@ async def _run_pipeline(
     critic = CriticAgent(client, light_model_for(settings, model), profile)
     # 交给模型的上下文里出现过的数字（持仓快照、旧验证点），模型转述不算编造
     method = f"用户为这类问题写的方法（按它组织回答）：\n{plan.method}" if plan.method else ""
+    brevity = "\n要求：这是快速回答，控制在 300 字以内，先给结论，再给最关键的两三个依据。" if quick else ""
     holdings_snapshot = _build_holdings_context(holdings, nav_data) if holdings else ""
     holdings_context = holdings_snapshot + prior
 
@@ -201,7 +238,7 @@ async def _run_pipeline(
             prior = _prior_context([completed[d] for d in task.deps if d in completed])
             # 会变的内容（持仓快照、解析结果、旧验证点）都放在用户消息里，系统提示保持逐字不变以命中缓存
             snapshot = f"用户当前持仓：\n{holdings_snapshot}\n\n" if holdings_snapshot else ""
-            msgs = [*base_messages, {"role": "user", "content": f"{snapshot}{resolved_note}{prior}子任务：{task.goal}\n用户问题：{message}"}]
+            msgs = [*base_messages, {"role": "user", "content": f"{snapshot}{resolved_note}{prior}子任务：{task.goal}\n用户问题：{message}{brevity}"}]
             result = await agent.run(msgs, emit, goal=task.goal, stream_text=False)
             completed[task.id] = result
             await emit({"type": "task_done", "id": task.id, "agent": task.agent,
@@ -268,7 +305,7 @@ async def _run_pipeline(
                 draft = results[0].text
             else:
                 draft = await synthesizer.run(message, results, plan.success_criteria, emit,
-                                               stream_output=False, extra_instruction="\n\n".join(filter(None, [method, prior.strip(), instruction])),
+                                               stream_output=False, extra_instruction="\n\n".join(filter(None, [method, prior.strip(), instruction, brevity.strip()])),
                                                sections=plan.sections)
             if not critic_on:
                 final_text = draft or "本轮未能生成回答，请换个问法再试。"
@@ -313,15 +350,97 @@ async def _run_pipeline(
                   conversation_id, db_session, user_id, [r.agent for r in results],
                   status=status, results=results,
                   missing=evidence_verdict.missing_evidence if status == "partial" else None,
-                  client=client, model=light_model_for(settings, model))
+                  client=client, model=light_model_for(settings, model), started=started, depth=depth)
+
+
+async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, profile, user_id, emit, client, model, settings, started) -> None:
+    """追问或改写：只用那一次研究已经取得的证据重新成文，不再取证。
+
+    "写短一点""只讲风险""这个判断依赖什么前提"这类要求不需要新数据。重跑一遍研究要一分钟，
+    而这里只有一次撰写加一次代码校验，十来秒。校验照旧：数字必须能在那批证据或原回答里找到。
+    """
+    async def fail(text: str) -> None:
+        await emit({"type": "error", "content": text})
+        await emit({"type": "done", "content": text, "meta": {"status": "failed", "playbook": "rewrite"}})
+
+    source = db_session.get(ChatMessage, rewrite_of) if db_session is not None else None
+    if source is None or source.user_id != (user_id or 0) or source.role != "assistant":
+        await fail("找不到要追问的那次研究。")
+        return
+    try:
+        meta = json.loads(source.metadata_json) if source.metadata_json else {}
+    except ValueError:
+        meta = {}
+    evidence = meta.get("evidence") or []
+    if not evidence:
+        await fail("那次研究没有留下证据，没法基于它回答，请重新提问。")
+        return
+    asked = db_session.exec(select(ChatMessage).where(
+        ChatMessage.user_id == source.user_id, ChatMessage.role == "user",
+        ChatMessage.conversation_id == source.conversation_id, ChatMessage.id < source.id).order_by(ChatMessage.id.desc()).limit(1)).first()
+    question = asked.content if asked else ""
+    results = [AgentResult("prior", "那次研究取得的全部证据", "", evidence)]
+
+    await emit({"type": "plan", "intent": "基于已有证据回答", "source": "rewrite", "playbook": "rewrite", "tasks": [],
+                "success_criteria": [], "eta_seconds": estimate_eta(db_session, user_id, "rewrite", 0)})
+    await emit({"type": "synthesizing", "agents": [], "mode": "rewrite"})
+    guide = ("这是对一份已发布回答的追问或改写。只能使用下面给出的证据和原回答里已有的数字，不要引入新的数字；"
+             "用户要的内容现有证据里没有时，直接说“现有证据里没有这一项，需要重新研究”，不要编。\n"
+             f"原问题：{question}\n\n原回答：\n{source.content[:6000]}\n\n用户现在的要求：{instruction}")
+    synthesizer = SynthesizerAgent(client, model, profile)
+    critic = CriticAgent(client, light_model_for(settings, model), profile)
+    draft = await synthesizer.run(instruction, results, [], emit, stream_output=False, extra_instruction=guide)
+
+    def check(text: str) -> Verdict:
+        # 原回答里的数字当时已经核对过，这里算作可引用的上下文
+        return critic.review_answer(text, results, f"{instruction}\n{question}", source.content, None)
+
+    status, final_text = "passed", draft
+    if not draft.strip():
+        status, final_text = "failed", "没有生成回答，请换个说法再试。"
+    elif getattr(settings, "critic_enabled", True):
+        verdict = check(draft)
+        await emit({**verdict.as_event("answer"), "attempt": 1})
+        if not verdict.passed:
+            status, final_text = "rejected", "改写后的回答没有通过校验，未发布。可以换个说法，或者重新研究。"
+            if all(i.startswith("以下数字未出现在工具返回中") for i in verdict.issues):
+                # 先让模型只改那几处；不行就把含这些数字的分句删掉
+                fixed = await synthesizer.repair(draft, verdict.issues, verdict.ungrounded_numbers)
+                for attempt, (candidate, label) in enumerate(((fixed, "passed"), (strip_ungrounded(draft, verdict.ungrounded_numbers), "partial")), 2):
+                    recheck = check(candidate) if candidate.strip() else None
+                    if recheck is None:
+                        continue
+                    await emit({**recheck.as_event("answer"), "attempt": attempt})
+                    if recheck.passed:
+                        status, final_text = label, candidate
+                        break
+
+    await _emit_text(emit, final_text)
+    usage = client.usage.as_dict() if isinstance(getattr(client, "usage", None), Usage) else {}
+    seconds = round(time.monotonic() - started, 1)
+    card = summary.card(final_text) if status in ("passed", "partial") else None
+    shared = {"status": status, "playbook": "rewrite", "rewrite_of": rewrite_of, "intent": "基于已有证据回答",
+              "evidence": evidence, "usage": usage, "seconds": seconds, "summary": card}
+    if conversation_id:
+        _save_message(db_session, conversation_id, user_id, "user", instruction)
+        message_id = _save_message(db_session, conversation_id, user_id, "assistant", final_text,
+                                   metadata={**shared, "securities": meta.get("securities") or [], "tasks": []})
+        memory.record(db_session, user_id or 0, "research/published" if status in ("passed", "partial") else "research/withheld",
+                      instruction[:80], {"message_id": message_id, "status": status, "playbook": "rewrite", "rewrite_of": rewrite_of,
+                                         "usage": usage}, actor="agent")
+    await emit({"type": "done", "content": final_text, "follow_ups": [],
+                "meta": {**shared, "missing_evidence": [], "agents": [], "message_id": message_id if conversation_id else None}})
 
 
 async def _finish(
     emit, final_text, grounding, plan, message, holdings,
     conversation_id, db_session, user_id, agents, status="passed", results=None, missing=None,
-    client=None, model="",
+    client=None, model="", started=None, depth="auto",
 ) -> None:
     usage = client.usage.as_dict() if isinstance(getattr(client, "usage", None), Usage) else {}
+    seconds = round(time.monotonic() - started, 1) if started is not None else None
+    card = summary.card(final_text) if status in ("passed", "partial") else None
+    message_id = None
     if grounding["ungrounded"]:
         # 不拦截输出，但把问题暴露出来 —— 这是可以进 CI 的可观测指标
         await emit({
@@ -345,13 +464,14 @@ async def _finish(
                 "securities": plan.securities,
                 "agents": agents,
                 "grounding_rate": round(grounding["rate"], 3),
-                "usage": usage,
+                "usage": usage, "seconds": seconds, "depth": depth, "summary": card,
             },
         )
         memory.record(db_session, user_id or 0, "research/published" if status in ("passed", "partial") else "research/withheld",
                       message[:80], {"message_id": message_id, "status": status, "playbook": plan.playbook,
                                      "securities": [s.get("code") for s in plan.securities], "usage": usage}, actor="agent")
-        await _emit_checkpoints(emit, db_session, client, model, user_id, message_id, message, plan, final_text, holdings, status)
+        if depth != "quick":   # 快速回答不是一次完整的判断，不留验证点
+            await _emit_checkpoints(emit, db_session, client, model, user_id, message_id, message, plan, final_text, holdings, status)
 
     await emit({
         "type": "done",
@@ -365,7 +485,8 @@ async def _finish(
             "intent": plan.intent,
             "agents": agents,
             "grounding_rate": round(grounding["rate"], 3),
-            "usage": usage,
+            "usage": usage, "seconds": seconds, "depth": depth, "summary": card,
+            "message_id": message_id,
         },
     })
 

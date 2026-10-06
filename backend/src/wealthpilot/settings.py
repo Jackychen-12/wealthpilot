@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     watch_time: str = Field(default="15:30", pattern=r"^\d{2}:\d{2}$", description="每日盯盘时间（本机时区）")
     watch_move_pct: float = Field(default=5.0, gt=0, description="当日涨跌幅超过多少算异动")
 
+    # 手机触达：Telegram 机器人。令牌在网页「设置」里填；绑定哪个聊天由配对码决定，存在数据库里
+    telegram_bot_token: str = Field(default="", description="Telegram 机器人令牌（@BotFather 给的）")
+    telegram_api_base: str = Field(default="https://api.telegram.org", description="Telegram 接口地址；需要走中转时改这里")
+
     local_user_id: int = Field(default=0, description="CLI / MCP 使用哪个用户的持仓与画像，0=匿名档")
 
     connectors_file: Path = Field(default=Path("./connectors.json"), description="外部 MCP 连接器配置文件")

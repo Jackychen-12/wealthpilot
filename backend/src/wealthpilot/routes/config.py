@@ -18,12 +18,13 @@ from wealthpilot.storage.db import get_engine
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "telegram_bot_token")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
     "advice_mode", "checkpoints_enabled", "broker", "paper_initial_cash",
     "watch_enabled", "watch_time", "watch_move_pct", "alert_webhook_url",
+    "telegram_bot_token", "telegram_api_base",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
