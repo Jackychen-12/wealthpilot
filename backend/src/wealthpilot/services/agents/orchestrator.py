@@ -140,6 +140,37 @@ def light_model_for(settings, default: str) -> str:
     return getattr(settings, "light_model", "") or default
 
 
+# 这句话是接着上一个话题说的："和五粮液比呢""它们哪个便宜"——要把上一轮的对象一起带上
+_FOLLOW_UP_RE = re.compile(r"相比|对比|比较|比一下|比呢|比起来|哪个|哪只|哪家|谁更|[和跟与同]它|它们|这两|这几")
+
+
+async def _named_in(text: str, known: list[dict], planner) -> list[dict]:
+    """一句话里点了名的证券：先按全称和代码直接匹配，匹配不到再让模型认简称（"茅台""宁王"）。"""
+    found = await resolve_text(text, known)
+    if not found:
+        found = await resolve_names(await asyncio.to_thread(planner.extract_names, text), [])
+    return found
+
+
+async def resolve_for_turn(message: str, history: list[dict], known: list[dict], planner) -> list[dict]:
+    """这一轮问的是哪些证券。
+
+    只认当前这句话点了名的：之前聊过宁德时代，现在问茅台，对象就只有茅台。
+    只有两种情况才往回找上一轮的对象：这句话没有点任何名（"那它的估值呢"），或者明显是接着比（"和五粮液比呢"）。
+    往回找时只看用户自己说过的话，不看回答 —— 回答里会顺带提到同行，把它们算进来就会研究错对象。
+    """
+    current = await _named_in(message, known, planner)
+    if current and not _FOLLOW_UP_RE.search(message):
+        return current
+    earlier: list[dict] = []
+    for text in reversed([m["content"] for m in history if m["role"] == "user" and isinstance(m["content"], str)][-3:]):
+        earlier = await resolve_text(text, known)
+        if earlier:
+            break
+    merged = {s["code"]: s for s in [*earlier, *current]}   # 上一轮的对象在前，这一句新点名的在后
+    return list(merged.values())
+
+
 async def _run_pipeline(
     message, history, holdings, nav_data, nav_history,
     conversation_id, db_session, profile, user_id, emit,
@@ -170,10 +201,7 @@ async def _run_pipeline(
     # 证券解析在规划之前完成：代码由程序查出来，不让模型凭记忆写
     known = [{"code": h.fund_code, "name": h.fund_name, "asset_type": h.asset_type or "fund"} for h in holdings]
     try:
-        securities = await resolve_text(f"{context}\n{message}" if context else message, known)
-        if not securities:
-            names = await asyncio.to_thread(planner.extract_names, message, context)
-            securities = await resolve_names(names, securities)
+        securities = await resolve_for_turn(message, base_messages, known, planner)
     except Exception:  # noqa: BLE001 — 解析失败不该让整轮研究失败，退回让 Agent 自己调 resolve_security
         securities = []
     if securities:

@@ -324,3 +324,64 @@ def test_screener_endpoint_uses_the_same_logic_as_the_tool(snap):
     from wealthpilot.main import app
     out = TestClient(app).post("/api/screener", json={"industry": "白酒", "roe_min": 15}).json()
     assert [s["name"] for s in out["stocks"]] == ["贵州茅台"]
+
+
+# ── 一轮对话问的是谁 ────────────────────────────────────
+
+class _Names:
+    """假的证券解析：只认全称；简称要靠"模型"（extract_names）来认。"""
+
+    BOOK = {"贵州茅台": "600519", "宁德时代": "300750", "五粮液": "000858"}
+
+    def __init__(self, aliases=None):
+        self.aliases, self.asked = aliases or {}, []
+
+    async def resolve_text(self, text, known=None):
+        return [{"code": code, "name": name, "asset_type": "stock"} for name, code in self.BOOK.items() if name in text]
+
+    async def resolve_names(self, names, already):
+        return list(already) + [{"code": self.BOOK[n], "name": n, "asset_type": "stock"} for n in names if n in self.BOOK]
+
+    def extract_names(self, message, context=""):
+        self.asked.append(message)
+        return [full for alias, full in self.aliases.items() if alias in message]
+
+
+def _resolver(monkeypatch, **kw):
+    fake = _Names(**kw)
+    monkeypatch.setattr(orchestrator, "resolve_text", fake.resolve_text)
+    monkeypatch.setattr(orchestrator, "resolve_names", fake.resolve_names)
+    return fake
+
+
+CATL_TURN = [{"role": "user", "content": "帮我深度分析一下宁德时代"},
+             {"role": "assistant", "content": "宁德时代是电池龙头，同行里贵州茅台、五粮液这类消费股估值更低……"}]
+
+
+async def test_a_new_question_is_not_polluted_by_the_previous_topic(monkeypatch):
+    fake = _resolver(monkeypatch)
+    found = await orchestrator.resolve_for_turn("帮我深度分析一下贵州茅台", CATL_TURN, [], fake)
+    assert [s["name"] for s in found] == ["贵州茅台"]          # 之前聊过宁德时代，回答里还提到五粮液，都不该混进来
+
+
+async def test_a_pronoun_follow_up_goes_back_to_the_last_named_stock(monkeypatch):
+    fake = _resolver(monkeypatch)
+    found = await orchestrator.resolve_for_turn("那它的估值贵不贵", CATL_TURN, [], fake)
+    assert [s["name"] for s in found] == ["宁德时代"]          # 只看用户问过的，不看回答里顺带提到的同行
+    assert await orchestrator.resolve_for_turn("今天大盘怎么样", [], [], fake) == []
+
+
+async def test_a_comparison_follow_up_keeps_both(monkeypatch):
+    fake = _resolver(monkeypatch)
+    found = await orchestrator.resolve_for_turn("和五粮液比呢", CATL_TURN, [], fake)
+    assert [s["name"] for s in found] == ["宁德时代", "五粮液"]
+    # 一句话里自己就点了两只：不需要往回找
+    found = await orchestrator.resolve_for_turn("对比一下贵州茅台和五粮液", [], [], fake)
+    assert [s["name"] for s in found] == ["贵州茅台", "五粮液"]
+
+
+async def test_aliases_in_the_current_question_are_read_without_the_old_context(monkeypatch):
+    fake = _resolver(monkeypatch, aliases={"茅台": "贵州茅台"})
+    found = await orchestrator.resolve_for_turn("茅台现在怎么样", CATL_TURN, [], fake)
+    assert [s["name"] for s in found] == ["贵州茅台"]
+    assert fake.asked == ["茅台现在怎么样"]                    # 让模型认简称时只给当前这句话，不把之前的对话塞给它
