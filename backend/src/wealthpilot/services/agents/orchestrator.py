@@ -29,6 +29,7 @@ from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services import checkpoints, memory, summary
+from wealthpilot.services.agents import debate
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.critic_agent import CriticAgent, Verdict, rewrite_instruction
 from wealthpilot.services.agents.planner_agent import (
@@ -265,6 +266,7 @@ async def _run_pipeline(
         results.extend(await asyncio.gather(*[run_task(t) for t in extra]))
 
     status = "passed"
+    debate_result: dict | None = None
     if all_failed:
         status = "failed"
         final_text = "研究任务全部执行失败，未能得出结论。请检查模型服务配置或稍后重试。"
@@ -289,6 +291,13 @@ async def _run_pipeline(
                     + "\n".join(f"- {g}" for g in gaps)) if gaps else ""
         if gaps:
             status = "partial"
+        # 个股深度研究：撰写之前先让多空两方就同一批证据各打各的
+        if plan.playbook == "stock_deep" and not quick and settings.debate_enabled and plan.securities:
+            subject = f"{plan.securities[0]['name']}（{plan.securities[0]['code']}）"
+            debate_result = await debate.run(client, light_model_for(settings, model), subject, message, results)
+            if debate_result:
+                await emit({"type": "debate", **debate_result})
+                method = "\n\n".join(filter(None, [method, debate.brief(debate_result)]))
         instruction = gap_note
         best: tuple[float, str, Verdict] | None = None
         repair_from: tuple[str, Verdict] | None = None
@@ -350,7 +359,7 @@ async def _run_pipeline(
                   conversation_id, db_session, user_id, [r.agent for r in results],
                   status=status, results=results,
                   missing=evidence_verdict.missing_evidence if status == "partial" else None,
-                  client=client, model=light_model_for(settings, model), started=started, depth=depth)
+                  client=client, model=light_model_for(settings, model), started=started, depth=depth, debate_result=debate_result)
 
 
 async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, profile, user_id, emit, client, model, settings, started) -> None:
@@ -435,7 +444,7 @@ async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, pro
 async def _finish(
     emit, final_text, grounding, plan, message, holdings,
     conversation_id, db_session, user_id, agents, status="passed", results=None, missing=None,
-    client=None, model="", started=None, depth="auto",
+    client=None, model="", started=None, depth="auto", debate_result=None,
 ) -> None:
     usage = client.usage.as_dict() if isinstance(getattr(client, "usage", None), Usage) else {}
     seconds = round(time.monotonic() - started, 1) if started is not None else None
@@ -464,7 +473,7 @@ async def _finish(
                 "securities": plan.securities,
                 "agents": agents,
                 "grounding_rate": round(grounding["rate"], 3),
-                "usage": usage, "seconds": seconds, "depth": depth, "summary": card,
+                "usage": usage, "seconds": seconds, "depth": depth, "summary": card, "debate": debate_result,
             },
         )
         memory.record(db_session, user_id or 0, "research/published" if status in ("passed", "partial") else "research/withheld",
@@ -485,7 +494,7 @@ async def _finish(
             "intent": plan.intent,
             "agents": agents,
             "grounding_rate": round(grounding["rate"], 3),
-            "usage": usage, "seconds": seconds, "depth": depth, "summary": card,
+            "usage": usage, "seconds": seconds, "depth": depth, "summary": card, "debate": debate_result,
             "message_id": message_id,
         },
     })

@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：40 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：51 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、资金与筹码、一致预期与消息、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -384,6 +384,85 @@ async def list_checkpoints(code: str = "", status: str = "") -> str:
     """List checkpoints set by past research with their verification results.
     列出此前研究设下的验证点及核对结果。code 可选（如 600519），status 可选（pending / held / broken）。"""
     return await execute_tool("list_checkpoints", {"code": code, "status": status}, [], {}, None)
+
+
+# ── 资金与筹码、预期与消息 ──────────────────────────────
+
+@mcp.tool()
+async def get_capital_flow(code: str) -> str:
+    """Net capital flow over 5/10/20 trading days, breakdown by order size, main-force cost.
+    个股资金流向：近 5 / 10 / 20 日累计净流入、按单子大小的拆分、主力持仓成本。"""
+    return await execute_tool("get_capital_flow", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_margin_trading(code: str) -> str:
+    """Margin financing balance and its recent change.
+    个股融资融券：融资余额及 5 / 20 / 60 日变化、融券余额、占流通市值的比例。"""
+    return await execute_tool("get_margin_trading", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_shareholder_structure(code: str) -> str:
+    """Holder count history, top-10 float holders, institutional and northbound holdings.
+    筹码结构：股东户数变化、十大流通股东、各类机构持仓、北向持股。"""
+    return await execute_tool("get_shareholder_structure", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_insider_activity(code: str) -> str:
+    """Insider buys/sells, buybacks in the last two years and share unlocks in the next year.
+    近两年股东与董监高增减持、回购，以及未来一年的限售股解禁。"""
+    return await execute_tool("get_insider_activity", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_large_trades(code: str) -> str:
+    """Recent block trades (premium/discount) and dragon-tiger list appearances.
+    近期大宗交易（折溢价、买卖方）与龙虎榜上榜记录。"""
+    return await execute_tool("get_large_trades", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_consensus_forecast(code: str) -> str:
+    """Sell-side consensus: coverage, rating distribution, EPS forecasts, forward P/E, broker target range.
+    卖方一致预期：覆盖机构数、评级分布、未来几年 EPS 预测与预期市盈率、券商目标价区间。"""
+    return await execute_tool("get_consensus_forecast", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_research_reports(code: str, limit: int = 8) -> str:
+    """Sell-side research reports from the last six months.
+    近半年的卖方研报：机构、标题、评级及评级变化、EPS 预测。"""
+    return await execute_tool("get_research_reports", {"code": code, "limit": limit}, [], {}, None)
+
+
+@mcp.tool()
+async def get_earnings_guidance(code: str) -> str:
+    """The company's own latest earnings forecast and preliminary results.
+    公司最近一次业绩预告与业绩快报。"""
+    return await execute_tool("get_earnings_guidance", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_stock_news(code: str, limit: int = 8) -> str:
+    """Recent news about one stock: title, summary, outlet, time.
+    个股最近的新闻：标题、摘要、媒体、时间。"""
+    return await execute_tool("get_stock_news", {"code": code, "limit": limit}, [], {}, None)
+
+
+@mcp.tool()
+async def get_investor_surveys(code: str) -> str:
+    """Recent institutional surveys and earnings calls with the opening of the Q&A.
+    最近的机构调研与业绩说明会纪要。"""
+    return await execute_tool("get_investor_surveys", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def get_business_segments(code: str) -> str:
+    """Revenue mix by product, region and industry with gross margins.
+    主营构成：按产品、地区、行业拆分的收入占比与毛利率。"""
+    return await execute_tool("get_business_segments", {"code": code}, [], {}, None)
 
 
 def main() -> None:

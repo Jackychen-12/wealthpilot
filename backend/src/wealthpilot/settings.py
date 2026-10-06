@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # Agent configuration
     agent_max_tool_rounds: int = Field(default=3)
     agent_max_tokens: int = Field(default=16000)
-    agent_max_parallel: int = Field(default=3, description="同一波内并发执行的 Agent 上限")
+    agent_max_parallel: int = Field(default=6, description="同一波内并发执行的 Agent 上限")
     planner_max_tasks: int = Field(default=4, description="Planner 单次拆解的任务数上限")
     critic_enabled: bool = Field(default=True, description="是否启用 Critic 双闸门校验")
     critic_max_replans: int = Field(default=1, description="证据不足时最多补充规划几轮")
@@ -59,12 +59,13 @@ class Settings(BaseSettings):
         description="重写用尽后，数字溯源率不低于此值的草稿带标注发布；设为 1 则一律拒答")
     tool_timeout_seconds: float = Field(default=30, gt=0)
     run_timeout_seconds: float = Field(default=180, gt=0)
-    run_max_tool_calls: int = Field(default=24, ge=1)
+    run_max_tool_calls: int = Field(default=40, ge=1)
     ai_timeout_seconds: float = Field(default=60, gt=0)
 
     skills_dir: Path = Field(default=Path("./skills"), description="技能目录：用户自己写的研究方法（Markdown）")
     light_model: str = Field(default="", description="提取证券名、审核证据、提出验证点等轻活用的模型；留空则与主模型相同")
     checkpoints_enabled: bool = Field(default=True, description="研究发布后提出可事后核对的验证点")
+    debate_enabled: bool = Field(default=True, description="个股深度研究时，撰写前先让看多、看空两方就同一批证据各自陈述")
     advice_mode: bool = Field(
         default=False,
         description="个人模式：允许给出明确的买卖立场与操作建议（仍须逐条授权才执行），并用涨跌类验证点事后打分")

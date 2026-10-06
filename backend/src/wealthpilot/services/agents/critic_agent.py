@@ -44,6 +44,8 @@ _ACTION_NUMBER_RE = re.compile(
 _FORECAST_RE = re.compile(r"目标价|必涨|必然上涨|一定会涨|肯定会涨|稳赚|保证收益|将涨到|会涨到|翻倍在即")
 # 建议模式下允许给目标价和方向判断，但"保证"类承诺任何时候都不行
 _GUARANTEE_RE = re.compile(r"必涨|必然上涨|一定会涨|肯定会涨|稳赚|保证收益|翻倍在即")
+# "券商给出的目标价"是在转述别人的观点，不是我们自己给目标价
+_ATTRIBUTED_RE = re.compile(r"(券商|卖方|机构|研报|分析师|一致预期)[^。；\n]{0,14}$")
 _NEGATION_RE = re.compile(r"(不|无|没有|未|非|避免|拒绝|不会|不得|不应)[^，。；\n]{0,8}$")
 _FINANCIAL_RE = re.compile(r"营收|营业收入|净利润|ROE|毛利率|净利率|每股收益")
 _PERIOD_RE = re.compile(r"\d{4}[-/年]\d{1,2}|年报|中报|半年报|季报|一季|三季|前三季|上半年|报告期")
@@ -252,6 +254,8 @@ class CriticAgent:
         advice = getattr(get_settings(), "advice_mode", False)
         for match in (_GUARANTEE_RE if advice else _FORECAST_RE).finditer(answer):
             before = answer[max(0, match.start() - 12):match.start()]
+            if match.group() == "目标价" and _ATTRIBUTED_RE.search(answer[max(0, match.start() - 18):match.start()]):
+                continue
             if not _NEGATION_RE.search(before):
                 issues.append(f"出现了对收益的承诺（“{match.group()}”），建议可以给，但不能保证结果" if advice else
                               f"出现了目标价或确定性的涨跌预测（“{match.group()}”），研究只能陈述事实与推断")

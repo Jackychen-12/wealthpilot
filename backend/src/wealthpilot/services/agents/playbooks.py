@@ -26,8 +26,9 @@ class Playbook:
 PLAYBOOKS: dict[str, Playbook] = {
     "stock_deep": Playbook(
         "stock_deep", "个股深度研究",
-        sections=("结论", "基本面", "估值", "走势", "行业", "风险", "待验证"),
-        criteria=("最近几期营收、净利润及同比，ROE 与负债率", "当前 PE/PB 及其历史分位", "近期走势与所处区间位置", "所属行业与同行对比"),
+        sections=("结论", "基本面", "估值", "走势", "资金", "预期", "行业", "多空", "风险", "待验证"),
+        criteria=("最近几期营收、净利润及同比，ROE 与负债率", "当前 PE/PB 及其历史分位", "近期走势与所处区间位置", "所属行业与同行对比",
+                  "资金流向或股东、机构持仓的变化", "卖方一致预期或公司的业绩预告"),
     ),
     "stock_compare": Playbook(
         "stock_compare", "个股对比",
@@ -55,8 +56,12 @@ _DIMENSIONS = {
     "fundamental": "研究{name}（{code}）的基本面：最近几期营收、净利润及同比、ROE、毛利率、负债率、现金流与分红；并读最新定期报告里管理层对业绩变动的解释与风险提示",
     "valuation": "研究{name}（{code}）的估值：当前 PE/PB/PS、各自的历史分位、与同行业公司的对比",
     "price": "研究{name}（{code}）的走势：最新行情、近一年所处价格区间位置、均线排列与波动率",
-    "industry": "研究{name}（{code}）的行业位置：所属行业、行业内市值排名与主要同行、所在行业当日表现、近期公告与新闻；近期有重要公告的读一下正文",
+    "industry": "研究{name}（{code}）的行业位置：所属行业、行业内市值排名与主要同行、所在行业当日表现、近期公告；近期有重要公告的读一下正文",
+    "capital": "研究{name}（{code}）的资金与筹码：近期资金流向与融资余额变化、股东户数与机构持仓的变化、近两年股东和高管的增减持与回购、未来一年的解禁",
+    "expectation": "研究{name}（{code}）的市场预期：券商一致预期（评级分布、未来两年 EPS 与隐含增速、预期市盈率）、近期研报的评级变化、"
+                   "公司的业绩预告、最近的新闻；并把预期的增速和最近几期实际的增速放在一起比",
 }
+_DEEP_DIMS = ("fundamental", "valuation", "price", "industry", "capital", "expectation")
 
 
 def _stock_tasks(security: dict, dims: tuple[str, ...], prefix: str) -> list[Task]:
@@ -89,7 +94,7 @@ def build_tasks(playbook: str, securities: list[dict], holdings: list[PortfolioH
     stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
 
     if playbook == "stock_deep" and stocks:
-        return _stock_tasks(stocks[0], ("fundamental", "valuation", "price", "industry"), "")
+        return _stock_tasks(stocks[0], _DEEP_DIMS, "")
 
     if playbook == "stock_compare" and len(stocks) >= 2:
         tasks: list[Task] = []

@@ -192,3 +192,67 @@ def test_last_resort_trim_drops_only_the_clause_with_the_unverifiable_number():
     assert "| 元件 | — |" in out and "## 50 这个标题不动" in out             # 表格换成"—"，标题不碰
     assert "2567" in strip_ungrounded("上涨 2567 家，占 50%。", ["50"])      # 2567 里的 "5" 不会被误伤
     assert strip_ungrounded(answer, []) == answer
+
+
+# ── 多空辩论 ────────────────────────────────────────────
+
+def _debate_results():
+    from wealthpilot.services.agents.base import AgentResult
+    ev = [{"id": "E-aaaaaaaaaaaa", "tool": "get_valuation_history", "input": {"code": "600519"}, "status": "ok",
+           "output": '{"pe": {"current": 19.32, "percentile": 4.1}}'},
+          {"id": "E-bbbbbbbbbbbb", "tool": "get_financial_indicators", "input": {"code": "600519"}, "status": "ok",
+           "output": '{"reports": [{"report_date": "2026-06-30", "revenue_yoy_pct": 1.47, "net_profit_yoy_pct": -1.95}]}'}]
+    return [AgentResult("valuation", "研究估值", "PE 19.32", ev)]
+
+
+def test_debate_drops_points_with_fake_evidence_or_invented_numbers():
+    from wealthpilot.services.agents import debate
+    raw = {"points": [
+        {"text": "PE 分位只有 4.1%，是近几年最便宜的时候", "evidence": ["E-aaaaaaaaaaaa"]},
+        {"text": "明年利润会增长 30%", "evidence": ["E-bbbbbbbbbbbb"]},          # 30 不在任何证据里
+        {"text": "机构都在抢筹", "evidence": ["E-cccccccccccc"]},               # 证据编号是编的
+        {"text": "没有证据的话", "evidence": []},
+    ], "weakness": "净利润同比 -1.95%，增长还没恢复"}
+    out = debate.validate(raw, _debate_results())
+    assert [p["text"] for p in out["points"]] == ["PE 分位只有 4.1%，是近几年最便宜的时候"]
+    assert out["points"][0]["evidence"] == ["E-aaaaaaaaaaaa"] and "1.95" in out["weakness"]
+
+
+def test_debate_runs_both_sides_and_briefs_the_writer():
+    import asyncio
+    from types import SimpleNamespace
+
+    from wealthpilot.services.agents import debate
+
+    class Model:
+        def __init__(self):
+            self.systems = []
+
+        def create(self, **kw):
+            self.systems.append(kw["system"])
+            if "看多方" in kw["system"]:
+                return SimpleNamespace(text='{"points":[{"text":"PE 分位 4.1%，很便宜","evidence":["E-aaaaaaaaaaaa"]}],"weakness":"增长停了"}')
+            return SimpleNamespace(text='{"points":[{"text":"净利润同比 -1.95%，还在掉","evidence":["E-bbbbbbbbbbbb"]}],"weakness":"估值已经很低"}')
+
+    model = Model()
+    out = asyncio.run(debate.run(model, "m", "贵州茅台（600519）", "分析茅台", _debate_results()))
+    assert len(model.systems) == 2 and out["bull"]["points"] and out["bear"]["points"]
+    text = debate.brief(out)
+    assert "看多方" in text and "看空方" in text and "[E-aaaaaaaaaaaa]" in text and "不要各打五十大板" in text
+
+    class Broken:
+        def create(self, **kw):
+            raise RuntimeError("offline")
+    assert asyncio.run(debate.run(Broken(), "m", "x", "q", _debate_results())) is None      # 辩论失败不影响研究
+
+    class Empty:
+        def create(self, **kw):
+            return SimpleNamespace(text='{"points":[],"weakness":""}')
+    assert asyncio.run(debate.run(Empty(), "m", "x", "q", _debate_results())) is None
+
+
+def test_broker_target_price_can_be_quoted_but_not_asserted():
+    from wealthpilot.services.agents.critic_agent import CriticAgent
+    check = CriticAgent._check_research_rules
+    assert not [i for i in check("## 预期\n券商给出的目标价区间是 1430 到 2030 元。", []) if "目标价" in i]
+    assert [i for i in check("## 结论\n我们给出目标价 1800 元。", []) if "目标价" in i]

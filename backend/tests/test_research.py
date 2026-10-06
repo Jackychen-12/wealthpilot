@@ -85,9 +85,9 @@ def test_intent_rules(message, resolved, has_holdings, expected):
     assert PlannerAgent.classify_by_rules(message, resolved, has_holdings) == expected
 
 
-def test_stock_deep_runs_four_dimensions_in_parallel_with_resolved_code():
+def test_stock_deep_runs_six_dimensions_in_parallel_with_resolved_code():
     tasks = build_tasks("stock_deep", [MAOTAI], [], {}, "分析茅台")
-    assert [t.agent for t in tasks] == ["fundamental", "valuation", "price", "industry"]
+    assert [t.agent for t in tasks] == ["fundamental", "valuation", "price", "industry", "capital", "expectation"]
     assert all("600519" in t.goal and not t.deps for t in tasks)
     assert len(Plan("x", tasks).waves()) == 1
 
@@ -153,7 +153,7 @@ async def test_orchestrator_passes_resolved_codes_to_agents(monkeypatch):
 
     events = [line async for line in orchestrator.chat_stream("帮我分析一下贵州茅台", [], [], {})]
     assert any('"type": "resolved"' in e and "600519" in e for e in events)
-    assert run.await_count == 4
+    assert run.await_count == 6
     for call in run.await_args_list:
         assert "贵州茅台：600519" in call.args[0][-1]["content"]
 
