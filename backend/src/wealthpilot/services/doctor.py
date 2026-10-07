@@ -65,7 +65,11 @@ def _model(online: bool) -> dict:
     try:
         client = create_ai_client(settings)
         client.create(model=settings.active_model, max_tokens=2000, system="只回复两个字：正常", messages=[{"role": "user", "content": "测试"}])
-    except Exception as e:  # noqa: BLE001 — 把供应商返回的原因原样给用户
+    except Exception as e:  # noqa: BLE001 — 认得出的说人话，认不出的把供应商返回的原因原样给用户
+        from wealthpilot.services.ai_client import diagnose
+        known = diagnose(e)
+        if known:
+            return _item("模型", "fail", f"{label} 用不了", known.message)
         return _item("模型", "fail", f"{label} 调用失败：{str(e)[:160]}", "检查 Key 是否有效、账户是否有余额、模型名是否写对（网页版「设置」里可以改并测试）。")
     return _item("模型", "ok", f"{label}，{time.monotonic() - started:.1f} 秒")
 

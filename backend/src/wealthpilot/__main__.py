@@ -75,7 +75,10 @@ def cmd_config(_args: argparse.Namespace) -> None:
 
     s = get_settings()
     provider = s.ai_provider.upper()
-    if s.ai_provider == "deepseek":
+    if s.ai_provider == "openai":
+        key_display = _mask_key(s.openai_api_key) if s.openai_api_key else "(本机模型，无需 Key)"
+        model = f"{s.openai_model} @ {s.openai_base_url}"[:24]
+    elif s.ai_provider == "deepseek":
         key_display = _mask_key(s.deepseek_api_key)
         model = s.deepseek_model
     else:

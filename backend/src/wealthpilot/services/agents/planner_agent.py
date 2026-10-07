@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services import skills
 from wealthpilot.services.agents.prompts import build_profile_context
-from wealthpilot.services.ai_client import json_mode
+from wealthpilot.services.ai_client import json_mode, raise_if_unavailable
 from wealthpilot.settings import get_settings
 
 if TYPE_CHECKING:
@@ -182,7 +182,8 @@ class PlannerAgent:
             match = re.search(r"\{.*\}", result.text.strip(), re.DOTALL)
             names = json.loads(match.group()).get("securities") if match else []
             return [str(n) for n in names][:5] if isinstance(names, list) else []
-        except Exception:
+        except Exception as e:
+            raise_if_unavailable(e)
             return []
 
     def _decide(self, message: str, context: str, securities: list[dict]) -> Plan | None:
@@ -199,7 +200,8 @@ class PlannerAgent:
                 **json_mode(self.client),
             )
             return self._parse(result.text, max_tasks)
-        except Exception:
+        except Exception as e:
+            raise_if_unavailable(e)   # 模型用不了就别退回关键词规划了：后面的 Agent 一样跑不动
             return None
 
     @staticmethod

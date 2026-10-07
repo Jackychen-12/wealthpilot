@@ -542,12 +542,20 @@ class App:
             return
         if not steps.get("model") or forced:
             c.print("\n[bold]第 1 步 · 配置模型[/] [dim]（不配也能看行情、选股、管持仓，只是不能让 AI 研究）[/]")
-            choice = (await self.ask("用哪家的模型？1 DeepSeek  2 Claude  回车跳过：")).strip()
-            if choice in ("1", "2"):
-                provider, field = ("deepseek", "deepseek_api_key") if choice == "1" else ("anthropic", "anthropic_api_key")
-                key = (await self.ask_secret("粘贴 API Key（输入不会显示，只保存在本机）：")).strip()
+            choice = (await self.ask("用哪家的模型？1 DeepSeek  2 Claude  3 其他兼容 OpenAI 接口的服务（含本机 Ollama）  回车跳过：")).strip()
+            if choice in ("1", "2", "3"):
+                payload: dict = {}
+                if choice == "3":
+                    base = (await self.ask("接口地址（如 https://api.siliconflow.cn/v1，本机 Ollama 是 http://localhost:11434/v1）：")).strip()
+                    name = (await self.ask("模型名（照服务商文档里的写；要支持工具调用）：")).strip()
+                    if base and name:
+                        payload = {"ai_provider": "openai", "openai_base_url": base, "openai_model": name}
+                provider, field = {"1": ("deepseek", "deepseek_api_key"), "2": ("anthropic", "anthropic_api_key"), "3": ("openai", "openai_api_key")}[choice]
+                key = (await self.ask_secret("粘贴 API Key（输入不会显示，只保存在本机" + ("；本机模型直接回车）：" if choice == "3" else "）："))).strip()
                 if key:
-                    await self.backend.request("PUT", "/api/settings", json={"ai_provider": provider, field: key})
+                    payload |= {"ai_provider": provider, field: key}
+                if payload:
+                    await self.backend.request("PUT", "/api/settings", json=payload)
                     with c.status("[dim]测试一下…", spinner="dots"):
                         result = await self.backend.request("POST", "/api/settings/test")
                     if result["ok"]:

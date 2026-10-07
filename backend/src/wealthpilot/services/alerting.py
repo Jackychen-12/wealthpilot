@@ -183,6 +183,12 @@ async def deliver_webhook(url: str, alerts: list[Alert], timeout: float = 8.0) -
             for a in alerts
         ],
     }
+    from wealthpilot.services import channels
+    if channels.webhook_payload(url, "").get("source") != "wealthpilot":
+        # 飞书 / 企业微信 / 钉钉 / Slack 的群机器人只认各自的文字格式
+        text = f"WealthPilot 预警（{len(alerts)} 条）\n" + "\n".join(f"· {a.fund_name}：{a.message}" for a in alerts)
+        ok = await channels.send_webhook(url, text)
+        return {"delivered": ok, "count": len(alerts)} if ok else {"delivered": False, "reason": "群机器人没有接受这条消息：检查地址，钉钉还要看关键词或加签设置"}
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, json=payload)

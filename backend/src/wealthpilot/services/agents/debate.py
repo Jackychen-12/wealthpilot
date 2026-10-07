@@ -14,7 +14,7 @@ import re
 
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.synthesizer_agent import SynthesizerAgent, check_numeric_grounding
-from wealthpilot.services.ai_client import json_mode
+from wealthpilot.services.ai_client import json_mode, raise_if_unavailable
 
 SIDES = {
     "bull": ("看多方", "这只股票现在值得看好"),
@@ -72,9 +72,11 @@ def _speak(client, model: str, side: str, subject: str, evidence_block: str) -> 
 
 async def run(client, model: str, subject: str, question: str, results: list[AgentResult]) -> dict | None:
     """两方同时发言。任何一方调用失败、或两方都拿不出站得住的理由，就当没有这场辩论（返回 None），不影响研究照常发布。"""
-    block = SynthesizerAgent._build_evidence_block(question, results)
+    block = SynthesizerAgent._build_evidence_block(question, results, budget=500)
     spoken = await asyncio.gather(*[asyncio.to_thread(_speak, client, model, side, subject, block) for side in SIDES],
                                   return_exceptions=True)
+    for failure in (s for s in spoken if isinstance(s, Exception)):
+        raise_if_unavailable(failure)
     if any(isinstance(s, Exception) for s in spoken):
         return None
     debate = {side: validate(raw, results) for side, raw in zip(SIDES, spoken, strict=True)}

@@ -18,13 +18,15 @@ from wealthpilot.storage.db import get_engine
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key", "telegram_bot_token")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
+    "openai_api_key", "openai_model", "openai_base_url", "openai_json_mode", "openai_max_tokens",
     "advice_mode", "checkpoints_enabled", "broker", "paper_initial_cash",
     "watch_enabled", "watch_time", "watch_move_pct", "alert_webhook_url",
     "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
+    "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -81,6 +83,15 @@ async def version(request: Request, refresh: bool = False):
     return await asyncio.to_thread(upgrade.check, force=True) if refresh else await asyncio.to_thread(upgrade.status)
 
 
+@router.get("/usage")
+def usage(request: Request):
+    """模型用量：今天、近 7 天、近 30 天，按天、按用途。"""
+    from wealthpilot.services import budget
+
+    _local_only(request)
+    return budget.summary(get_settings().local_user_id)
+
+
 @router.get("/doctor")
 async def doctor(request: Request, model: bool = False):
     """自检：数据源、模型、数据库、手机触达、版本，各自通不通、不通怎么修。model=1 时实测一次模型调用。"""
@@ -102,7 +113,7 @@ def update_settings(body: dict, request: Request):
     for k, v in changes.items():
         if isinstance(v, str) and re.search(r"[\r\n]", v):
             raise HTTPException(422, f"{k} 不能包含换行")
-    if changes.get("ai_provider") not in (None, "anthropic", "deepseek") or changes.get("broker") not in (None, "none", "paper"):
+    if changes.get("ai_provider") not in (None, "anthropic", "deepseek", "openai") or changes.get("broker") not in (None, "none", "paper"):
         raise HTTPException(422, "取值不合法")
     try:   # 先用模型校验一遍，别把写不合法的值落到文件里
         Settings(**{**get_settings().model_dump(), **changes})
@@ -128,6 +139,9 @@ async def test_model(request: Request):
         client = create_ai_client(settings)
         result = await asyncio.to_thread(client.create, model=settings.active_model, max_tokens=2000,
                                          system="只回复两个字：正常", messages=[{"role": "user", "content": "测试"}])
-    except Exception as e:  # noqa: BLE001 — 把供应商返回的原因原样告诉用户
-        return {"ok": False, "provider": settings.ai_provider, "model": settings.active_model, "error": str(e)[:300]}
+    except Exception as e:  # noqa: BLE001 — 认得出的错误说人话，认不出的把供应商返回的原因原样给用户
+        from wealthpilot.services.ai_client import diagnose
+        known = diagnose(e)
+        return {"ok": False, "provider": settings.ai_provider, "model": settings.active_model,
+                "error": known.message if known else str(e)[:300], "kind": known.kind if known else ""}
     return {"ok": True, "provider": settings.ai_provider, "model": settings.active_model, "reply": (result.text or "").strip()[:40]}

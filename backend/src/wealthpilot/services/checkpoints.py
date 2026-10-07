@@ -386,6 +386,27 @@ def _describe(cp: Checkpoint) -> str:
     return f"{text} → 尚未到核对时点（{cp.due_date or '等下一期财报'}）"
 
 
+MIN_SAMPLE = 5
+
+
+def calibration_note(db: Session, user_id: int) -> str:
+    """这个 Agent 自己过去的判断，事后核对下来各类对了多少 —— 带进新一轮研究，让它据此收放把握。
+
+    按判断的类型分开说：某一类经常落空，下次同类判断就该更保守。样本不到 5 条的类型不提，免得被两三次偶然带偏。
+    """
+    lines = []
+    for group in scorecard(db, user_id)["by_group"]:
+        verified, rate = group["held"] + group["broken"], group["hold_rate_pct"]
+        if verified < MIN_SAMPLE or rate is None:
+            continue
+        advice = ("这类判断过去经常落空：这次同类的判断要更保守，结论里写明把握不大" if rate < 50
+                  else "这类判断过去大多成立" if rate >= 75 else "这类判断对错参半：结论里要写明不确定性")
+        lines.append(f"- {group['label']}类：已核对 {verified} 条，成立 {group['held']} 条（{rate:g}%）。{advice}。")
+    if not lines:
+        return ""
+    return "你过去的判断事后核对的结果（据此校准这一次的把握程度，不必在回答里复述）：\n" + "\n".join(lines) + "\n\n"
+
+
 def prior_note(db: Session, user_id: int, codes: list[str]) -> str:
     """此前研究给这些股票设过的验证点及结果，带给新一轮研究。"""
     if not codes:

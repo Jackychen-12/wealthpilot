@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.synthesizer_agent import check_numeric_grounding
-from wealthpilot.services.ai_client import json_mode
+from wealthpilot.services.ai_client import json_mode, raise_if_unavailable
 from wealthpilot.services.evidence import brief
 from wealthpilot.settings import get_settings
 
@@ -178,7 +178,8 @@ class CriticAgent:
                 raise ValueError("审核缺少 missing 列表")
             missing = data["missing"]
             missing = lacking + [str(m) for m in missing if str(m).strip()][:4]
-        except Exception:
+        except Exception as e:
+            raise_if_unavailable(e)
             return Verdict(passed=True, issues=["证据审核未完成"], missing_evidence=lacking + list(success_criteria), review_complete=False)
 
         if not missing:

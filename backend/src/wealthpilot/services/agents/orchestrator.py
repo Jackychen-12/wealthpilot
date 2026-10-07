@@ -22,13 +22,14 @@ import re
 import statistics
 import time
 from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
 from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services import checkpoints, memory, summary
+from wealthpilot.services import budget, checkpoints, memory, summary
 from wealthpilot.services.agents import debate
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.critic_agent import (
@@ -51,7 +52,7 @@ from wealthpilot.services.agents.synthesizer_agent import (
     check_numeric_grounding,
     strip_ungrounded,
 )
-from wealthpilot.services.ai_client import Usage, create_ai_client
+from wealthpilot.services.ai_client import ModelUnavailableError, Usage, create_ai_client
 from wealthpilot.services.checkpoints import ACTIVE_USER
 from wealthpilot.services.connectors import agent_tools
 from wealthpilot.services.evidence import ToolSession
@@ -93,6 +94,10 @@ async def chat_stream(
             text = f"本次研究超过 {timeout:.0f} 秒未完成，已中止。请缩小问题范围后重试。"
             await emit({"type": "error", "content": text})
             await emit({"type": "done", "content": text, "meta": {"status": "failed"}})
+        except ModelUnavailableError as e:
+            # 模型这一轮肯定用不了：只说一句能照着做的话，reason 让界面给出去设置的入口
+            await emit({"type": "error", "content": e.message})
+            await emit({"type": "done", "content": e.message, "meta": {"status": "failed", "reason": e.kind}})
         except Exception as e:  # noqa: BLE001
             await emit({"type": "error", "content": f"Agent 执行异常: {e}"})
         finally:
@@ -140,6 +145,18 @@ def light_model_for(settings, default: str) -> str:
     return getattr(settings, "light_model", "") or default
 
 
+async def _gather(coros) -> list:
+    """并发跑一波任务。其中一个报出"模型用不了"，其余的立刻取消 —— 不让它们各自再撞一次同样的墙。"""
+    tasks = [asyncio.ensure_future(c) for c in coros]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 # 这句话是接着上一个话题说的："和五粮液比呢""它们哪个便宜"——要把上一轮的对象一起带上
 _FOLLOW_UP_RE = re.compile(r"相比|对比|比较|比一下|比呢|比起来|哪个|哪只|哪家|谁更|[和跟与同]它|它们|这两|这几")
 
@@ -181,9 +198,44 @@ async def _run_pipeline(
     try:
         client = create_ai_client(settings)
     except ValueError as e:
-        await emit({"type": "error", "content": str(e)})
-        await emit({"type": "done", "content": "模型服务不可用，本次研究未完成。", "meta": {"status": "failed"}})
+        text = f"还没有配置好模型，这次没法研究（{e}）。到「设置」填一个模型服务；行情、选股、持仓这些不用模型的功能照常可用。"
+        await emit({"type": "error", "content": text})
+        await emit({"type": "done", "content": text, "meta": {"status": "failed", "reason": "not_configured"}})
         return
+    over = budget.blocked(user_id or 0)
+    if over:
+        await emit({"type": "error", "content": over})
+        await emit({"type": "done", "content": over, "meta": {"status": "failed", "reason": "budget"}})
+        return
+    run = {"kind": "rewrite" if rewrite_of is not None else "free"}
+    try:
+        await _research(client, settings, started, run, message, history, holdings, nav_data, nav_history,
+                        conversation_id, db_session, profile, user_id, emit, depth, rewrite_of)
+    finally:
+        # 不管成没成、是不是中途被取消，花掉的 token 都记一笔
+        budget.record(user_id or 0, getattr(client, "usage", None) or Usage(), settings.active_model, run["kind"])
+
+
+def compact_history(messages: list[dict], keep: int = 6) -> list[dict]:
+    """交给模型的"此前对话"：问题原样留着，回答只留结论那几句。
+
+    之前是把最近几轮的完整回答（每篇五六千字）原样塞给每一个 Agent、每一轮工具调用都重发一遍 ——
+    同一个会话里问到第三个问题，光这部分就要多花十几万 token，而 Agent 取数根本用不上它。
+    """
+    out = []
+    for m in messages[-keep:]:
+        content = m["content"] if isinstance(m["content"], str) else ""
+        if m["role"] == "user":
+            out.append({"role": "user", "content": content[:400]})
+        else:
+            out.append({"role": "assistant", "content": (summary.conclusion(content, 300) or content[:300]) + "（此前回答的结论，全文略）"})
+    while out and out[0]["role"] != "user":
+        out.pop(0)
+    return out
+
+
+async def _research(client, settings, started, run, message, history, holdings, nav_data, nav_history,
+                    conversation_id, db_session, profile, user_id, emit, depth="auto", rewrite_of=None) -> None:
     model = settings.active_model
     if rewrite_of is not None:
         # 追问或改写：只用上一次研究已经取得的证据，不重新取证
@@ -197,7 +249,8 @@ async def _run_pipeline(
     while base_messages and base_messages[0]["role"] != "user":
         base_messages.pop(0)
     planner = PlannerAgent(client, model, profile)
-    context = "\n".join(f"{m['role']}: {m['content']}" for m in base_messages[-4:])
+    brief_history = compact_history(base_messages)
+    context = "\n".join(f"{m['role']}: {m['content']}" for m in brief_history[-4:])
     # 证券解析在规划之前完成：代码由程序查出来，不让模型凭记忆写
     known = [{"code": h.fund_code, "name": h.fund_name, "asset_type": h.asset_type or "fund"} for h in holdings]
     try:
@@ -212,7 +265,8 @@ async def _run_pipeline(
     if db_session and securities and getattr(settings, "checkpoints_enabled", False):
         try:
             await checkpoints.verify_pending(db_session, user_id or 0)
-            prior = checkpoints.prior_note(db_session, user_id or 0, [s["code"] for s in securities])
+            prior = (checkpoints.prior_note(db_session, user_id or 0, [s["code"] for s in securities])
+                     + checkpoints.calibration_note(db_session, user_id or 0))
         except Exception:  # noqa: BLE001 — 复盘信息取不到，不影响本轮研究
             prior = ""
 
@@ -235,8 +289,15 @@ async def _run_pipeline(
             remembered = ""
     resolved_note += prior + remembered
     prior += remembered   # 记忆里的数字同样算"交给模型的上下文"
+    if depth == "auto" and plan.playbook == "stock_deep" and securities:
+        found = recent_research(db_session, user_id, securities[0]["code"], getattr(settings, "research_reuse_hours", 0))
+        if found:
+            await _reuse(found, message, conversation_id, db_session, profile, user_id, emit, client, model, settings, started, run)
+            return
+    run["kind"] = "quick" if quick else plan.playbook or "free"
     await emit({"type": "plan", "intent": plan.intent, "source": plan.source, "playbook": plan.playbook, "depth": depth,
                 "eta_seconds": estimate_eta(db_session, user_id, plan.playbook, len(plan.tasks)),
+                "eta_tokens": budget.typical_tokens(user_id or 0, run["kind"]),
                 "tasks": [{"id": t.id, "agent": t.agent, "goal": t.goal, "deps": t.deps,
                            "label": AGENT_LABELS.get(t.agent, t.agent)} for t in plan.tasks],
                 "success_criteria": plan.success_criteria})
@@ -273,7 +334,7 @@ async def _run_pipeline(
             prior = _prior_context([completed[d] for d in task.deps if d in completed])
             # 会变的内容（持仓快照、解析结果、旧验证点）都放在用户消息里，系统提示保持逐字不变以命中缓存
             snapshot = f"用户当前持仓：\n{holdings_snapshot}\n\n" if holdings_snapshot else ""
-            msgs = [*base_messages, {"role": "user", "content": f"{snapshot}{resolved_note}{prior}子任务：{task.goal}\n用户问题：{message}{brevity}"}]
+            msgs = [*brief_history, {"role": "user", "content": f"{snapshot}{resolved_note}{prior}子任务：{task.goal}\n用户问题：{message}{brevity}"}]
             result = await agent.run(msgs, emit, goal=task.goal, stream_text=False)
             completed[task.id] = result
             await emit({"type": "task_done", "id": task.id, "agent": task.agent,
@@ -281,7 +342,7 @@ async def _run_pipeline(
             return result
 
     for wave in plan.waves():
-        results.extend(await asyncio.gather(*[run_task(t) for t in wave]))
+        results.extend(await _gather(run_task(t) for t in wave))
 
     critic_on = getattr(settings, "critic_enabled", True)
     # 所有任务都失败（典型：Key 无效、模型不可用）时补任务只会再失败一轮，直接收尾
@@ -297,7 +358,7 @@ async def _run_pipeline(
         if not extra:
             break
         await emit({"type": "replan", "tasks": [{"id": t.id, "agent": t.agent, "goal": t.goal} for t in extra]})
-        results.extend(await asyncio.gather(*[run_task(t) for t in extra]))
+        results.extend(await _gather(run_task(t) for t in extra))
 
     status = "passed"
     debate_result: dict | None = None
@@ -403,7 +464,69 @@ async def _run_pipeline(
                   client=client, model=light_model_for(settings, model), started=started, depth=depth, debate_result=debate_result)
 
 
-async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, profile, user_id, emit, client, model, settings, started) -> None:
+def recent_research(db_session, user_id, code: str, hours: float, now: datetime | None = None):
+    """这只股票最近一次还算新的深度研究：（那条回答, 它的元数据, 当时的问题, 过去了多少分钟）。没有返回 None。"""
+    if db_session is None or hours <= 0:
+        return None
+    now = now or datetime.now()
+    rows = db_session.exec(select(ChatMessage).where(
+        ChatMessage.user_id == (user_id or 0), ChatMessage.role == "assistant",
+        ChatMessage.created_at >= now - timedelta(hours=hours)).order_by(ChatMessage.id.desc()).limit(30)).all()
+    for row in rows:
+        try:
+            meta = json.loads(row.metadata_json) if row.metadata_json else {}
+        except ValueError:
+            continue
+        stocks = meta.get("securities") or []
+        if (meta.get("playbook") == "stock_deep" and meta.get("status") in ("passed", "partial") and meta.get("evidence")
+                and stocks and stocks[0].get("code") == code):
+            asked = db_session.exec(select(ChatMessage).where(
+                ChatMessage.user_id == row.user_id, ChatMessage.role == "user", ChatMessage.conversation_id == row.conversation_id,
+                ChatMessage.id < row.id).order_by(ChatMessage.id.desc()).limit(1)).first()
+            return row, meta, asked.content if asked else "", max(1, round((now - row.created_at).total_seconds() / 60))
+    return None
+
+
+def _same_question(a: str, b: str) -> bool:
+    def strip(text: str) -> str:
+        return re.sub(r"[\s，。？！?!,.、：:（）()]+", "", text)
+    return bool(strip(a)) and strip(a) == strip(b)
+
+
+def _age(minutes: int) -> str:
+    return f"{minutes} 分钟前" if minutes < 60 else f"{minutes / 60:.1f} 小时前".replace(".0 ", " ")
+
+
+async def _reuse(found, message, conversation_id, db_session, profile, user_id, emit, client, model, settings, started, run) -> None:
+    """几小时内又来研究同一只股票：不重新取数。问题一模一样就把那篇原样给出来（不花钱）；问法不同就只用那批证据重写一遍。"""
+    row, meta, asked, minutes = found
+    saved = budget.typical_tokens(user_id or 0, "stock_deep")
+    note = {"message_id": row.id, "age_minutes": minutes, "age": _age(minutes), "saved_tokens": saved}
+    if _same_question(message, asked):
+        run["kind"] = "reuse"
+        await emit({"type": "reused", **note, "mode": "replay"})
+        await emit({"type": "plan", "intent": meta.get("intent") or "个股深度研究", "source": "reuse", "playbook": "stock_deep",
+                    "tasks": [], "success_criteria": [], "eta_seconds": 1})
+        for e in meta.get("evidence") or []:
+            await emit({"type": "evidence", "agent": "prior", "evidence": e})
+        if meta.get("debate"):
+            await emit({"type": "debate", **meta["debate"]})
+        await _emit_text(emit, row.content)
+        await emit({"type": "done", "content": row.content, "follow_ups": [],
+                    "meta": {"status": meta.get("status", "passed"), "playbook": "stock_deep", "intent": meta.get("intent", ""),
+                             "missing_evidence": [], "agents": [], "evidence": meta.get("evidence") or [], "usage": {},
+                             "seconds": round(time.monotonic() - started, 1), "summary": meta.get("summary"), "debate": meta.get("debate"),
+                             "message_id": row.id, "reused": {**note, "mode": "replay"}}})
+        return
+    run["kind"] = "rewrite"
+    await emit({"type": "reused", **note, "mode": "evidence"})
+    await _run_rewrite(message, row.id, conversation_id, db_session, profile, user_id, emit, client, model, settings, started,
+                       note=f"下面的证据是 {_age(minutes)}那次研究取到的，这次没有重新取数。回答第一句先说明这一点。",
+                       reused={**note, "mode": "evidence"})
+
+
+async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, profile, user_id, emit, client, model, settings, started,
+                       note: str = "", reused: dict | None = None) -> None:
     """追问或改写：只用那一次研究已经取得的证据重新成文，不再取证。
 
     "写短一点""只讲风险""这个判断依赖什么前提"这类要求不需要新数据。重跑一遍研究要一分钟，
@@ -436,7 +559,8 @@ async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, pro
     await emit({"type": "synthesizing", "agents": [], "mode": "rewrite"})
     guide = ("这是对一份已发布回答的追问或改写。只能使用下面给出的证据和原回答里已有的数字，不要引入新的数字；"
              "用户要的内容现有证据里没有时，直接说“现有证据里没有这一项，需要重新研究”，不要编。\n"
-             f"原问题：{question}\n\n原回答：\n{source.content[:6000]}\n\n用户现在的要求：{instruction}")
+             f"原问题：{question}\n\n原回答：\n{source.content[:6000]}\n\n用户现在的要求：{instruction}"
+             + (f"\n\n{note}" if note else ""))
     synthesizer = SynthesizerAgent(client, model, profile)
     critic = CriticAgent(client, light_model_for(settings, model), profile)
     draft = await synthesizer.run(instruction, results, [], emit, stream_output=False, extra_instruction=guide)
@@ -470,7 +594,7 @@ async def _run_rewrite(instruction, rewrite_of, conversation_id, db_session, pro
     seconds = round(time.monotonic() - started, 1)
     card = summary.card(final_text) if status in ("passed", "partial") else None
     shared = {"status": status, "playbook": "rewrite", "rewrite_of": rewrite_of, "intent": "基于已有证据回答",
-              "evidence": evidence, "usage": usage, "seconds": seconds, "summary": card}
+              "evidence": evidence, "usage": usage, "seconds": seconds, "summary": card, "reused": reused}
     if conversation_id:
         _save_message(db_session, conversation_id, user_id, "user", instruction)
         message_id = _save_message(db_session, conversation_id, user_id, "assistant", final_text,

@@ -24,6 +24,8 @@ _FOREVER = 3650 * cache.DAY
 
 def model_ready() -> bool:
     s = get_settings()
+    if s.ai_provider == "openai":   # 兼容服务：本机模型不需要 Key，有地址和模型名就算配好了
+        return bool(s.openai_base_url.strip() and s.openai_model.strip())
     key = s.deepseek_api_key if s.ai_provider == "deepseek" else s.anthropic_api_key
     return key.strip() not in _PLACEHOLDER_KEYS
 

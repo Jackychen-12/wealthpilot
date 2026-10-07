@@ -12,6 +12,7 @@ import re
 import secrets
 import time
 import uuid
+from urllib.parse import urlparse
 
 import httpx
 from sqlmodel import Session
@@ -329,16 +330,52 @@ def digest_text(digest: dict) -> str:
 
 # ── 推送与轮询 ──────────────────────────────────────────
 
-async def notify(text: str, buttons: list[list[tuple[str, str]]] | None = None) -> bool:
-    """给主人发一条消息。没配置、没绑定或发送失败都返回 False，不抛异常。"""
-    token, chat_id = get_settings().telegram_bot_token, owner()
-    if not token or chat_id is None:
+def webhook_payload(url: str, text: str) -> dict:
+    """群机器人的 webhook 各家格式不同，发错了对方直接拒收。按地址认出是哪家，发它认的那一种。"""
+    host = urlparse(url).netloc.lower()
+    if "feishu.cn" in host or "larksuite.com" in host:
+        return {"msg_type": "text", "content": {"text": text}}
+    if "qyapi.weixin.qq.com" in host or "dingtalk.com" in host:
+        return {"msgtype": "text", "text": {"content": text[:1800]}}   # 企业微信单条上限 2048 字节
+    if "hooks.slack.com" in host:
+        return {"text": text}
+    if "discord.com" in host or "discordapp.com" in host:
+        return {"content": text[:1900]}
+    # 认不出来的自建服务：几种常见字段都带上，接收方取它认识的那个
+    return {"text": text, "content": text, "msgtype": "text", "source": "wealthpilot"}
+
+
+async def send_webhook(url: str, text: str) -> bool:
+    if not url:
         return False
     try:
-        await Telegram(token, get_settings().telegram_api_base).send(chat_id, text, buttons)
-        return True
-    except Exception:  # noqa: BLE001
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.post(url, json=webhook_payload(url, text))
+        if resp.status_code >= 300:
+            return False
+        try:   # 飞书、企业微信、钉钉即使拒收也回 200，要看返回体里的错误码
+            body = resp.json()
+        except ValueError:
+            return True
+        return not (isinstance(body, dict) and (body.get("code") or body.get("errcode") or body.get("StatusCode")))
+    except httpx.HTTPError:
         return False
+
+
+async def notify(text: str, buttons: list[list[tuple[str, str]]] | None = None) -> bool:
+    """把一条消息发到用户配置的所有渠道：Telegram（绑定了的话）和群机器人 webhook。有一处发出去就算成功，不抛异常。"""
+    settings = get_settings()
+    sent = False
+    token, chat_id = settings.telegram_bot_token, owner()
+    if token and chat_id is not None:
+        try:
+            await Telegram(token, settings.telegram_api_base).send(chat_id, text, buttons)
+            sent = True
+        except Exception:  # noqa: BLE001
+            pass
+    if settings.alert_webhook_url:
+        sent = await send_webhook(settings.alert_webhook_url, plain(text)) or sent
+    return sent
 
 
 async def run_bot() -> None:
