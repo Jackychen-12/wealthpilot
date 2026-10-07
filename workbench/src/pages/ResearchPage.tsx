@@ -108,8 +108,9 @@ export const DebateCard: React.FC<{ debate: Debate; onCite?: (id: string) => voi
 }
 
 const when = (iso: string) => {
-  const d = new Date(iso)
-  const days = Math.floor((Date.now() - d.getTime()) / 864e5)
+  // 按日历上的日子算，不按"过去了多少小时"：昨天下午的事，今天上午看也该写"昨天"
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((day(new Date()) - day(new Date(iso))) / 864e5)
   return days <= 0 ? `今天 ${iso.slice(11, 16)}` : days === 1 ? `昨天 ${iso.slice(11, 16)}` : iso.slice(5, 10)
 }
 

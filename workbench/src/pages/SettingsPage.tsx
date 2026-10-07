@@ -2,7 +2,7 @@ import type React from 'react'
 import { useEffect, useState } from 'react'
 import { DEMO, api, useApi, type AppSettings, type DoctorItem } from '../api'
 import { ValueBars } from '../components/charts'
-import { Button, Callout, Input, Select, Tag } from '../components/kit'
+import { Button, Callout, Input, Segmented, Select, Tag } from '../components/kit'
 import { DataState, Page, Section } from '../components/ui'
 
 type Values = Record<string, string | number | boolean>
@@ -17,17 +17,23 @@ const Toggle: React.FC<{ label: string; hint: string; checked: boolean; onChange
   </label>
 )
 
+type ChannelName = 'telegram' | 'feishu' | 'wecom'
+const CHANNEL_TABS = [['telegram', 'Telegram'], ['feishu', '飞书'], ['wecom', '企业微信']] as const
+
 /**
- * 手机触达：绑定一个 Telegram 机器人。令牌和其他设置一起保存；绑定哪个聊天靠配对码 ——
- * 在这里生成，在 Telegram 里发给机器人，谁发对了谁就是主人。
+ * 手机触达：在 Telegram、飞书或企业微信里收简报和提醒、直接提问、处理建议单。
+ * 应用的凭证和其他设置一起保存；认谁做主人靠配对码 —— 在这里生成，在那个应用里发给机器人，谁发对了谁就是主人。
  */
-const Reach: React.FC<{ data: AppSettings; token: string; onToken: (v: string) => void; base: string; onBase: (v: string) => void }> = ({ data, token, onToken, base, onBase }) => {
+const Reach: React.FC<{
+  data: AppSettings; form: Values; set: (k: string, v: string) => void; keys: Record<string, string>; setKey: (k: string, v: string) => void
+}> = ({ data, form, set, keys, setKey }) => {
   const channel = useApi(api.channel)
+  const [tab, setTab] = useState<ChannelName>('telegram')
   const [code, setCode] = useState('')
   const [note, setNote] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [busy, setBusy] = useState('')
-  const saved = data.secrets.telegram_bot_token?.set
-  const paired = channel.data?.paired
+  const info = channel.data?.channels.find((c) => c.channel === tab)
+  const paired = info?.paired
   const reload = channel.reload
   // 配对码亮着的时候每 3 秒看一眼：用户在手机上发完，这里自己变成“已绑定”
   useEffect(() => {
@@ -35,47 +41,105 @@ const Reach: React.FC<{ data: AppSettings; token: string; onToken: (v: string) =
     const timer = setInterval(reload, 3000)
     return () => clearInterval(timer)
   }, [code, paired, reload])
-  useEffect(() => { if (paired) setCode('') }, [paired])
+  useEffect(() => { setCode(''); setNote(null) }, [tab, paired])
   const act = async (key: string, work: () => Promise<void>) => {
     setBusy(key); setNote(null)
     try { await work() } catch (e) { setNote({ tone: 'danger', text: e instanceof Error ? e.message : '操作失败' }) } finally { setBusy('') }
   }
+  const secret = (id: string, field: string, label: string, hint?: string) => (
+    <Input id={id} label={label} type="password" autoComplete="off" hint={hint}
+      placeholder={data.secrets[field]?.set ? `已配置（${data.secrets[field].hint}），留空表示不改` : '粘贴后点页面底部的「保存」'}
+      value={keys[field] ?? ''} onChange={(e) => setKey(field, e.target.value)} />
+  )
+  const text = (id: string, field: string, label: string, hint?: string, placeholder?: string) => (
+    <Input id={id} label={label} hint={hint} placeholder={placeholder} value={String(form[field] ?? '')} onChange={(e) => set(field, e.target.value)} />
+  )
+  const callback = `${window.location.origin}/api/channel/wecom/callback`
   return (
-    <Section title="手机触达" hint="在手机上收每日简报和提醒、直接提问、处理建议单">
+    <Section title="手机触达" hint="在手机上收每日简报和提醒、直接提问、处理建议单。三个里接一个就行">
+      <div className="mb-4 flex items-center gap-4 border-b border-hairline">
+        <Segmented value={tab} onChange={(v) => setTab(v as ChannelName)} options={CHANNEL_TABS} />
+        <span className="mb-1.5 ml-auto text-[13px] text-steel">
+          {(channel.data?.channels ?? []).filter((c) => c.paired).map((c) => c.label).join('、') || '还没有绑定任何一个'}{channel.data?.channels.some((c) => c.paired) ? ' 已绑定' : ''}
+        </span>
+      </div>
       <div className="grid max-w-2xl gap-3">
-        <Input id="s-tg" label="Telegram 机器人令牌" type="password" autoComplete="off"
-          placeholder={saved ? `已配置（${data.secrets.telegram_bot_token.hint}），留空表示不改` : '粘贴令牌，然后点页面底部的「保存」'}
-          hint="在 Telegram 里找 @BotFather，发 /newbot，按提示起个名字，它会回你一串令牌。这个机器人只属于你。"
-          value={token} onChange={(e) => onToken(e.target.value)} />
-        <details className="text-[13px] text-steel">
-          <summary className="cursor-pointer select-none hover:text-ink">本机连不上 Telegram？</summary>
-          <div className="mt-2"><Input id="s-tgbase" label="接口地址" value={base} onChange={(e) => onBase(e.target.value)} hint="默认 https://api.telegram.org。需要走中转时改成你的中转地址，保存后生效。" /></div>
-        </details>
-        {!saved ? null : paired ? (
+        {tab === 'telegram' ? (
+          <>
+            {secret('s-tg', 'telegram_bot_token', '机器人令牌', '在 Telegram 里找 @BotFather，发 /newbot，按提示起个名字，它会回你一串令牌。这个机器人只属于你。')}
+            <details className="text-[13px] text-steel">
+              <summary className="cursor-pointer select-none hover:text-ink">本机连不上 Telegram？</summary>
+              <div className="mt-2">{text('s-tgbase', 'telegram_api_base', '接口地址', '默认 https://api.telegram.org。需要走中转时改成你的中转地址，保存后生效。')}</div>
+            </details>
+          </>
+        ) : tab === 'feishu' ? (
+          <>
+            <Callout tone="neutral">
+              不需要公网地址：由这台电脑主动连到飞书。在<a className="mx-0.5 underline underline-offset-2" href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">飞书开放平台</a>建一个「企业自建应用」，然后：
+              <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">
+                <li>添加应用能力里加上「机器人」；</li>
+                <li>权限管理里开通「读取用户发给机器人的单聊消息」和「以应用的身份发消息」；</li>
+                <li>事件与回调里，订阅方式选「使用长连接接收事件」，添加事件「接收消息」；</li>
+                <li>发布应用，把下面两项填好保存，然后<b>重启 WealthPilot</b>（长连接在启动时建立）；</li>
+                <li>在飞书里搜到这个机器人，把配对码发给它。</li>
+              </ol>
+            </Callout>
+            {text('s-fsid', 'feishu_app_id', 'App ID', undefined, 'cli_…')}
+            {secret('s-fssecret', 'feishu_app_secret', 'App Secret')}
+            <details className="text-[13px] text-steel">
+              <summary className="cursor-pointer select-none hover:text-ink">用的是海外版 Lark？</summary>
+              <div className="mt-2">{text('s-fsbase', 'feishu_api_base', '接口地址', '飞书是 https://open.feishu.cn，Lark 是 https://open.larksuite.com')}</div>
+            </details>
+            {info?.error ? <Callout tone="danger">{info.error}</Callout> : null}
+          </>
+        ) : (
+          <>
+            <Callout tone="warning">
+              企业微信只支持“回调”收消息：它要能从公网访问到 WealthPilot。只在自己电脑上跑、没有公网地址的话用不了这个，请用飞书或 Telegram。
+              部署在服务器上时：在企业微信管理后台建一个自建应用，「接收消息」里把 URL 填成
+              <code className="mx-1 select-all break-all rounded-xs bg-canvas/60 px-1 font-mono text-xs">{callback}</code>
+              （换成你的公网地址），Token 和 EncodingAESKey 用它随机生成的；先在这里保存，再回后台点保存，它会来验证一次。还要把服务器的 IP 加进应用的「企业可信 IP」，否则发不出消息。
+            </Callout>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {text('s-wxcorp', 'wecom_corp_id', '企业 ID', '「我的企业」页面最下面')}
+              {text('s-wxagent', 'wecom_agent_id', 'AgentId', '应用详情页里')}
+            </div>
+            {secret('s-wxsecret', 'wecom_secret', '应用的 Secret')}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {secret('s-wxtoken', 'wecom_token', 'Token')}
+              {secret('s-wxaes', 'wecom_aes_key', 'EncodingAESKey', '43 位')}
+            </div>
+          </>
+        )}
+
+        {!info?.configured ? (
+          <p className="text-[13px] text-steel">填好上面的内容并点页面底部的「保存」，这里会出现绑定的步骤。</p>
+        ) : paired ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-hairline p-4 text-sm">
             <Tag tone="green">已绑定</Tag>
-            <span className="text-charcoal">每日简报、定时任务的结论和提醒会推到这个聊天。发 /help 看它能做什么。</span>
+            <span className="text-charcoal">简报、定时任务的结论和提醒会发到这里。在里面发 /help 看它能做什么。</span>
             <span className="ml-auto flex gap-2">
               <Button size="xs" variant="secondary" loading={busy === 'test'} onClick={() => void act('test', async () => {
-                const r = await api.testChannel()
+                const r = await api.testChannel(tab)
                 setNote(r.ok ? { tone: 'success', text: '测试消息已发出，看一下手机' } : { tone: 'danger', text: r.error })
               })}>发一条测试消息</Button>
-              <Button size="xs" variant="ghost" loading={busy === 'unpair'} onClick={() => void act('unpair', async () => { await api.unpairChannel(); reload() })}>解除绑定</Button>
+              <Button size="xs" variant="ghost" loading={busy === 'unpair'} onClick={() => void act('unpair', async () => { await api.unpairChannel(tab); reload() })}>解除绑定</Button>
             </span>
           </div>
         ) : code ? (
           <div className="rounded-lg border border-hairline p-4 text-sm">
-            <p className="text-charcoal">在 Telegram 里打开你的机器人，给它发这条消息（10 分钟内有效）：</p>
+            <p className="text-charcoal">在{info.label}里打开你的机器人（应用），给它发这条消息（10 分钟内有效）：</p>
             <p className="mt-2 select-all font-mono text-xl font-semibold tracking-wider text-ink">/pair {code}</p>
-            <p className="mt-2 text-[13px] text-steel">发完这里会自动变成“已绑定”。之后只有这个聊天能指挥它，别人给机器人发消息不会有回应。</p>
+            <p className="mt-2 text-[13px] text-steel">发完这里会自动变成“已绑定”。之后只有这个聊天能指挥它，别人发消息不会有回应。</p>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-hairline p-4 text-sm">
-            <span className="text-charcoal">令牌已保存，还差一步：告诉机器人谁是它的主人。</span>
-            <Button size="sm" variant="secondary" loading={busy === 'pair'} onClick={() => void act('pair', async () => setCode((await api.pairChannel()).code))}>生成配对码</Button>
+            <span className="text-charcoal">应用信息已保存，还差一步：告诉它谁是主人。</span>
+            <Button size="sm" variant="secondary" loading={busy === 'pair'} onClick={() => void act('pair', async () => setCode((await api.pairChannel(tab)).code))}>生成配对码</Button>
           </div>
         )}
         {note ? <Callout tone={note.tone}>{note.text}</Callout> : null}
+        <p className="text-xs text-stone">飞书和企业微信的文字消息没有按钮，授权建议单时按提示回复命令（如 /ok 3）。这两个渠道是照官方文档写的，还没有用真实的应用跑过，接不上的话告诉我们卡在哪一步。</p>
       </div>
     </Section>
   )
@@ -307,8 +371,7 @@ const SettingsPage: React.FC = () => {
               </div>
             </Section>
 
-            <Reach data={data} token={keys.telegram_bot_token ?? ''} onToken={(v) => setKeys((k) => ({ ...k, telegram_bot_token: v }))}
-              base={String(form.telegram_api_base ?? '')} onBase={(v) => set('telegram_api_base', v)} />
+            <Reach data={data} form={form} set={set} keys={keys} setKey={(k, v) => setKeys((prev) => ({ ...prev, [k]: v }))} />
 
             <Section title="模拟盘">
               <div className="grid max-w-2xl gap-3">

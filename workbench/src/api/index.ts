@@ -171,10 +171,10 @@ export const api = {
   dismissOnboarding: () => request<unknown>('/api/onboarding/dismiss', { method: 'POST' }),
   parseHoldings: (text: string) => request<{ rows: ParsedHolding[] }>('/api/portfolio/parse', json('POST', { text })),
   addHoldings: (rows: ParsedHolding[]) => request<{ added: number; skipped: string[] }>('/api/portfolio/batch', json('POST', { rows })),
-  channel: () => request<{ channel: string; configured: boolean; paired: boolean }>('/api/channel'),
-  pairChannel: () => request<{ code: string; ttl_seconds: number }>('/api/channel/pair', { method: 'POST' }),
-  unpairChannel: () => request<unknown>('/api/channel/pair', { method: 'DELETE' }),
-  testChannel: () => request<{ ok: boolean; error: string }>('/api/channel/test', { method: 'POST' }),
+  channel: () => request<{ configured: boolean; paired: boolean; channels: ChannelInfo[] }>('/api/channel'),
+  pairChannel: (channel = 'telegram') => request<{ code: string; ttl_seconds: number }>(`/api/channel/pair?channel=${channel}`, { method: 'POST' }),
+  unpairChannel: (channel = 'telegram') => request<unknown>(`/api/channel/pair?channel=${channel}`, { method: 'DELETE' }),
+  testChannel: (channel = 'telegram') => request<{ ok: boolean; error: string }>(`/api/channel/test?channel=${channel}`, { method: 'POST' }),
   automations: () => request<{ items: Automation[]; metrics: { key: string; label: string; unit: string }[]; daily_runs_max: number; running: boolean }>('/api/automations'),
   saveAutomation: (body: Record<string, unknown>, id?: number) => request<Automation & { current?: number | null; hit?: boolean }>(id ? `/api/automations/${id}` : '/api/automations', json(id ? 'PUT' : 'POST', body)),
   removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
@@ -327,6 +327,7 @@ export interface ConversationTurn { message_id: number; created_at: string; ques
     evidence?: NonNullable<StreamEvent['evidence']>[]; summary?: SummaryCard | null; debate?: Debate | null; seconds?: number; usage?: Usage; depth?: string
     reused?: Reused | null; rewrite_of?: number | null; missing_evidence?: string[] } }
 export interface SkillSuggestion { key: string; pattern: string; times: number; stocks: string[]; examples: { question: string; name: string }[]; description: string }
+export interface ChannelInfo { channel: 'telegram' | 'feishu' | 'wecom'; label: string; configured: boolean; paired: boolean; error?: string }
 export interface Reused { message_id: number; age: string; age_minutes: number; saved_tokens: number | null; mode: 'replay' | 'evidence' }
 export interface ActiveRun { run_id: string; question: string; conversation_id: string; depth: Depth; rewrite_of: number | null; started_at: number; done: boolean }
 export interface UsageTotal { runs: number; input_tokens: number; cached_tokens: number; output_tokens: number; tokens: number; cost: number | null }

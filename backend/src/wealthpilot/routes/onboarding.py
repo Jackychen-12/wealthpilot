@@ -5,6 +5,7 @@ import re
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
 
 from wealthpilot.models.chat import ChatMessage
@@ -44,8 +45,8 @@ def onboarding(db: Session = Depends(get_session), user_id: int = Depends(curren
          "hint": "把持仓粘贴进来，或搜一只股票加自选；想先看看效果可以用示例数据。"},
         {"key": "research", "title": "做第一次研究", "done": researched, "to": "/research",
          "hint": "问一句“帮我分析一下××”，约一分钟出一份带证据的结论，并留下之后会自动核对的验证点。"},
-        {"key": "reach", "title": "连上手机", "done": channels.status()["paired"], "to": "/settings", "optional": True,
-         "hint": "绑定一个 Telegram 机器人，在手机上收每日简报、提问、处理建议单。可以以后再说。"},
+        {"key": "reach", "title": "连上手机", "done": any(c["paired"] for c in channels.status_all()), "to": "/settings", "optional": True,
+         "hint": "在 Telegram、飞书或企业微信里收每日简报、提问、处理建议单。可以以后再说。"},
     ]
     return {"steps": steps, "complete": all(s["done"] for s in steps if not s.get("optional")),
             "dismissed": bool(cache.read(f"onboarding:dismissed:{user_id}", _FOREVER))}
@@ -132,27 +133,85 @@ async def add_holdings(body: dict, db: Session = Depends(get_session), user_id: 
 
 @router.get("/channel")
 def channel_status():
-    return channels.status()
+    """每个渠道配没配好、绑没绑定。保留顶层的 configured / paired（Telegram 的），老页面还在用。"""
+    from wealthpilot.services import feishu
+    listed = channels.status_all()
+    for item in listed:
+        if item["channel"] == "feishu":
+            item["error"] = feishu.listener_error()
+    return {**channels.status("telegram"), "channels": listed}
+
+
+def _channel(name: str) -> str:
+    if name not in channels.CHANNELS:
+        raise HTTPException(404, "没有这个渠道")
+    return name
 
 
 @router.post("/channel/pair")
-def start_pairing(request: Request):
+def start_pairing(request: Request, channel: str = "telegram"):
     """生成一个 10 分钟有效的配对码。只能在本机生成：谁拿到它，谁就能成为机器人的主人。"""
     _local_only(request)
-    if not get_settings().telegram_bot_token:
-        raise HTTPException(409, "先填好 Telegram 机器人令牌并保存")
-    return {"code": channels.new_pair_code(), "ttl_seconds": channels.PAIR_TTL}
+    if not channels.configured(_channel(channel)):
+        raise HTTPException(409, f"先把{channels.CHANNELS[channel]}的应用信息填好并保存")
+    return {"code": channels.new_pair_code(channel), "ttl_seconds": channels.PAIR_TTL}
 
 
 @router.delete("/channel/pair")
-def unpair(request: Request):
+def unpair(request: Request, channel: str = "telegram"):
     _local_only(request)
-    channels.set_owner(None)
+    channels.set_owner(None, _channel(channel))
     return {"ok": True}
 
 
 @router.post("/channel/test")
-async def test_channel(request: Request):
+async def test_channel(request: Request, channel: str = "telegram"):
+    """给这个渠道绑定的聊天发一条测试消息。"""
     _local_only(request)
-    ok = await channels.notify("这是 WealthPilot 发来的测试消息。收到就说明手机触达已经通了。")
-    return {"ok": ok, "error": "" if ok else "没有发出去：检查令牌是否正确、是否已经配对、网络能否访问 Telegram"}
+    name, target = channels.CHANNELS[_channel(channel)], channels.owner(channel)
+    api = channels._api_for(channel)
+    if api is None or target is None:
+        return {"ok": False, "error": f"{name}还没有配置好或还没有绑定"}
+    try:
+        await api.send(target, "这是 WealthPilot 发来的测试消息。收到就说明这个渠道已经通了。")
+    except Exception as e:  # noqa: BLE001 — 把对方返回的原因告诉用户
+        return {"ok": False, "error": f"没有发出去：{str(e)[:200]}"}
+    return {"ok": True, "error": ""}
+
+
+# ── 企业微信回调 ────────────────────────────────────────
+# 这两个接口是给企业微信的服务器调的，所以不要求登录，也不限本机；谁都能往上发，靠签名和解密把关。
+
+def _wecom_open(msg_signature: str, timestamp: str, nonce: str, encrypted: str) -> str:
+    from wealthpilot.services import wecom
+    s = get_settings()
+    if not channels.configured("wecom"):
+        raise HTTPException(404, "企业微信渠道没有配置")
+    try:
+        return wecom.open_envelope(s.wecom_token, s.wecom_aes_key, s.wecom_corp_id, msg_signature, timestamp, nonce, encrypted)
+    except Exception as e:  # noqa: BLE001 — 验签或解密不过：一律拒绝，不透露原因
+        raise HTTPException(403, "验证失败") from e
+
+
+@router.get("/channel/wecom/callback", response_class=PlainTextResponse)
+def wecom_verify(msg_signature: str = "", timestamp: str = "", nonce: str = "", echostr: str = ""):
+    """在企业微信后台保存回调地址时，它会先来验证一次：把解密出来的内容原样返回。"""
+    return _wecom_open(msg_signature, timestamp, nonce, echostr)
+
+
+@router.post("/channel/wecom/callback", response_class=PlainTextResponse)
+async def wecom_receive(request: Request, msg_signature: str = "", timestamp: str = "", nonce: str = ""):
+    """成员给应用发了消息。先立刻应答（企业微信只等 5 秒），研究放到后台跑，跑完用发消息接口回过去。"""
+    from wealthpilot.services import wecom
+    body = (await request.body()).decode("utf-8", errors="replace")
+    inner = _wecom_open(msg_signature, timestamp, nonce, wecom._field(body, "Encrypt"))
+    parsed = wecom.parse_message(inner)
+    bot = wecom.bot()
+    if parsed and bot is not None and wecom.fresh(parsed[2]):
+        task = asyncio.create_task(bot.message(parsed[0], parsed[1]))
+        _wecom_tasks.add(task)
+        task.add_done_callback(_wecom_tasks.discard)
+    return ""
+
+
+_wecom_tasks: set[asyncio.Task] = set()

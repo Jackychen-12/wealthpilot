@@ -94,6 +94,17 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", description="Telegram 机器人令牌（@BotFather 给的）")
     telegram_api_base: str = Field(default="https://api.telegram.org", description="Telegram 接口地址；需要走中转时改这里")
 
+    # 飞书：企业自建应用，事件订阅选"长连接"。不需要公网地址
+    feishu_app_id: str = Field(default="", description="飞书应用的 App ID")
+    feishu_app_secret: str = Field(default="", description="飞书应用的 App Secret")
+    feishu_api_base: str = Field(default="https://open.feishu.cn", description="飞书接口地址；海外版 Lark 用 https://open.larksuite.com")
+    # 企业微信：自建应用，接收消息要填回调地址（需要公网能访问）
+    wecom_corp_id: str = Field(default="", description="企业 ID")
+    wecom_agent_id: str = Field(default="", description="应用的 AgentId")
+    wecom_secret: str = Field(default="", description="应用的 Secret")
+    wecom_token: str = Field(default="", description="接收消息设置里的 Token")
+    wecom_aes_key: str = Field(default="", description="接收消息设置里的 EncodingAESKey（43 位）")
+
     local_user_id: int = Field(default=0, description="CLI / MCP 使用哪个用户的持仓与画像，0=匿名档")
 
     connectors_file: Path = Field(default=Path("./connectors.json"), description="外部 MCP 连接器配置文件")

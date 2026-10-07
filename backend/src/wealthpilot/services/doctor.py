@@ -114,18 +114,27 @@ def _web(port: int, serving: bool) -> list[dict]:
 
 
 async def _reach() -> dict:
-    from wealthpilot.services import channels
+    from wealthpilot.services import channels, feishu
 
-    settings, status = get_settings(), channels.status()
-    if not settings.telegram_bot_token:
-        return _item("手机触达", "warn", "没有配置", "可选。想在手机上收简报、提问，到网页版「设置 → 手机触达」绑定一个 Telegram 机器人。")
-    try:
-        me = await channels.Telegram(settings.telegram_bot_token, settings.telegram_api_base).call("getMe")
-    except Exception as e:  # noqa: BLE001
-        return _item("手机触达", "fail", f"连不上 Telegram：{str(e)[:120]}", "令牌写错了，或者本机网络到不了 api.telegram.org（可以在设置里填中转地址）。")
-    name = "@" + str((me or {}).get("username", ""))
-    return _item("手机触达", "ok" if status["paired"] else "warn", f"{name}，{'已绑定' if status['paired'] else '还没有绑定聊天'}",
-                 "" if status["paired"] else "到网页版「设置 → 手机触达」生成配对码，在 Telegram 里发给机器人。")
+    settings = get_settings()
+    listed = channels.status_all()
+    ready = [c for c in listed if c["configured"]]
+    if not ready:
+        return _item("手机触达", "warn", "没有配置", "可选。想在手机上收简报、提问，到网页版「设置 → 手机触达」接上 Telegram、飞书或企业微信。")
+    problems = []
+    if settings.telegram_bot_token:
+        try:
+            await channels.Telegram(settings.telegram_bot_token, settings.telegram_api_base).call("getMe")
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"连不上 Telegram：{str(e)[:80]}（令牌写错了，或者本机到不了 api.telegram.org）")
+    if feishu.listener_error():
+        problems.append(feishu.listener_error())
+    summary = "、".join(f"{c['label']}{'已绑定' if c['paired'] else '未绑定'}" for c in ready)
+    if problems:
+        return _item("手机触达", "fail", summary, "；".join(problems))
+    unpaired = [c["label"] for c in ready if not c["paired"]]
+    return _item("手机触达", "warn" if unpaired else "ok", summary,
+                 f"{'、'.join(unpaired)}还没有绑定：到网页版「设置 → 手机触达」生成配对码，在那个应用里发给机器人。" if unpaired else "")
 
 
 def _extras() -> list[dict]:

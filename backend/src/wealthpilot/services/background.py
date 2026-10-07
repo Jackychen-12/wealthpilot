@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from wealthpilot.services import channels, upgrade, watcher
+from wealthpilot.services import channels, feishu, upgrade, watcher
 from wealthpilot.settings import get_settings
 
 
@@ -18,4 +18,4 @@ async def check_updates() -> None:
 
 
 async def run_all() -> None:
-    await asyncio.gather(watcher.scheduler(), channels.run_bot(), check_updates(), return_exceptions=True)
+    await asyncio.gather(watcher.scheduler(), channels.run_bot(), feishu.run(), check_updates(), return_exceptions=True)

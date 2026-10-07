@@ -18,7 +18,7 @@ from wealthpilot.storage.db import get_engine
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
@@ -26,6 +26,7 @@ EDITABLE = (
     "advice_mode", "checkpoints_enabled", "broker", "paper_initial_cash",
     "watch_enabled", "watch_time", "watch_move_pct", "alert_webhook_url",
     "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
+    "feishu_app_id", "feishu_app_secret", "feishu_api_base", "wecom_corp_id", "wecom_agent_id", "wecom_secret", "wecom_token", "wecom_aes_key",
     "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}

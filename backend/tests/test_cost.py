@@ -192,7 +192,7 @@ async def test_notify_reaches_the_webhook_and_reads_the_bots_error_code(monkeypa
         return httpx.Response(200, json={"code": 0} if str(request.url).endswith("/ok") else {"code": 19001, "msg": "param invalid"})
     real = httpx.AsyncClient
     monkeypatch.setattr(channels.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **{k: v for k, v in kw.items() if k != "transport"}))
-    monkeypatch.setattr(channels, "owner", lambda: None)                           # 没绑 Telegram
+    monkeypatch.setattr(channels, "owner", lambda channel="telegram": None)        # 哪个聊天渠道都没绑
     monkeypatch.setattr(channels, "get_settings", lambda: SimpleNamespace(
         telegram_bot_token="", telegram_api_base="", alert_webhook_url="https://open.feishu.cn/open-apis/bot/v2/hook/ok"))
     assert await channels.notify("**⏰ 定时任务**\\n结论在这") is True

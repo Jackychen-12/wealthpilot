@@ -157,7 +157,7 @@ def update(say=print) -> bool:
     if code != 0:
         say(f"拉取失败：{out[:300]}")
         return False
-    steps = [("安装依赖", ["uv", "sync", "--inexact"], REPO / "backend"),
+    steps = [("安装依赖", ["uv", "sync", "--inexact", "--extra", "feishu"], REPO / "backend"),
              ("安装网页版依赖", ["npm", "install", "--no-audit", "--no-fund"], REPO / "workbench"),
              ("构建网页版", ["npm", "run", "build", "--", "--outDir", "dist-app", "--emptyOutDir"], REPO / "workbench")]
     for label, command, cwd in steps:

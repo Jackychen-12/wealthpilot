@@ -2316,12 +2316,13 @@ wheels = [
 
 [[package]]
 name = "wealthpilot"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "akshare" },
     { name = "anthropic" },
     { name = "bcrypt" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp", extra = ["cli"] },
@@ -2356,6 +2357,7 @@ requires-dist = [
     { name = "akshare", specifier = ">=1.14.0" },
     { name = "anthropic", specifier = ">=0.40.0" },
     { name = "bcrypt", specifier = ">=4.0.0" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "lark-oapi", marker = "extra == 'feishu'", specifier = ">=1.4.0" },

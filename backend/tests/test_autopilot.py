@@ -259,4 +259,7 @@ def test_paths_are_anchored_to_home_not_the_current_directory(tmp_path, monkeypa
     monkeypatch.delenv("SKILLS_DIR", raising=False)
     fresh = settings_module.Settings()
     assert fresh.skills_dir == settings_module.HOME / "skills" and fresh.skills_dir.is_absolute()
-    assert settings_module.HOME.name == "backend" and not str(fresh.skills_dir).startswith(str(tmp_path))
+    assert not str(fresh.skills_dir).startswith(str(tmp_path))
+    # 测试里 HOME 被 conftest 指到了临时目录；没有这个环境变量时，默认就是仓库的 backend/
+    monkeypatch.delenv("WEALTHPILOT_HOME", raising=False)
+    assert settings_module._home().name == "backend"
