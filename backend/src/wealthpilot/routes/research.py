@@ -162,6 +162,60 @@ def research_detail(message_id: int, db: Session = Depends(get_session), user_id
                 select(TradeProposal).where(TradeProposal.user_id == user_id, TradeProposal.message_id == answer.id)).all()]}
 
 
+def _meta(row: ChatMessage) -> dict:
+    try:
+        return json.loads(row.metadata_json) if row.metadata_json else {}
+    except ValueError:
+        return {}
+
+
+_SOURCE = (("auto-", "定时任务"), ("tg-", "Telegram"), ("fs-", "飞书"), ("wx-", "企业微信"))
+
+
+@router.get("/conversations")
+def conversations(limit: int = 30, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """会话列表，最近用过的在前。一个会话是连着问的几个问题；标题取第一个问题。"""
+    rows = db.exec(select(ChatMessage).where(ChatMessage.user_id == user_id, ChatMessage.conversation_id != "")
+                   .order_by(ChatMessage.id.desc()).limit(800)).all()
+    found: dict[str, dict] = {}
+    for row in rows:   # 新的在前：先见到的是最后一条，越往后越早
+        item = found.setdefault(row.conversation_id, {
+            "id": row.conversation_id, "title": "", "turns": 0, "last_at": row.created_at.isoformat(), "securities": {},
+            "source": next((label for prefix, label in _SOURCE if row.conversation_id.startswith(prefix)), ""), "last_status": ""})
+        item["last_at"] = max(item["last_at"], row.created_at.isoformat())
+        if row.role == "user":
+            item["title"] = row.content[:60]          # 不断被更早的问题覆盖，最后留下的就是第一个问题
+        else:
+            item["turns"] += 1
+            meta = _meta(row)
+            item["last_status"] = item["last_status"] or meta.get("status", "")
+            for s in meta.get("securities") or []:
+                item["securities"].setdefault(s.get("code"), s)
+    out = [{**c, "securities": list(c["securities"].values())[:4]} for c in found.values() if c["turns"]]
+    return sorted(out, key=lambda c: c["last_at"], reverse=True)[:max(1, min(limit, 100))]
+
+
+@router.get("/conversations/{conversation_id}")
+def conversation(conversation_id: str, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """一个会话里的每一轮：问题、回答、当时的证据和校验结果。页面据此把会话整个恢复出来，接着问。"""
+    rows = db.exec(select(ChatMessage).where(ChatMessage.user_id == user_id, ChatMessage.conversation_id == conversation_id)
+                   .order_by(ChatMessage.id)).all()
+    if not rows:
+        raise HTTPException(404, "没有这个会话")
+    turns, question = [], ""
+    for row in rows:
+        if row.role == "user":
+            question = row.content
+            continue
+        turns.append({
+            "message_id": row.id, "created_at": row.created_at.isoformat(), "question": question, "answer": row.content, "meta": _meta(row),
+            "checkpoints": [checkpoints.serialize(c) for c in checkpoints.list_checkpoints(db, user_id, message_id=row.id)],
+            "proposals": [checkpoints.serialize_proposal(p) for p in db.exec(
+                select(TradeProposal).where(TradeProposal.user_id == user_id, TradeProposal.message_id == row.id)).all()]})
+        question = ""
+    return {"id": conversation_id, "turns": turns}
+
+
 @router.get("/research/stats")
 def research_stats(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     count = db.exec(select(func.count()).select_from(ChatMessage)

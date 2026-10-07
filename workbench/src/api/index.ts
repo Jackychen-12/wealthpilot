@@ -180,6 +180,12 @@ export const api = {
   removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
   runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
   parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
+  conversations: () => request<ConversationInfo[]>('/api/conversations'),
+  conversation: (id: string) => request<{ id: string; turns: ConversationTurn[] }>(`/api/conversations/${encodeURIComponent(id)}`),
+  lessons: () => request<MemoryItem[]>('/api/lessons'),
+  reflect: () => request<{ added: MemoryItem[] }>('/api/lessons/reflect', { method: 'POST' }),
+  skillSuggestions: () => request<SkillSuggestion[]>('/api/skills/suggestions'),
+  dismissSuggestion: (key: string) => request<unknown>(`/api/skills/suggestions/${key}/dismiss`, { method: 'POST' }),
   activeRuns: () => request<ActiveRun[]>('/api/chat/runs/active'),
   stopRun: (runId: string) => request<unknown>(`/api/chat/runs/${runId}/stop`, { method: 'POST' }),
   usage: () => request<UsageSummary>('/api/settings/usage'),
@@ -281,7 +287,7 @@ export interface Desk { sample?: boolean; stocks: DeskStock[]; todo: { proposals
 export interface Thesis { code: string; latest: { id: number; date: string; status: string; playbook: string; conclusion: string; stance: string } | null; research_dates: string[]
   checkpoints: { total: number; pending: number; held: number; broken: number }; broken: Checkpoint[] }
 export interface Mover { code: string; name: string; industry: string; price: number | null; change_pct: number; total_mv_yi: number | null }
-export interface MemoryItem { id: number; kind: 'preference' | 'decision' | 'note'; code: string; content: string; source: string; created_at: string }
+export interface MemoryItem { id: number; kind: 'preference' | 'decision' | 'note' | 'lesson'; code: string; content: string; source: string; created_at: string }
 export interface AuditEntry { id: number; at: string; kind: string; actor: string; summary: string; payload: Record<string, unknown>; hash: string }
 export interface SkillInfo { name: string; label: string; description: string; when_to_use: string; triggers: string[]; needs: string; agents: string[]; sections: string[]; criteria: string[]; path: string; content?: string }
 export interface FlowDay { date: string; close: number | null; change_pct: number | null; net_yi: number | null; net_ratio_pct: number | null; xlarge_net_yi: number | null }
@@ -315,6 +321,12 @@ export interface StockNews { date: string; title: string; summary: string; media
 export interface Survey { notice_date: string; date: string; way: string; place: string; participants: number; content: string }
 export interface Segment { name: string; revenue_yi: number | null; revenue_ratio_pct: number | null; gross_margin_pct: number | null }
 export interface Segments { report_date: string; report_name: string; by_industry: Segment[]; by_product: Segment[]; by_region: Segment[] }
+export interface ConversationInfo { id: string; title: string; turns: number; last_at: string; securities: Security[]; source: string; last_status: string }
+export interface ConversationTurn { message_id: number; created_at: string; question: string; answer: string; checkpoints: Checkpoint[]; proposals: Proposal[]
+  meta: { status?: string; playbook?: string; intent?: string; securities?: Security[]; tasks?: { id: string; agent: string; goal: string }[]
+    evidence?: NonNullable<StreamEvent['evidence']>[]; summary?: SummaryCard | null; debate?: Debate | null; seconds?: number; usage?: Usage; depth?: string
+    reused?: Reused | null; rewrite_of?: number | null; missing_evidence?: string[] } }
+export interface SkillSuggestion { key: string; pattern: string; times: number; stocks: string[]; examples: { question: string; name: string }[]; description: string }
 export interface Reused { message_id: number; age: string; age_minutes: number; saved_tokens: number | null; mode: 'replay' | 'evidence' }
 export interface ActiveRun { run_id: string; question: string; conversation_id: string; depth: Depth; rewrite_of: number | null; started_at: number; done: boolean }
 export interface UsageTotal { runs: number; input_tokens: number; cached_tokens: number; output_tokens: number; tokens: number; cost: number | null }

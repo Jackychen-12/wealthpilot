@@ -23,6 +23,7 @@ _PREFERENCE_RE = re.compile(
     r"以后(?:都|请|不要|别)|不要再(?:给我)?推荐|(?:单只|单票|个股)[^，。；]{0,8}不(?:超过|高于)|我(?:是|属于)[^，。；]{0,6}(?:长线|短线|价值|成长)")
 _SENTENCE_RE = re.compile(r"[^。！？!?；;\n]+")
 MAX_IN_PROMPT = 12
+MAX_LESSONS = 6
 
 
 def extract_preferences(message: str) -> list[str]:
@@ -72,12 +73,19 @@ def serialize(m: Memory) -> dict:
 def note(db: Session, user_id: int, codes: list[str] | None = None) -> str:
     """带给本轮研究的记忆：通用的全带，针对某只证券的只在研究它时带。"""
     codes = set(codes or [])
-    rows = [m for m in list_memories(db, user_id) if not m.code or m.code in codes][:MAX_IN_PROMPT]
-    if not rows:
-        return ""
+    relevant = [m for m in list_memories(db, user_id) if not m.code or m.code in codes]
+    rows = [m for m in relevant if m.kind != "lesson"][:MAX_IN_PROMPT]
+    lessons = [m for m in relevant if m.kind == "lesson"][:MAX_LESSONS]
     label = {"preference": "偏好", "decision": "决定", "note": "备注"}
-    return ("用户此前明确说过的偏好和做过的决定（必须尊重；本次结论与其中某条冲突时要明说，不要悄悄违背）：\n"
-            + "\n".join(f"- [{label.get(m.kind, m.kind)}] {m.content}" for m in rows) + "\n\n")
+    out = ""
+    if rows:
+        out += ("用户此前明确说过的偏好和做过的决定（必须尊重；本次结论与其中某条冲突时要明说，不要悄悄违背）：\n"
+                + "\n".join(f"- [{label.get(m.kind, m.kind)}] {m.content}" for m in rows) + "\n\n")
+    if lessons:
+        # 这是 Agent 自己过去判断落空后留下的记录，不是用户的要求：用来避免重犯，不必在回答里复述
+        out += ("你自己过去判断落空后记下的经验（这次遇到同类判断先对照一下，别再犯同样的错）：\n"
+                + "\n".join(f"- {m.content}" for m in lessons) + "\n\n")
+    return out
 
 
 # ── 审计日志 ────────────────────────────────────────────

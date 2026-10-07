@@ -1,8 +1,8 @@
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, ChevronRight, ListTree, Square, SquarePen } from 'lucide-react'
+import { ArrowUp, Check, ChevronRight, History, ListTree, Square, SquarePen } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { DEMO, api, runTool, useApi, type Debate, type Depth, type ValuationHistory } from '../api'
+import { DEMO, api, runTool, useApi, type ConversationInfo, type Debate, type Depth, type ValuationHistory } from '../api'
 import { askNotifyPermission, research, useResearch, type Evidence, type Turn } from '../api/researchStore'
 import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
@@ -107,6 +107,34 @@ export const DebateCard: React.FC<{ debate: Debate; onCite?: (id: string) => voi
   )
 }
 
+const when = (iso: string) => {
+  const d = new Date(iso)
+  const days = Math.floor((Date.now() - d.getTime()) / 864e5)
+  return days <= 0 ? `今天 ${iso.slice(11, 16)}` : days === 1 ? `昨天 ${iso.slice(11, 16)}` : iso.slice(5, 10)
+}
+
+/** 以前的会话：点一个就接着聊。来自定时任务和手机的也在这里，标了来源。 */
+const Sessions: React.FC<{ items: ConversationInfo[]; current: string; onOpen: (id: string) => void; limit?: number }> = ({ items, current, onOpen, limit }) => (
+  <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
+    {items.slice(0, limit).map((c) => (
+      <li key={c.id}>
+        <button type="button" onClick={() => onOpen(c.id)} className={cn('flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-surface-soft', c.id === current && 'bg-surface-soft')}>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-ink">{c.title || '（没有记下问题）'}</span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-steel">
+              <span>{when(c.last_at)}</span><span>{c.turns} 轮</span>
+              {c.securities.slice(0, 3).map((s) => <span key={s.code}>{s.name}</span>)}
+              {c.source ? <Tag className="!py-0">{c.source}</Tag> : null}
+              {c.id === current ? <span className="text-primary">当前</span> : null}
+            </span>
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />
+        </button>
+      </li>
+    ))}
+  </ul>
+)
+
 /** 等待中：告诉用户现在在干什么、大概还要多久，而不是只转一个圈。 */
 const Waiting: React.FC<{ t: Turn }> = ({ t }) => {
   const stage = stageOf(t)
@@ -169,6 +197,13 @@ const ResearchPage: React.FC = () => {
   const [reportOpen, setReportOpen] = useState(() => { try { return localStorage.getItem(REPORT_KEY) === '1' } catch { return false } })
   const [opened, setOpened] = useState<Record<number, boolean>>({})
   const [reuse, setReuse] = useState(false)
+  const sessions = useApi(() => (DEMO ? Promise.resolve([] as ConversationInfo[]) : api.conversations()), [turns.length === 0])
+  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [sessionError, setSessionError] = useState('')
+  const openSession = (id: string) => {
+    setSessionError('')
+    research.open(id).then(() => setSessionsOpen(false)).catch((e) => setSessionError(e instanceof Error ? e.message : '打不开这个会话'))
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
   const skillList = useApi(api.skills)
   const skillQuestions = (skillList.data?.skills ?? []).map((k) => `用「${k.label}」的方法看看贵州茅台`)
@@ -227,6 +262,16 @@ const ResearchPage: React.FC = () => {
                         </button>
                       ))}
                     </div>
+                    {sessions.data?.length ? (
+                      <div className="mt-8">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="eyebrow">接着之前的聊</span>
+                          {sessions.data.length > 4 ? <button type="button" onClick={() => setSessionsOpen(true)} className="text-[13px] text-steel hover:text-ink">全部 {sessions.data.length} 个会话</button> : null}
+                        </div>
+                        <Sessions items={sessions.data} current="" onOpen={openSession} limit={4} />
+                        {sessionError ? <p className="mt-2 text-[13px] text-on-rose">{sessionError}</p> : null}
+                      </div>
+                    ) : null}
                     <details className="mt-4 text-sm text-slate">
                       <summary className="cursor-pointer select-none text-[13px] text-steel hover:text-ink">还能问什么</summary>
                       <div className="mt-1">
@@ -243,7 +288,12 @@ const ResearchPage: React.FC = () => {
             ) : (
               <div className="mb-6 flex items-center justify-between">
                 <span className="text-[13px] text-steel">本次会话 · {turns.length} 个问题</span>
-                {!busy ? <Button size="xs" variant="ghost" onClick={research.clear}><SquarePen className="h-3.5 w-3.5" />新会话</Button> : null}
+                {!busy ? (
+                  <span className="flex gap-1">
+                    {sessions.data?.length ? <Button size="xs" variant="ghost" onClick={() => { sessions.reload(); setSessionsOpen(true) }}><History className="h-3.5 w-3.5" />历史会话</Button> : null}
+                    <Button size="xs" variant="ghost" onClick={research.clear}><SquarePen className="h-3.5 w-3.5" />新会话</Button>
+                  </span>
+                ) : null}
               </div>
             )}
 
@@ -399,6 +449,11 @@ const ResearchPage: React.FC = () => {
       <aside className={cn('hidden h-full w-[360px] shrink-0 flex-col border-l border-hairline bg-surface-soft', showProcess && 'xl:flex')}>
         <Inspector turn={current} focus={focusEvidence} />
       </aside>
+      <Drawer open={sessionsOpen} onClose={() => setSessionsOpen(false)} title="历史会话" width="max-w-lg">
+        {sessionError ? <Callout tone="danger" className="mb-3">{sessionError}</Callout> : null}
+        <p className="mb-3 text-[13px] text-steel">点一个会话就回到当时的对话，接着问。每一轮当时的证据和校验结果都还在。</p>
+        <Sessions items={sessions.data ?? []} current={research.conversationId} onOpen={openSession} />
+      </Drawer>
       {/* 窄屏：过程面板收进抽屉 */}
       <Drawer open={processOpen} onClose={() => setProcessOpen(false)} title="研究过程" width="max-w-[400px]">
         <div className="-mx-6 -my-5 flex h-full flex-col bg-surface-soft"><Inspector turn={current} focus={focusEvidence} compact /></div>

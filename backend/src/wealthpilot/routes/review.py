@@ -114,6 +114,33 @@ def delete_memory(memory_id: int, db: Session = Depends(get_session), user_id: i
     return {"ok": True}
 
 
+@router.get("/lessons")
+def list_lessons(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """它自己记下的经验：判断落空时自动记的，和它归纳出来的规律。"""
+    from wealthpilot.services import lessons
+    return [memory.serialize(m) for m in lessons.list_lessons(db, user_id)]
+
+
+@router.post("/lessons/reflect")
+async def reflect(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """让模型把已核对的判断归纳一次（会调用一次模型，所以只在用户点的时候跑）。"""
+    import asyncio
+
+    from wealthpilot.services import lessons
+    from wealthpilot.services.ai_client import create_ai_client, diagnose
+
+    settings = get_settings()
+    try:
+        client = create_ai_client(settings)
+        saved = await asyncio.to_thread(lessons.reflect, db, user_id, client, settings.light_model or settings.active_model)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        known = diagnose(e)
+        raise HTTPException(502, known.message if known else f"模型没有返回可用的结果：{str(e)[:200]}") from e
+    return {"added": [memory.serialize(m) for m in saved]}
+
+
 @router.get("/audit")
 def audit_log(limit: int = 100, kind: str = "", db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """审计日志，新的在前。只读：没有修改和删除的接口。"""

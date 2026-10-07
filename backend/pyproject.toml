@@ -32,6 +32,8 @@ dependencies = [
 wealthpilot = "wealthpilot.__main__:main"
 
 [project.optional-dependencies]
+# 在飞书里和它对话（长连接，不需要公网地址）。不用飞书可以不装
+feishu = ["lark-oapi>=1.4.0"]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",

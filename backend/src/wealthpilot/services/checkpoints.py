@@ -280,6 +280,7 @@ async def verify_pending(db: Session, user_id: int, *, force: bool = False, toda
     today = today or date.today()
     pending = db.exec(select(Checkpoint).where(Checkpoint.user_id == user_id, Checkpoint.status == "pending")).all()
     counts = {"checked": 0, "held": 0, "broken": 0, "unverifiable": 0}
+    broken: list[Checkpoint] = []
     verified: list[Checkpoint] = []
     for cp in pending:
         try:
@@ -294,12 +295,18 @@ async def verify_pending(db: Session, user_id: int, *, force: bool = False, toda
         else:
             cp.actual_value, cp.actual_as_of = outcome
             cp.status = _judge(cp.op, cp.actual_value, cp.threshold)
+            if cp.status == "broken":
+                broken.append(cp)
             counts[cp.status] += 1
         cp.checked_at = datetime.now()
         counts["checked"] += 1
         db.add(cp)
         verified.append(cp)
     db.commit()
+    if broken:
+        from wealthpilot.services import lessons  # 放在这里导入：lessons 也要用到本模块
+        for cp in broken:
+            lessons.from_broken(db, cp)   # 判断落空：照实记一条，下次研究这只股票时带上
     for cp in verified:
         memory.record(db, user_id, "checkpoint/verified", f"{cp.name} {METRICS.get(cp.metric, (cp.metric,))[0]}：{cp.status}",
                       {"id": cp.id, "code": cp.code, "status": cp.status, "actual": cp.actual_value, "as_of": cp.actual_as_of})

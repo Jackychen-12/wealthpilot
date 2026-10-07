@@ -63,6 +63,8 @@ COMMANDS: dict[str, str] = {
     "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
     "/update": "有没有新版本、怎么升级",
     "/setup": "重新走一遍首次配置（模型 Key、示例数据）",
+    "/sessions": "/sessions [序号] — 以前的会话；带序号则回到那个会话接着聊",
+    "/lessons": "/lessons [reflect] — 它自己记下的经验（reflect：让模型归纳一次规律，会调用一次模型）",
     "/new": "开始新会话（清空上下文）",
     "/status": "当前模式、后端与模型",
     "/login": "/login <用户名> — 远程模式登录（密码单独输入）",
@@ -70,11 +72,11 @@ COMMANDS: dict[str, str] = {
 }
 # /help 按用途分组：三十多个命令排成一列没法看
 HELP_GROUPS = [
-    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/evidence", "/history", "/new"]),
+    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/evidence", "/history", "/sessions", "/new"]),
     ("行情", ["/stock", "/search", "/screen", "/market"]),
     ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
-    ("调教与追责", ["/skills", "/memory", "/audit"]),
+    ("调教与追责", ["/skills", "/memory", "/lessons", "/audit"]),
     ("其他", ["/setup", "/sample", "/doctor", "/update", "/status", "/login", "/help", "/quit"]),
 ]
 ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
@@ -672,6 +674,42 @@ class App:
         self.console.print(t if t.row_count else "[dim]还没有研究记录[/]")
         if t.row_count:
             self.console.print("[dim]/history <编号> 调出某一次，接着追问[/]")
+
+    async def cmd_sessions(self, args: str) -> None:
+        rows = await self.backend.request("GET", "/api/conversations")
+        if args.strip().isdigit():
+            index = int(args.strip())
+            if not 1 <= index <= len(rows):
+                raise ValueError("没有这个序号。/sessions 看列表")
+            data = await self.backend.request("GET", f"/api/conversations/{rows[index - 1]['id']}")
+            turns = data["turns"]
+            # 回到那个会话：之后的提问存进同一个会话，带上最近几轮的上下文，/rewrite 用最后一轮的证据
+            self.conversation_id = data["id"]
+            self.history = [m for t in turns[-3:] for m in ({"role": "user", "content": t["question"]}, {"role": "assistant", "content": t["answer"]})]
+            self.evidence = (turns[-1].get("meta") or {}).get("evidence") or []
+            self.last_message_id = turns[-1]["message_id"]
+            for t in turns:
+                card = (t.get("meta") or {}).get("summary") or {}
+                self.console.print(f"[bold cyan]›[/] {t['question']}\n  [dim]{(card.get('conclusion') or t['answer'][:120]).strip()}[/]", highlight=False)
+            self.console.print("\n[dim]已回到这个会话，可以接着问。看某一轮的全文：/history <编号>[/]")
+            return
+        t = self.table("序号", "最近", "轮数", "第一个问题", "来源", right=(0, 2))
+        for i, c in enumerate(rows, 1):
+            t.add_row(str(i), c["last_at"][5:16].replace("T", " "), str(c["turns"]), c["title"][:44], c.get("source") or "")
+        self.console.print(t if rows else "[dim]还没有会话[/]")
+        if rows:
+            self.console.print("[dim]/sessions <序号> 回到那个会话接着聊[/]")
+
+    async def cmd_lessons(self, args: str) -> None:
+        if args.strip() == "reflect":
+            with self.console.status("[dim]归纳中（调用一次模型）…", spinner="dots"):
+                added = (await self.backend.request("POST", "/api/lessons/reflect"))["added"]
+            self.console.print(f"[green]归纳出 {len(added)} 条规律[/]" if added else "[dim]没有找到有两条以上记录支撑的规律，什么都没记[/]")
+        rows = await self.backend.request("GET", "/api/lessons")
+        for m in rows:
+            self.console.print(f"  [bold]#{m['id']}[/] [dim]{'规律' if m['source'] == 'reflection' else '落空'}[/] {m['content']}", highlight=False)
+        if not rows:
+            self.console.print("[dim]还没有。有判断被证伪时会自动记一条；/memory rm <编号> 可以删[/]")
 
     # —— 对话：深度与改写 ——
 

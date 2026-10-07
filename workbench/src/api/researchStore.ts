@@ -3,7 +3,7 @@
  * 切到别的页面再回来，对话和正在跑的研究都还在。
  */
 import { useSyncExternalStore } from 'react'
-import { DEMO, api, attachRun, streamChat, type ActiveRun, type Checkpoint, type Debate, type Depth, type Proposal, type Reused, type Security, type StreamEvent, type SummaryCard, type Usage } from '../api'
+import { DEMO, api, attachRun, streamChat, type ActiveRun, type Checkpoint, type ConversationTurn, type Debate, type Depth, type Proposal, type Reused, type Security, type StreamEvent, type SummaryCard, type Usage } from '../api'
 
 export interface Evidence { id: string; tool: string; agent: string; taskId: string; ok: boolean; input: string; output: string; asOf: string; source: string }
 export interface Task { id: string; agent: string; goal: string; state: 'pending' | 'running' | 'done' | 'failed' }
@@ -133,6 +133,18 @@ export const research = {
   },
   clear: () => { research.stop(); conversationId = crypto.randomUUID(); emit({ turns: [], selected: null, focusEvidence: '' }); persist() },
   get busy() { return state.turns.some(t => t.running) },
+  get conversationId() { return conversationId },
+
+  /** 打开一个以前的会话：把每一轮连同当时的证据恢复出来，之后的提问接在它后面。 */
+  async open(id: string) {
+    if (research.busy) return
+    const data = await api.conversation(id)
+    const turns = data.turns.map((r, i) => fromRecord(r, i + 1))
+    conversationId = id
+    nextId = turns.length + 1
+    emit({ turns, selected: turns[turns.length - 1]?.id ?? null, focusEvidence: '' })
+    persist()
+  },
 
   /**
    * 提问。options.depth 选快速还是深入；options.rewriteOf 给了某一轮的 id，就不重新研究，
@@ -155,6 +167,23 @@ export const research = {
     await follow(id, Date.now(), streamChat(turn.question, history, controller.signal, conversationId,
       { depth: turn.depth, rewriteOf: source?.messageId ?? null }), wasHidden)
   },
+}
+
+/** 研究记录里的一轮 → 页面上的一轮。证据的原文截短，够点开看就行。 */
+function fromRecord(r: ConversationTurn, id: number): Turn {
+  const meta = r.meta || {}
+  const evidence: Evidence[] = (meta.evidence || []).map(v => ({
+    id: v.id, tool: v.tool, agent: '', taskId: '', ok: v.status === 'ok', input: clip(v.input ?? {}, 300), output: clip(v.output ?? '', 1200),
+    asOf: (Object.values(v.provenance?.as_of || {}).filter(Boolean).sort().pop() as string) || '', source: v.provenance?.sources?.[0]?.url || '',
+  }))
+  return {
+    id, question: r.question, answer: r.answer, status: meta.status || 'passed', running: false, intent: meta.intent || '', fallbackPlan: false,
+    tasks: (meta.tasks || []).map(t => ({ ...t, state: 'done' as const })), criteria: [], evidence, checks: [], missing: meta.missing_evidence || [],
+    followUps: [], seconds: meta.seconds || 0, error: '', playbook: meta.playbook || '', securities: meta.securities || [],
+    checkpoints: r.checkpoints || [], proposals: r.proposals || [], usage: meta.usage ?? null,
+    eta: 0, depth: (meta.depth as Depth) || 'auto', summary: meta.summary ?? null, debate: meta.debate ?? null, runId: '', etaTokens: 0, reason: '',
+    reused: meta.reused ?? null, messageId: r.message_id, rewriteOf: meta.playbook === 'rewrite' ? 0 : null,
+  }
 }
 
 /** 跟着一次研究的事件流走到结束。新发起的和刷新后接回来的都走这里。 */

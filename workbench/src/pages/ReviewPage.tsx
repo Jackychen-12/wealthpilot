@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
 import { DEMO, api, useApi, type Checkpoint } from '../api'
 import { AskAi } from '../components/AskAi'
 import { CP_STATUS, CheckpointTable, ProposalList } from '../components/Checkpoints'
@@ -9,6 +9,45 @@ import { DataState, Metric, Metrics, Page, Section, Table, Td } from '../compone
 
 const FILTERS = [['all', '全部'], ['pending', '待核对'], ['held', '成立'], ['broken', '被证伪']] as const
 const rate = (v: number | null) => (v == null ? '—' : `${v}%`)
+
+/**
+ * 它记下的经验：判断落空时由程序照实记一条（不花钱）；攒够几条后可以让模型归纳一次规律（点了才调用）。
+ * 这些会带进之后的研究，不想要的可以删。
+ */
+const Lessons: React.FC = () => {
+  const list = useApi(api.lessons)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<{ tone: 'success' | 'danger' | 'neutral'; text: string } | null>(null)
+  const rows = list.data ?? []
+  const reflect = async () => {
+    setBusy(true); setNote(null)
+    try {
+      const r = await api.reflect()
+      setNote(r.added.length ? { tone: 'success', text: `归纳出 ${r.added.length} 条规律，已经记下。` } : { tone: 'neutral', text: '这次没有找到有两条以上记录支撑的规律，什么都没记。' })
+      list.reload()
+    } catch (e) {
+      setNote({ tone: 'danger', text: e instanceof Error ? e.message : '没有归纳成' })
+    } finally { setBusy(false) }
+  }
+  return (
+    <Section title="它记下的经验" hint="判断落空时自动记一条；之后研究同一只股票会带上"
+      actions={DEMO ? undefined : <Button size="sm" variant="secondary" loading={busy} onClick={() => void reflect()} title="把已核对的判断交给模型找规律。会调用一次模型"><Sparkles className="h-3.5 w-3.5" />让它归纳规律</Button>}>
+      {note ? <Callout tone={note.tone} className="mb-3">{note.text}</Callout> : null}
+      <DataState loading={list.loading} error={list.error} onRetry={list.reload}
+        empty={rows.length === 0 ? '还没有。等有判断被证伪，这里会自动出现一条：当时怎么想的、实际是多少。' : undefined}>
+        <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
+          {rows.map((m) => (
+            <li key={m.id} className="flex items-baseline gap-3 px-4 py-2.5 text-sm">
+              <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-xs ${m.source === 'reflection' ? 'bg-tint-lavender text-ink' : 'bg-surface text-steel'}`}>{m.source === 'reflection' ? '规律' : '落空'}</span>
+              <span className="min-w-0 flex-1 leading-relaxed text-charcoal">{m.content}</span>
+              {DEMO ? null : <button type="button" onClick={() => void api.removeMemory(m.id).then(list.reload)} className="shrink-0 text-[13px] text-steel hover:text-ink">删掉</button>}
+            </li>
+          ))}
+        </ul>
+      </DataState>
+    </Section>
+  )
+}
 
 /** 验证与复盘：研究当时的判断，后来对不对。 */
 const ReviewPage: React.FC = () => {
@@ -89,6 +128,8 @@ const ReviewPage: React.FC = () => {
           <p className="mt-3 text-[13px] text-steel">验证条件由模型在研究发布时提出，基准值和核对结果由代码取数。已经核对出结果的不能删除，成绩单不会因为删掉证伪的条目而变好看。</p>
         </Section>
       ) : null}
+
+      <Lessons />
 
       <ConfirmDialog open={removing != null} title="删除验证点" confirmText="删除"
         message={removing ? `删除「${removing.name} ${removing.metric_label}」这条待核对的验证点？` : ''}
