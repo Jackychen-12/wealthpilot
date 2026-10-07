@@ -261,6 +261,9 @@ class App:
                     else:
                         c.print(f"[dim]◆ {gate}[/] [yellow]打回[/] [dim]{'；'.join(e.get('issues', []))[:110]}[/]")
                     status.update("[dim]撰写并校验回答…")
+                elif kind == "reused":
+                    how = "原样给出那次的结果，没有花 token" if e.get("mode") == "replay" else "只用那次取到的数据重写，没有重新取数"
+                    c.print(f"[yellow]◆ {e.get('age', '')}研究过这只股票：{how}。要最新数据用 /deep <问题>[/]")
                 elif kind == "debate":
                     c.print("[dim]◆ 多空辩论[/]")
                     for side, color, label in (("bull", "red", "看多"), ("bear", "green", "看空")):
@@ -277,8 +280,12 @@ class App:
                     answer, meta["done"] = e.get("content", ""), e.get("meta", {})
 
         c.print()
-        c.print(Markdown(cite(answer or "没有生成回答。")))
         done = meta.get("done", {})
+        if done.get("reason"):
+            # 模型这边的问题（余额、Key、上限……）：错误那一行已经说清楚了，不再当成一篇回答重排一遍
+            c.print("[dim]在网页版「设置」里处理，或在这里运行 /setup 换一个模型；/doctor 可以看是哪一环不通。[/]")
+            return
+        c.print(Markdown(cite(answer or "没有生成回答。")))
         color, label = STATUS.get(done.get("status", ""), ("dim", done.get("status", "")))
         usage = done.get("usage") or {}
         cost = (f" · {(usage['input_tokens'] + usage['output_tokens']) / 1000:.0f}k token（缓存 {usage['cache_hit_pct']}%）"

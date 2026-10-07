@@ -1,6 +1,6 @@
 [project]
 name = "wealthpilot"
-version = "0.3.0"
+version = "0.4.0"
 description = "WealthPilot AI Agent Backend — portfolio analysis, market data, LLM chat"
 requires-python = ">=3.11"
 license = { text = "MIT" }

@@ -473,14 +473,14 @@ def create_ai_client(settings) -> AIClient:
     timeout = getattr(settings, "ai_timeout_seconds", None)
     if settings.ai_provider == "openai":
         if not settings.openai_base_url.strip() or not settings.openai_model.strip():
-            raise ValueError("还没有填模型服务的接口地址和模型名，请到「设置」里填")
+            raise ValueError("还没有填模型服务的接口地址和模型名")
         return DeepSeekAIClient(settings.openai_api_key, settings.openai_base_url.strip(), timeout,
                                 json_mode=settings.openai_json_mode, max_output=settings.openai_max_tokens)
     if settings.ai_provider == "deepseek":
         if settings.deepseek_api_key.strip() in _PLACEHOLDER_KEYS:
-            raise ValueError("未配置 DEEPSEEK_API_KEY，请在 backend/.env 中设置")
+            raise ValueError("还没有填 DeepSeek 的 API Key")
         return DeepSeekAIClient(settings.deepseek_api_key, settings.deepseek_base_url, timeout)
     else:
         if settings.anthropic_api_key.strip() in _PLACEHOLDER_KEYS:
-            raise ValueError("未配置 ANTHROPIC_API_KEY，请在 backend/.env 中设置")
+            raise ValueError("还没有填 Claude 的 API Key")
         return AnthropicAIClient(settings.anthropic_api_key, timeout)

@@ -189,7 +189,7 @@ async def test_notify_reaches_the_webhook_and_reads_the_bots_error_code(monkeypa
 
     def handler(request):
         posted.append((str(request.url), json.loads(request.content)))
-        return httpx.Response(200, json={"code": 0} if "ok" in str(request.url) else {"code": 19001, "msg": "param invalid"})
+        return httpx.Response(200, json={"code": 0} if str(request.url).endswith("/ok") else {"code": 19001, "msg": "param invalid"})
     real = httpx.AsyncClient
     monkeypatch.setattr(channels.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **{k: v for k, v in kw.items() if k != "transport"}))
     monkeypatch.setattr(channels, "owner", lambda: None)                           # 没绑 Telegram

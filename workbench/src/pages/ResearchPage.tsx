@@ -54,6 +54,12 @@ const REWRITES = ['更短一点', '只讲风险', '换成给新手的说法', '�
 // 和个股页的判断卡同一套颜色：偏多用红、偏空用绿（A 股的习惯）
 const STANCE_TONE: Record<string, Tone> = { 看多: 'pink', 中性偏多: 'pink', 看空: 'green', 中性偏空: 'green', 中性: 'gray' }
 const STAGES = ['规划', '取证', '审核证据', '辩论与撰写', '核对'] as const
+// 研究没成是因为模型这边的问题：给一个直接去处理的入口，而不是让用户自己猜
+const REASON_ACTION: Record<string, string> = {
+  balance: '去设置换一个模型', auth: '去设置重填 Key', model: '去设置核对模型名', network: '去设置检查接口地址',
+  budget: '去设置调整上限', not_configured: '去设置填模型', rate_limit: '',
+}
+const wan = (tokens: number) => `${(tokens / 1e4).toFixed(tokens >= 1e5 ? 0 : 1)} 万 token`
 
 /** 现在进行到哪一步（对应 STAGES 的下标）。 */
 function stageOf(t: Turn): number {
@@ -118,6 +124,7 @@ const Waiting: React.FC<{ t: Turn }> = ({ t }) => {
         <span className="min-w-0 truncate font-medium text-ink">{detail}</span>
         <span className="shrink-0 tabular-nums text-steel">
           {left == null ? `已用 ${t.seconds.toFixed(0)} 秒` : left > 0 ? `大约还要 ${left} 秒` : '比平时久一点，快好了'}
+          {t.etaTokens ? ` · 约 ${wan(t.etaTokens)}` : ''}
         </span>
       </div>
       <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface">
@@ -132,7 +139,7 @@ const Waiting: React.FC<{ t: Turn }> = ({ t }) => {
           ))}
         </ol>
       )}
-      <p className="mt-3 text-xs text-stone">没通过核对的草稿不会显示。可以先去看别的页面，好了会提醒你。</p>
+      <p className="mt-3 text-xs text-stone">没通过核对的草稿不会显示。可以去看别的页面，甚至关掉这个标签页：研究在后台照样跑完，结果会存进研究记录。</p>
     </div>
   )
 }
@@ -271,8 +278,23 @@ const ResearchPage: React.FC = () => {
                         {t.securities.filter((x) => x.asset_type === 'stock').slice(0, 3).map((x) => <StockSnapshot key={x.code} code={x.code} name={x.name} />)}
                       </div>
                     ) : null}
+                    {t.reused && !t.running ? (
+                      <Callout tone="neutral" className="mt-4"
+                        action={<Button size="xs" variant="secondary" disabled={busy} onClick={(e) => { e.stopPropagation(); void research.ask(t.question, { depth: 'deep' }) }}>重新取数研究</Button>}>
+                        {t.reused.mode === 'replay'
+                          ? <>这是 <b>{t.reused.age}</b>那次研究的原文，这次没有重新跑，也没有花 token。</>
+                          : <>这次没有重新取数：用的是 <b>{t.reused.age}</b>那次研究取到的数据，只重写了回答。</>}
+                        {t.reused.saved_tokens ? ` 重新取数大约要 ${wan(t.reused.saved_tokens)}。` : ''} 行情和消息在这之后可能有变化。
+                      </Callout>
+                    ) : null}
                     <div className="mt-4" onClick={(e) => e.stopPropagation()}>
                       {t.running ? <Waiting t={t} />
+                        : t.reason ? (
+                          <Callout tone={t.reason === 'budget' ? 'warning' : 'danger'}
+                            action={REASON_ACTION[t.reason] ? <Link to="/settings" className="shrink-0 text-[13px] font-medium underline underline-offset-2">{REASON_ACTION[t.reason]}</Link> : undefined}>
+                            {t.answer || t.error}
+                          </Callout>
+                        )
                         : !t.answer ? <p className="text-[15px] text-steel">{t.error || '没有生成回答。'}</p>
                         : t.summary && t.rewriteOf == null ? (
                           <>

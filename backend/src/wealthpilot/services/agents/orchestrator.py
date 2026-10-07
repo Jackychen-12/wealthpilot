@@ -198,7 +198,7 @@ async def _run_pipeline(
     try:
         client = create_ai_client(settings)
     except ValueError as e:
-        text = f"还没有配置好模型，这次没法研究（{e}）。到「设置」填一个模型服务；行情、选股、持仓这些不用模型的功能照常可用。"
+        text = f"{e}，这次没法研究。到「设置」填一个模型服务（DeepSeek、Claude，或任何兼容 OpenAI 接口的服务，包括本机模型）；行情、选股、持仓这些不用模型的功能照常可用。"
         await emit({"type": "error", "content": text})
         await emit({"type": "done", "content": text, "meta": {"status": "failed", "reason": "not_configured"}})
         return

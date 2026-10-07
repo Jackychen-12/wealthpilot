@@ -1,6 +1,7 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
 import { DEMO, api, useApi, type AppSettings, type DoctorItem } from '../api'
+import { ValueBars } from '../components/charts'
 import { Button, Callout, Input, Select, Tag } from '../components/kit'
 import { DataState, Page, Section } from '../components/ui'
 
@@ -137,6 +138,55 @@ const VersionAndDoctor: React.FC = () => {
   )
 }
 
+// 常见的兼容服务。只预填接口地址；模型名各家经常变，照服务商文档里的写
+const PRESETS: { label: string; url: string }[] = [
+  { label: '硅基流动', url: 'https://api.siliconflow.cn/v1' },
+  { label: '智谱', url: 'https://open.bigmodel.cn/api/paas/v4' },
+  { label: 'Moonshot（Kimi）', url: 'https://api.moonshot.cn/v1' },
+  { label: '阿里云百炼（通义）', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: '火山方舟（豆包）', url: 'https://ark.cn-beijing.volces.com/api/v3' },
+  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+  { label: 'OpenAI', url: 'https://api.openai.com/v1' },
+  { label: '本机 Ollama', url: 'http://localhost:11434/v1' },
+]
+const KIND_LABEL: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '复盘',
+  quick: '快速回答', rewrite: '改写 / 沿用证据', free: '自由问答', reuse: '原样复用' }
+const wan = (tokens: number) => (tokens / 1e4).toFixed(tokens >= 1e6 ? 0 : 1)
+
+/** 用量：花了多少 token（填了单价就折成钱），都花在哪类问题上。 */
+const UsagePanel: React.FC = () => {
+  const usage = useApi(api.usage)
+  const u = usage.data
+  if (!u) return null
+  const cell = (label: string, t: { tokens: number; runs: number; cost: number | null }) => (
+    <div className="min-w-0 flex-1 rounded-lg border border-hairline px-4 py-3">
+      <p className="text-[13px] text-steel">{label}</p>
+      <p className="mt-0.5 text-[22px] font-semibold leading-tight tabular-nums text-ink">{wan(t.tokens)} <span className="text-sm font-normal text-steel">万 token</span></p>
+      <p className="mt-0.5 text-[13px] text-steel">{t.runs} 次{t.cost != null ? ` · 约 ${t.cost.toFixed(2)} 元` : ''}</p>
+    </div>
+  )
+  return (
+    <div className="grid max-w-3xl gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row">{cell('今天', u.today)}{cell('近 7 天', u.last_7_days)}{cell('近 30 天', u.last_30_days)}</div>
+      {u.last_30_days.runs > 0 ? (
+        <>
+          <ValueBars title="每天的用量（万 token）" unit="万 token" height={150} data={u.by_day.map((d) => ({ label: d.day.slice(3), value: Number((d.tokens / 1e4).toFixed(1)) }))} />
+          <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline text-sm">
+            {u.by_kind.map((k) => (
+              <li key={k.kind} className="flex items-baseline gap-3 px-4 py-2">
+                <span className="min-w-0 flex-1 text-ink">{KIND_LABEL[k.kind] ?? (k.kind.startsWith('skill:') ? `方法：${k.kind.slice(6)}` : k.kind)}</span>
+                <span className="shrink-0 tabular-nums text-steel">{k.runs} 次</span>
+                <span className="w-36 shrink-0 text-right tabular-nums text-charcoal">平均 {wan(k.avg_tokens)} 万 / 次</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : <p className="text-[13px] text-steel">还没有用量记录。从这一版开始，每次调用模型都会记一笔。</p>}
+      {u.today.tokens > 0 && u.today.cached_tokens > 0 ? <p className="text-[13px] text-steel">今天的输入里有 {Math.round((u.today.cached_tokens / Math.max(1, u.today.input_tokens)) * 100)}% 命中了服务商的缓存，这部分实际更便宜，所以折算的钱是个上限。</p> : null}
+    </div>
+  )
+}
+
 /** 设置：在网页上改配置，不用编辑 .env。保存后立即生效。 */
 const SettingsPage: React.FC = () => {
   const settings = useApi(api.settings)
@@ -151,15 +201,17 @@ const SettingsPage: React.FC = () => {
   const set = (k: string, v: string | number | boolean) => setForm((f) => ({ ...f, [k]: v }))
   const locked = (k: string) => data?.overridden.includes(k) ?? false
   const provider = String(form.ai_provider ?? 'anthropic')
-  const keyField = provider === 'deepseek' ? 'deepseek_api_key' : 'anthropic_api_key'
-  const modelField = provider === 'deepseek' ? 'deepseek_model' : 'anthropic_model'
+  const keyField = provider === 'deepseek' ? 'deepseek_api_key' : provider === 'openai' ? 'openai_api_key' : 'anthropic_api_key'
+  const modelField = provider === 'deepseek' ? 'deepseek_model' : provider === 'openai' ? 'openai_model' : 'anthropic_model'
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true); setMessage(null)
     try {
       await api.saveSettings({ ...form, ...keys, paper_initial_cash: Number(form.paper_initial_cash), watch_move_pct: Number(form.watch_move_pct),
-        auto_daily_runs_max: Number(form.auto_daily_runs_max) })
+        auto_daily_runs_max: Number(form.auto_daily_runs_max), openai_max_tokens: Number(form.openai_max_tokens || 4096),
+        daily_token_budget: Math.max(0, Math.round(Number(form.daily_token_budget || 0))), token_price_input: Number(form.token_price_input || 0),
+        token_price_output: Number(form.token_price_output || 0), research_reuse_hours: Number(form.research_reuse_hours || 0) })
       setKeys({})
       settings.reload()
       setMessage({ tone: 'success', text: '已保存，立即生效' })
@@ -189,16 +241,61 @@ const SettingsPage: React.FC = () => {
 
             <Section title="模型" hint={`当前使用 ${data.active_model}`}>
               <div className="grid max-w-2xl gap-3 sm:grid-cols-2">
-                <Select id="s-provider" label="提供商" value={provider} onChange={(v) => set('ai_provider', v)} options={[{ value: 'anthropic', label: 'Claude（Anthropic）' }, { value: 'deepseek', label: 'DeepSeek' }]} />
-                <Input id="s-model" label="模型" value={String(form[modelField] ?? '')} onChange={(e) => set(modelField, e.target.value)} />
+                <Select id="s-provider" label="提供商" value={provider} onChange={(v) => set('ai_provider', v)} options={[{ value: 'anthropic', label: 'Claude（Anthropic）' }, { value: 'deepseek', label: 'DeepSeek' }, { value: 'openai', label: '其他兼容 OpenAI 接口的服务（含本机模型）' }]} />
+                <Input id="s-model" label="模型" value={String(form[modelField] ?? '')} onChange={(e) => set(modelField, e.target.value)}
+                  placeholder={provider === 'openai' ? '照服务商文档里的模型名写' : undefined} />
+                {provider === 'openai' ? (
+                  <div className="grid gap-3 sm:col-span-2">
+                    <Input id="s-base" label="接口地址" placeholder="https://…/v1" value={String(form.openai_base_url ?? '')} onChange={(e) => set('openai_base_url', e.target.value)}
+                      hint="任何兼容 OpenAI 接口的服务都行。点下面的名字可以填好常见服务的地址。" />
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRESETS.map((p) => (
+                        <button key={p.url} type="button" onClick={() => set('openai_base_url', p.url)}
+                          className={`rounded-full border px-2.5 py-0.5 text-[13px] transition-colors ${form.openai_base_url === p.url ? 'border-primary text-ink' : 'border-hairline text-slate hover:bg-hover hover:text-ink'}`}>{p.label}</button>
+                      ))}
+                    </div>
+                    <Callout tone="neutral">
+                      模型要支持<b>工具调用</b>（function calling），不然 Agent 没法取数，研究会一直失败。本机模型不需要 Key，留空就行，但小模型的工具调用和中文长文质量通常明显差一截。
+                      这些服务我们没有逐个实测过，填好后先点「测试当前配置」。
+                    </Callout>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input id="s-maxtok" label="单次输出上限（token）" type="number" min="256" step="1" value={String(form.openai_max_tokens ?? 4096)} onChange={(e) => set('openai_max_tokens', e.target.value)}
+                        hint="超过服务商的限制会直接报错；拿不准就用 4096" />
+                      <label className="flex cursor-pointer items-start gap-2 self-end pb-5 text-sm text-charcoal">
+                        <input type="checkbox" checked={Boolean(form.openai_json_mode)} onChange={(e) => set('openai_json_mode', e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--primary)]" />
+                        <span>服务支持 JSON 输出模式<span className="block text-xs text-steel">打开后规划更稳；不支持的服务打开会报 400</span></span>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="sm:col-span-2">
                   <Input id="s-key" label="API Key" type="password" autoComplete="off"
                     placeholder={data.secrets[keyField]?.set ? `已配置（${data.secrets[keyField].hint}），留空表示不改` : '粘贴 Key'}
-                    hint="只保存在你这台机器的 backend/.env 里；保存后页面不会再显示它"
+                    hint={provider === 'openai' ? '本机模型可以留空。只保存在你这台机器上；保存后页面不会再显示它' : '只保存在你这台机器的 backend/.env 里；保存后页面不会再显示它'}
                     value={keys[keyField] ?? ''} onChange={(e) => setKeys((k) => ({ ...k, [keyField]: e.target.value }))} />
                 </div>
               </div>
               <Button variant="secondary" size="sm" className="mt-3" loading={testing} onClick={() => void test()}>测试当前配置</Button>
+            </Section>
+
+            <Section title="用量与预算" hint="token 是服务商计费的单位；想看折成多少钱，把你那家的单价填上">
+              <UsagePanel />
+              <div className="mt-4 grid max-w-3xl gap-3 sm:grid-cols-3">
+                <Input id="s-budget" label="每天最多用多少（万 token）" type="number" min="0" step="1"
+                  value={form.daily_token_budget ? String(Number(form.daily_token_budget) / 1e4) : ''} placeholder="不限"
+                  onChange={(e) => set('daily_token_budget', Math.round(Number(e.target.value || 0) * 1e4))}
+                  hint="到了就不再调用模型，第二天恢复。一次个股深度研究大约 15 到 20 万" />
+                <Input id="s-pin" label="输入单价（元 / 百万 token）" type="number" min="0" step="0.01" value={String(form.token_price_input || '')} placeholder="不折算"
+                  onChange={(e) => set('token_price_input', e.target.value)} />
+                <Input id="s-pout" label="输出单价（元 / 百万 token）" type="number" min="0" step="0.01" value={String(form.token_price_output || '')} placeholder="不折算"
+                  onChange={(e) => set('token_price_output', e.target.value)} />
+              </div>
+              <div className="mt-3 grid max-w-3xl gap-3">
+                <div className="max-w-xs"><Input id="s-reuse" label="几小时内不重复取数" type="number" min="0" step="0.5" value={String(form.research_reuse_hours ?? 4)} onChange={(e) => set('research_reuse_hours', e.target.value)}
+                  hint="这段时间内再对同一只股票做深度研究，沿用上次取到的数据。填 0 就每次都重新取" /></div>
+                <Toggle label="个股深度研究先做多空辩论" locked={locked('debate_enabled')} checked={Boolean(form.debate_enabled)} onChange={(v) => set('debate_enabled', v)}
+                  hint="撰写前让看多、看空两方各说一遍，报告更不容易和稀泥。每次多两次模型调用，想省就关掉。" />
+              </div>
             </Section>
 
             <Section title="研究方式">
