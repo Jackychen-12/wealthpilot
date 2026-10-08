@@ -16,6 +16,7 @@ import { DEMO_DEFAULTS } from '../demo/defaults'
 import { Button, Callout, Drawer, Segmented, Tag } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
+import { ReverseDcfSection } from './DepthSections'
 import { CapitalTab, ExpectationTab, QuarterBars, SegmentsSection } from './stock/InsightTabs'
 
 const RANGES = [['63', '近 3 月'], ['125', '近半年'], ['250', '近 1 年'], ['500', '近 2 年']] as const
@@ -412,6 +413,7 @@ const ValuationTab: React.FC<{ code: string }> = ({ code }) => {
           ) : null}
         </DataState>
       </Section>
+      <ReverseDcfSection code={code} />
     </>
   )
 }

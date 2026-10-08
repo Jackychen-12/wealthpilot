@@ -184,6 +184,11 @@ export const api = {
   removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
   runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
   parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
+  recap: () => request<Recap>('/api/market/recap'),
+  macro: () => request<MacroSnapshot>('/api/market/macro'),
+  reverseDcf: (code: string) => request<ReverseDcf>(`/api/market/stock/${code}/reverse-dcf`),
+  stances: () => request<StanceCard>('/api/stances'),
+  checkTrades: (text: string) => request<TradesReport>('/api/trades/check', json('POST', { text })),
   persona: () => request<Persona>('/api/settings/persona'),
   savePersona: (text: string) => request<Persona>('/api/settings/persona', json('PUT', { text })),
   conversations: (q = '') => request<ConversationInfo[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
@@ -235,6 +240,26 @@ export interface Backtest {
 export interface FundInfo { code: string; name: string; nav: number; nav_date: string; estimated_change?: number; manager?: string; company?: string; scale?: string; type?: string; benchmark?: string
   return_1w?: string; return_1m?: string; return_3m?: string; return_1y?: string }
 export interface NavPoint { nav_date: string; nav: number; daily_return: number; open?: number; high?: number; low?: number; volume?: number }
+export interface Recap { day: string; indices: { name: string; change: string }[]; breadth: { up: number; down: number; median_change_pct: number } | null
+  limits: { limit_up: number; broken: number; limit_down: number; seal_rate_pct: number | null; first_board: number; multi_board: number; max_streak: number
+    ladder: { boards: number; names: string[] }[]; yesterday_limit_up_today_pct: number | null; yesterday_limit_up_count: number }
+  themes: { theme: string; count: number; names: string[]; basis: string }[]
+  concepts: { top: { name: string; change_pct: number }[]; bottom: { name: string; change_pct: number }[] } | null
+  billboard: { count: number; institution_net_yi: number | null; northbound_net_yi: number | null; top_buy: { code: string; name: string; net_yi: number; change_pct: number }[]
+    seats: { seat: string; kind: string; net_yi: number; stocks: string[] }[] } | null
+  mood: { label: string; points: number; basis: string[] } }
+export interface MacroPoint { key: string; label: string; unit: string; value: number; as_of: string; previous: number | null; change: number | null; how_to_read?: string }
+export interface MacroSnapshot { indicators: MacroPoint[]; rates: MacroPoint[]; spread: { label: string; value: number; unit: string; how_to_read: string } | null; missing: string[]; note: string }
+export interface ReverseDcf { ok: boolean; reason?: string; code: string; name: string; market_cap_yi: number | null; profit_ttm_yi?: number; profit_period?: string; pe_ttm?: number
+  implied_growth?: { discount_pct: number; growth_pct: number | null }[]; past_profit_cagr_3y_pct?: number | null
+  scenarios?: { discount_pct: number; rows: { growth_pct: number; value_vs_market_cap: number }[] }; notes?: string[] }
+export interface StanceHorizon { settled: number; pending: number; right: number; hit_rate_pct: number | null; 看多_count: number; 看多_avg_excess_pct: number | null; 看空_count: number; 看空_avg_excess_pct: number | null }
+export interface StanceCall { message_id: number; code: string; name: string; stance: string; asked: string
+  results: Record<string, { settled: boolean; excess_pct?: number; return_pct?: number; benchmark_pct?: number; right?: boolean }> }
+export interface StanceCard { total: number; calls: StanceCall[]; horizons: Record<string, StanceHorizon>; note: string; benchmark: string; neutral_band_pct: number }
+export interface TradesReport { ok: boolean; reason?: string; problems: string[]; trades: number; stocks?: number; closed?: number; period?: { from: string; to: string }
+  findings?: { key: string; label: string; flag: boolean; text: string; examples: string[] }[]; flagged?: string[]; worst_stocks?: { name: string; pnl: number }[]
+  missing_prices?: string[]; note?: string }
 export interface Persona { text: string; path: string; max_chars: number; presets: { key: string; label: string; text: string }[] }
 export interface ModelPreset { key: string; label: string; provider: string; base_url: string; model: string; needs_key: boolean; note: string; key_page: string }
 export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; fallback_active?: string; env_file: string; presets?: ModelPreset[] }

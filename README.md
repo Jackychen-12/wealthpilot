@@ -47,11 +47,11 @@
 | 🧭 | **不让模型猜代码** | 「宁德时代」「茅台」先由代码解析成 300750、600519，再交给 Agent；解析不到就直说 |
 | 🎯 | **风险画像硬约束** | 风险测评结果注入 Planner/Agent/Synthesizer 三处；未测评时不得给出具体仓位比例 |
 | 🔍 | **证据溯源 + Critic 闸门** | 每次工具调用生成证据 ID `[E-…]`，回答必须逐条引用；数字回查不到、证据不足或越过画像约束的草稿不会发布 |
-| 🔧 | **53 个实时工具** | 个股行情、财务指标与主营构成、估值历史分位、同行对比、资金流向与融资融券、股东与机构持仓、增减持与解禁、卖方一致预期与研报、公告与新闻、全市场选股，加上持仓、风险、穿透、回测，以及把算术从 LLM 手里拿走的 compute/check 工具 |
+| 🔧 | **58 个实时工具** | 个股行情、财务指标与主营构成、估值历史分位、同行对比、资金流向与融资融券、股东与机构持仓、增减持与解禁、卖方一致预期与研报、公告与新闻、全市场选股，加上持仓、风险、穿透、回测，以及把算术从 LLM 手里拿走的 compute/check 工具 |
 | 🌐 | **双模型支持** | Claude & DeepSeek 一行配置切换，Provider 抽象层自动适配 Anthropic SDK / OpenAI SDK |
 | 📊 | **免费实时数据** | AKShare + 东方财富 + 天天基金 + 新浪财经，无需付费数据源 |
 | ⚡ | **过程可见的 SSE** | 规划、工具调用、证据、Critic 结论实时推送；正文在通过校验后才下发，未过审的草稿不会流到用户面前 |
-| 🔌 | **MCP Server** | 53 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
+| 🔌 | **MCP Server** | 58 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
 | 💻 | **多入口调用** | Web UI / 终端交互 / CLI 管道 / MCP，任选其一接入分析能力 |
 | 🖥️ | **投研工作台** | 23 个功能页：今日、个股详情（财务 / 估值分位 / 同行 / 公告）、选股器、自选股、研究记录等，页面与 Agent 共用同一批工具 |
 | 🔐 | **多租户隔离** | JWT 认证 + 用户级数据隔离，对话历史持久化 |
@@ -183,6 +183,8 @@ wealthpilot setup --base-url http://localhost:8080/v1 --model my-model   # 清�
 | `wealthpilot sessions` | 以前的会话。`sessions 宁德时代` 只列提到过它的；`wealthpilot -c` 进来就接着上一个会话聊 |
 | `wealthpilot channels` | 手机上的渠道卡在哪一步。`channels setup telegram --token …` 配置，`channels pair telegram` 出配对码，`channels test telegram` 发一条试试 |
 | `wealthpilot backup` | 把数据库、配置、研究方法打成一个文件（`--no-keys` 不带 Key）。`wealthpilot restore <文件>` 放回来，恢复前会先自动备份现状 |
+| `wealthpilot recap` · `wealthpilot macro` | 今天的大盘复盘（涨停、连板、题材热点、龙虎榜、情绪刻度）· 宏观数据。都不调用模型 |
+| `wealthpilot trades 交割单.csv` | 交易记录体检：从你自己的成交记录里找追高、交易过勤、越跌越买这类毛病。记录不保存 |
 | `wealthpilot persona` | 说话方式：你希望它怎么跟你说话。`persona use friend` 用现成的，`persona set "…"` 自己写，`persona clear` 清掉 |
 | `wealthpilot logs` | 后台出了什么事：研究失败、推送没发出去、盯盘出错。`--errors` 只看出问题的，`-f` 跟着看 |
 | `wealthpilot doctor` | 哪里不通：逐项检查模型、数据源、数据库、网页版、手机触达、版本、日志，不通的每一项都附修法 |
@@ -261,7 +263,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 | 个股详情、选股器、自选股、全局搜索 | ✅ | ✅ |
 | AI 研究 | 提示未配置 Key（在线演示可回放录好的研究过程） | **多 Agent 实时分析** |
 | 截图 OCR 导入 | ❌ | ✅（仅 Anthropic Key，Claude Vision） |
-| MCP Server 的 53 个工具 | ✅（不调用 LLM） | ✅ |
+| MCP Server 的 58 个工具 | ✅（不调用 LLM） | ✅ |
 | AI 周报 | 模板回退 | **LLM 智能生成** |
 
 ---
@@ -549,6 +551,26 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 **行情源的备用**。日线主源（腾讯）对突发请求会临时限流；取不到时依次换东方财富（前复权）和新浪（不复权，返回里带 `price_basis` 标记）。
 
 ---
+
+## 对照同类项目补上的：复盘、成绩单、估值、体检
+
+调研了 GitHub 上高星的投研和金融 Agent 项目（TradingAgents、daily_stock_analysis、ai-hedge-fund、Vibe-Trading、FinRobot、ai-berkshire 等二十来个）之后补的。除了最后那个研究方法，这一节的东西都是取数之后的确定性计算，**不调用模型、不花钱**。
+
+**每日大盘复盘**。每日简报只盯你自己的持仓和自选，这里讲的是市场本身：指数和涨跌家数，涨停、炸板、跌停和封板率，连板梯队，涨停集中在哪些题材（带同花顺整理的涨停原因），概念板块领涨领跌，龙虎榜上机构席位、北向席位和活跃营业部的净买卖。最后有一个“情绪刻度”——冰点、偏冷、一般、偏热、高潮——是把五个公开数字套一把固定的尺子得出的，尺子写在 `services/recap.py` 的 `gauge()` 里，依据的数字一起给出来；它只是把“今天热不热”说成一句话，不是预测。看的地方：今日页的「今天的市场」、`wealthpilot recap`、终端 `/recap`、手机里 `/recap`；每日简报推送时也会带上（`RECAP_PUSH=false` 关掉）。龙虎榜席位只按交易所披露的口径分类（机构、北向、个人、营业部），不去猜某个营业部背后是哪位游资。
+
+**不开电脑也能每天收到日报**。电脑合盖，进程就停，这一点软件拦不住。借 GitHub Actions 绕过去：fork 这个仓库，在 Settings → Secrets and variables → Actions 里加 `STOCK_LIST`（你关注的股票，名称或代码，逗号分隔）和一个推送地址（`ALERT_WEBHOOK_URL` 群机器人，或 `TELEGRAM_BOT_TOKEN` 加 `TELEGRAM_CHAT_ID`），在 Actions 页面启用 `Daily brief` 工作流。之后每个交易日 18:00 它跑一份日报推到手机：大盘复盘，加上你点名的那几只今天的涨跌、有没有涨停及原因。不调用模型，GitHub 的免费额度够用；没配推送地址时这个任务直接跳过。它没有数据库，所以不知道你的持仓成本、验证点和建议单——那些仍然要在自己电脑上运行才有。如实说明：这个工作流的命令在本机用真实数据跑通过，但没有在 GitHub 上实际触发过一次定时任务。
+
+**立场成绩单**。验证点核对的是“我说的那个条件成立没有”，这里看更直接的一件事：立场本身对不对。每次给过立场（看多 / 中性 / 看空）的个股研究，从当天收盘价起，看 5、20、60 个交易日之后它比沪深 300 多涨还是少涨了多少。看多的要跑赢、看空的要跑输才算对，中性的要求差距在 5 个百分点以内。还没到日子的写“未到期”，已结算不到 10 条时明说样本太少。在「验证与复盘」页、终端 `/review`、手机 `/review` 里。只有打开个人模式之后的研究才写立场，所以没开过的话这里是空的。
+
+**反向 DCF**。正着算 DCF 要先猜增长率，猜出来的“内在价值”很容易变成一个看着精确的目标价。反过来算老实得多：市值是已知的，问的是“利润要以多高的速度涨十年，折现回来才值这个市值”。个股页「估值」里的「现价隐含了什么」、终端 `/dcf 贵州茅台`、估值 Agent 的 `compute_reverse_dcf` 工具给出三档折现率下的隐含增速，旁边放着过去三年利润的实际增速，以及几档增长假设下“算出来的价值是市值的几倍”。口径都写在结果里：用的是近四个季度的归母净利润，没有扣资本开支，重资产公司会被高估；亏损公司算不了；金融类公司只作参考。Agent 的规则里写明了不得把它说成目标价或上涨空间。
+
+**宏观数据**。制造业和非制造业 PMI、CPI、PPI、M1 / M2、新增人民币贷款、GDP、LPR、中美国债收益率和利差，每项带最新值、上期值、所属月份和一句怎么读。今日页的「宏观」、`wealthpilot macro`、行业 Agent 的 `get_macro_indicators`。**没有社会融资规模**：试过的接口取不到，先用新增贷款和 M2 看信用松紧。
+
+**题材和产业链**。两个新工具：`get_concept_boards` 看概念板块今天的强弱，`get_concept_stocks` 拿一个板块里的公司。研究方法库里多了一个「题材产业链拆解」（`wealthpilot skills install theme-chain`）：把一个题材从下游往上游拆开，找最难替代的环节，再用主营构成核对板块里的公司是真受益还是沾边。这个方法会调用模型，和一次普通研究的花费相当。
+
+**交易记录体检**。研究写得再好，钱是在买卖的那一下亏掉的。把券商导出的交割单贴进「交易体检」页（或 `wealthpilot trades 交割单.csv`），它按先进先出把买卖配成一笔一笔的来回，然后数：有多少次是在大涨之后才买的、交易得勤不勤、有几次是越跌越买、赚钱的单子和亏钱的单子各拿了多久、胜率和盈亏比、卖出之后又怎么走。占比够高的才标成“留意”，每一条都带数字和例子。它只看行为，不评价你选的股票；成交记录只在这次计算里用，不存进数据库。
+
+**通用技能包**。ai-berkshire、investorskills、serenity-skill 这些热门的方法论都是 SKILL.md 格式。现在 `wealthpilot skills install https://github.com/…` 认得它：仓库首页或目录地址都行。导入时去掉代码块（那些脚本在这里跑不了），补上派哪几个 Agent、报告分哪几节的默认值，太长就截断并说明——保留下来的是“怎么判断”的那部分。装之前会把改写后的全文给你看。
 
 ## 像个成熟的 Agent：换模型、管花费、断了能接上
 
@@ -907,6 +929,7 @@ wealthpilot --server http://192.168.1.10:8000    # 远程：连到一台已在�
 | `/sessions [序号 \| 关键词]` | 以前的会话；带序号回到那个会话，带关键词只列提到过它的 |
 | `/model [服务名 \| fallback <服务名>]` · `/usage` · `/logs [errors]` | 换到一家已经配好的模型、设备用 · 用了多少 token · 后台出了什么事 |
 | `/persona [use <预设> \| set <一段话> \| clear]` | 说话方式：你希望它怎么跟你说话 |
+| `/recap` · `/macro` · `/dcf <名称>` · `/trades <文件>` | 大盘复盘 · 宏观数据 · 反向 DCF · 交易记录体检 |
 | `/new` · `/status` · `/login` · `/quit` | 新会话 · 当前模式 · 远程登录 · 退出 |
 
 `/help` 按用途分组列出全部命令。交互终端里有输入历史和命令补全，Ctrl-C 只中断当前这次研究。输入来自管道时退回逐行读取，可以写成脚本：`printf '/stock 茅台\n/quit\n' | uv run wealthpilot`。
@@ -924,6 +947,9 @@ wealthpilot sessions [关键词] # 以前的会话；带关键词只列提到过
 wealthpilot -c              # 进来就接着上一个会话聊
 wealthpilot channels        # 手机渠道：setup / pair / unpair / test <telegram|feishu|wecom>
 wealthpilot backup [路径]    # 备份（--no-keys 不带 Key，--list 看已有的）；wealthpilot restore <文件> 恢复
+wealthpilot recap           # 今天的大盘复盘；wealthpilot macro 看宏观数据
+wealthpilot trades 交割单.csv # 交易记录体检（- 表示从管道读）
+wealthpilot daily --push    # 不靠数据库的一份日报并推送（GitHub Actions 用）
 wealthpilot persona         # 说话方式：persona use <预设> / set "…" / clear / path
 wealthpilot logs            # 后台出了什么事（--errors 只看出问题的，-f 跟着看）
 wealthpilot completion zsh  # 生成 Tab 补全脚本（或 bash）
@@ -975,7 +1001,7 @@ python -m wealthpilot ask "市场分析" 2>/dev/null
 
 ## MCP Server — Claude Code / Cursor 集成
 
-WealthPilot 提供标准 **MCP (Model Context Protocol) Server**，将 53 个投资分析工具直接暴露给 Claude Code、Cursor 等 MCP 客户端。Claude 可以自主调用这些工具获取实时行情和持仓分析——**无需自建 Agent，无需 API Key**（MCP Server 本身不调用 LLM）。
+WealthPilot 提供标准 **MCP (Model Context Protocol) Server**，将 58 个投资分析工具直接暴露给 Claude Code、Cursor 等 MCP 客户端。Claude 可以自主调用这些工具获取实时行情和持仓分析——**无需自建 Agent，无需 API Key**（MCP Server 本身不调用 LLM）。
 
 ### 配置方法
 
@@ -1231,7 +1257,7 @@ make clean     # 清理生成文件
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/tools` | 53 个 Agent 工具及入参说明，按 Agent 分组 |
+| GET | `/api/tools` | 58 个 Agent 工具及入参说明，按 Agent 分组 |
 | POST | `/api/tools/{name}` | 直接执行一个工具，返回 `{ok, data, as_of}`；工作台功能页走这里 |
 
 `/api/chat` 的 SSE 事件类型：`resolved`（解析出的证券）、`plan`（含 `playbook`）、`checkpoints`（验证点与建议单，在 `done` 之前）、`task_start`、`tool_call`、`evidence`、`task_done`、`critic`、`replan`、`synthesizing`、`delta`、`grounding_warning`、`error`、`done`（`done.meta.status` 为 `passed` / `partial` / `insufficient_data` / `rejected` / `failed`）。
@@ -1261,7 +1287,7 @@ wealthpilot/
     └── src/wealthpilot/
         ├── __main__.py          #   CLI 入口 (run/init/config/chat/mcp/ask)
         ├── tui.py               #   ⭐ 终端入口（本机 / 远程）
-        ├── mcp_server.py        #   ⭐ MCP Server（53 工具，for Claude Code）
+        ├── mcp_server.py        #   ⭐ MCP Server（58 工具，for Claude Code）
         ├── main.py              #   FastAPI 应用
         ├── settings.py          #   配置管理（支持双 Provider）
         ├── routes/              #   17 个路由模块，87 个端点（含 research：搜索 / 自选 / 选股 / 研究记录，review：验证点 / 建议单）

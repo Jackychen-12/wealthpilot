@@ -22,6 +22,7 @@ import WatchlistPage from './pages/WatchlistPage'
 import ScreenerPage from './pages/ScreenerPage'
 import HistoryPage from './pages/HistoryPage'
 import ReviewPage from './pages/ReviewPage'
+import TradesPage from './pages/TradesPage'
 import AutomationsPage from './pages/AutomationsPage'
 import BrokerPage from './pages/BrokerPage'
 import SettingsPage from './pages/SettingsPage'
@@ -61,6 +62,7 @@ const App: React.FC = () => {
           <Route path="/broker" element={<BrokerPage key={epoch} />} />
           <Route path="/automations" element={<AutomationsPage key={epoch} />} />
           <Route path="/review" element={<ReviewPage key={epoch} />} />
+          <Route path="/trades" element={<TradesPage key={epoch} />} />
           <Route path="/history/:id?" element={<HistoryPage key={epoch} />} />
           <Route path="/overview" element={<HoldingsPage key={`${epoch}-a`} initialTab="analysis" />} />
           <Route path="/holdings" element={<HoldingsPage key={epoch} />} />

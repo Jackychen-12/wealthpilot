@@ -11,7 +11,6 @@ from wealthpilot.services.market_data import (
     fetch_market_news,
     get_comprehensive_fund_info,
     get_fund_rank_akshare,
-    get_macro_data_akshare,
 )
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -52,12 +51,6 @@ async def get_fund_rank(fund_code: str):
     if not rank:
         return {"error": f"基金 {fund_code} 排名数据获取失败"}
     return rank
-
-
-@router.get("/macro")
-async def get_macro():
-    """宏观经济指标（PMI/CPI 等）。"""
-    return await asyncio.to_thread(get_macro_data_akshare)
 
 
 @router.get("/stock/{code}")

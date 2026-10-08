@@ -6,6 +6,7 @@ import { AskAi } from '../components/AskAi'
 import { CP_STATUS, CheckpointTable, ProposalList } from '../components/Checkpoints'
 import { Button, Callout, ConfirmDialog, Segmented } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td } from '../components/ui'
+import { StanceSection } from './DepthSections'
 
 const FILTERS = [['all', '全部'], ['pending', '待核对'], ['held', '成立'], ['broken', '被证伪']] as const
 const rate = (v: number | null) => (v == null ? '—' : `${v}%`)
@@ -129,6 +130,7 @@ const ReviewPage: React.FC = () => {
         </Section>
       ) : null}
 
+      <StanceSection />
       <Lessons />
 
       <ConfirmDialog open={removing != null} title="删除验证点" confirmText="删除"

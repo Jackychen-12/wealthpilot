@@ -10,6 +10,7 @@ import { securityPath } from '../components/SecuritySearch'
 import { Button, Callout, Tag, type Tone } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
+import { MacroSection, RecapSection } from './DepthSections'
 import { PLAYBOOK, STATUS } from './ResearchPage'
 
 const EVENT: Record<string, { label: string; tone: Tone }> = {
@@ -260,6 +261,8 @@ const TodayPage: React.FC = () => {
         ) : null}
       </DataState>
 
+      <RecapSection />
+
       <Section title="市场" hint={m ? `截至 ${m.breadth.trade_date} 收盘` : undefined} actions={<More to="/screener">选股器</More>}>
         <DataState loading={market.loading} error={market.error} onRetry={market.reload} empty={!market.loading && !m ? String(market.data?.data ?? '没有取到大盘数据') : undefined}>
           {m ? (
@@ -284,6 +287,8 @@ const TodayPage: React.FC = () => {
           </div>
         ) : null}
       </Section>
+
+      <MacroSection />
 
       <Section title="最近的研究" actions={<More to="/history">全部记录</More>}>
         <DataState loading={history.loading} error={history.error} onRetry={history.reload} empty={history.data?.length === 0 ? '还没有研究记录。' : undefined}>
