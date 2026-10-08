@@ -164,9 +164,16 @@ async def run(*, online: bool = True, port: int = 8000, serving: bool = False) -
     items = [_item("Python", "ok" if sys.version_info >= (3, 11) else "fail", sys.version.split()[0],
                    "" if sys.version_info >= (3, 11) else "需要 Python 3.11 或更高")]
     items += _storage()
-    model, sources, reach, web, extras = await asyncio.gather(
-        asyncio.to_thread(_model, online), _sources(), _reach(), asyncio.to_thread(_web, port, serving), asyncio.to_thread(_extras))
-    items += [model, *sources, *web, reach, *extras]
+    names = ("模型", "数据源", "网页版", "手机触达", "版本与研究方法")
+    results = await asyncio.gather(
+        asyncio.to_thread(_model, online), _sources(), asyncio.to_thread(_web, port, serving), _reach(), asyncio.to_thread(_extras),
+        return_exceptions=True)
+    for name, result in zip(names, results, strict=True):
+        if isinstance(result, BaseException):   # 某一项检查自己出了错：照实说，别让整个自检跟着崩
+            items.append(_item(name, "warn", f"这一项没查成（{type(result).__name__}：{str(result)[:100]}）",
+                               "是自检自己出的错，不代表这一环不通。其余各项照常看。"))
+        else:
+            items += [result] if isinstance(result, dict) else list(result)
     if os.environ.get("WATCH_ENABLED", "").lower() == "false" or not get_settings().watch_enabled:
         items.append(_item("每日盯盘", "warn", "已关闭", "盯盘、定时任务和提醒都不会自己跑。到网页版「设置」里打开。"))
     return items
