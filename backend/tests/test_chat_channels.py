@@ -369,9 +369,9 @@ def _ding_clean():
 
 def test_dingtalk_events_are_read_the_way_the_official_sdk_reads_them():
     import warnings
-    with warnings.catch_warnings():
+    with warnings.catch_warnings():        # 钉钉的 SDK 是可选依赖：没装就跳过，装了才对字段名
         warnings.simplefilter("ignore")
-        import dingtalk_stream
+        dingtalk_stream = pytest.importorskip("dingtalk_stream")
     from wealthpilot.services import dingtalk
     _ding_clean()
     official = dingtalk_stream.ChatbotMessage.from_dict(DING_EVENT)                 # 用 SDK 自己的解析对一遍字段名
@@ -413,9 +413,9 @@ async def test_dingtalk_sends_through_the_robot_api_and_reports_refusals():
 
 async def test_a_dingtalk_message_reaches_the_same_bot_and_is_acknowledged_at_once():
     import warnings
-    with warnings.catch_warnings():
+    with warnings.catch_warnings():        # 钉钉的 SDK 是可选依赖：没装就跳过，装了才对字段名
         warnings.simplefilter("ignore")
-        import dingtalk_stream
+        dingtalk_stream = pytest.importorskip("dingtalk_stream")
     from wealthpilot.services import dingtalk
     _ding_clean()
     sink = Sink()

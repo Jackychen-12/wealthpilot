@@ -207,7 +207,7 @@ async def test_telegram_photos_and_voice_notes_are_fetched_and_routed(monkeypatc
 
 
 def test_feishu_and_dingtalk_media_messages_are_recognised():
-    import lark_oapi as lark
+    lark = pytest.importorskip("lark_oapi")      # 飞书的 SDK 是可选依赖：没装就跳过
     from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 
     from wealthpilot.services import dingtalk, feishu

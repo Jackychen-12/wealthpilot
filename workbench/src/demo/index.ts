@@ -38,6 +38,7 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
 
   if (method === 'GET') {
     if (path in data.get) return data.get[path]
+    if (path in EMPTY_IN_DEMO) return EMPTY_IN_DEMO[path]
     if (path.startsWith(SEARCH)) return demoSearch(decodeURIComponent(path.slice(SEARCH.length)))
     if (path.startsWith('/api/filings/')) throw new Error('在线演示只录了一条公告的正文')
     if (path.startsWith('/api/market/fund/')) throw new Error(`在线演示只录了 ${DEMO_FUND} 这一只基金的数据`)
@@ -65,6 +66,11 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
     return posted.result
   }
   throw new Error(READ_ONLY)
+}
+
+// 录制这份示例数据时还没有的列表：示例账户里它们本来就是空的，照实给空列表，页面显示"还没有"，而不是报错
+const EMPTY_IN_DEMO: Record<string, unknown> = {
+  '/api/lessons': [], '/api/skills/suggestions': [], '/api/conversations': [], '/api/chat/runs/active': [],
 }
 
 const SEARCH = '/api/securities/search?q='

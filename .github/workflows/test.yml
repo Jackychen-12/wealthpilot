@@ -1,0 +1,21 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+      # 飞书、钉钉的 SDK 是可选依赖；这里一起装上，对着 SDK 核字段名的那几条测试才会跑，而不是被跳过
+      - run: uv sync --extra dev --extra feishu --extra dingtalk
+      - run: uv run pytest -q
