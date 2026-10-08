@@ -252,3 +252,98 @@ def test_channel_routes_cover_all_three():
     assert client.post("/api/channel/pair?channel=line").status_code == 404
     assert client.post("/api/channel/test?channel=wecom").json()["ok"] is False
     assert client.get("/api/channel/wecom/callback").status_code == 404        # 没配置时回调地址不存在
+
+
+# ── 手机里的命令和终端对齐：能停、能改写、能看状态，而且一次只查一个 ──────────────
+
+def _paired(ask):
+    sink = Sink()
+    channels.set_owner("me", "feishu")
+    return channels.Bot(sink, ask=ask, channel="feishu"), sink
+
+
+async def test_stop_cancels_the_running_research_and_only_one_runs_at_a_time():
+    started, cleaned = asyncio.Event(), []
+
+    async def slow(question, history, conversation, depth="auto", **kw):
+        try:
+            yield {"type": "plan", "intent": "个股深度研究", "eta_seconds": 40}
+            started.set()
+            await asyncio.sleep(60)
+            yield {"type": "done", "content": "不该走到这里", "meta": {"status": "passed"}}
+        finally:
+            cleaned.append(question)          # 真实的研究在这里把已经花掉的 token 记账
+    bot, sink = _paired(slow)
+    await bot.message("me", "/stop")
+    assert "没有在查" in sink.last()
+    first = asyncio.create_task(bot.message("me", "帮我分析一下宁德时代"))
+    await started.wait()
+    assert "/stop" in sink.last()                                             # 告诉用户不想等可以停
+    await bot.message("me", "再分析一下茅台")                                  # 手一快连发了第二条
+    assert "还在查" in sink.last() and "宁德时代" in sink.last() and cleaned == []      # 没有同时跑第二个
+    await bot.message("me", "/status")
+    assert "正在查：帮我分析一下宁德时代" in sink.last()
+    await bot.message("me", "/stop")
+    await asyncio.wait_for(first, 2)
+    assert sink.last().startswith("已停止") and cleaned == ["帮我分析一下宁德时代"] and bot._running is None
+    assert bot.history == []                                                  # 停掉的那次不算进对话
+    await bot.message("me", "/status")
+    assert "现在没有在查的问题" in sink.last() and "今天用量" in sink.last() and "模型：" in sink.last()
+
+
+async def test_deep_and_rewrite_reach_the_research_with_the_right_arguments():
+    seen = []
+
+    async def ask(question, history, conversation, depth="auto", **kw):
+        seen.append((question, depth, kw))
+        yield {"type": "done", "content": "结论：估值在历史中位附近。", "meta": {"status": "passed", "seconds": 3, "message_id": 77,
+                                                                      "fallback": {"model": "DeepSeek · deepseek-chat", "reason": "balance", "message": ""}}}
+    bot, sink = _paired(ask)
+    await bot.message("me", "/rewrite 更短一点")
+    assert "还没有可以改写的回答" in sink.last() and seen == []
+    await bot.message("me", "/deep 茅台估值贵不贵")
+    assert seen[-1] == ("茅台估值贵不贵", "deep", {}) and bot.last_message_id == 77
+    assert "主模型余额不足，这一轮是备用模型 DeepSeek · deepseek-chat 答的" in sink.last()      # 换过模型要说
+    await bot.message("me", "/rewrite 更短一点")
+    assert seen[-1] == ("更短一点", "auto", {"rewrite_of": 77}) and len(bot.history) == 2     # 改写不算新的一轮
+    await bot.message("me", "/rewrite")
+    assert "想怎么改" in sink.last()
+    await bot.message("me", "/new")
+    assert bot.last_message_id is None and bot.history == []
+    for command in ("/deep", "/rewrite", "/stop", "/status", "/usage", "/holdings", "/watch", "/tasks"):
+        assert command in channels.HELP
+
+
+async def test_read_only_commands_answer_from_local_data(monkeypatch):
+    from datetime import date
+
+    from sqlmodel import select
+
+    from wealthpilot.models.portfolio import PortfolioHolding
+    from wealthpilot.services import assets, automations
+
+    async def quotes(codes):
+        return {"600519": {"price": 1650.0, "change_pct": 1.2}}
+    monkeypatch.setattr(assets, "fetch_sina_quotes", quotes)
+    bot, sink = _paired(None)
+    with Session(get_engine()) as db:
+        for row in db.exec(select(PortfolioHolding).where(PortfolioHolding.user_id == 0)).all():
+            db.delete(row)
+        db.add(PortfolioHolding(user_id=0, fund_code="600519", fund_name="贵州茅台", shares=100, cost_price=1500, asset_type="stock", buy_date=date(2026, 1, 5)))
+        db.commit()
+        task_id = automations.save(db, 0, {"kind": "task", "schedule": "工作日 08:30", "prompt": "诊断一下我的持仓"}).id
+    try:
+        await bot.message("me", "/holdings")
+        assert "贵州茅台 600519  100 股  现价 1650  +10.0%" in sink.last() and "浮动盈亏 +1.50 万（+10.0%）" in sink.last()
+        await bot.message("me", "/tasks")
+        assert "工作日 08:30：诊断一下我的持仓" in sink.last() and "下次" in sink.last()
+        await bot.message("me", "/usage")
+        assert sink.last().startswith("今天：") and "近 30 天" in sink.last()
+        await bot.message("me", "/watch")
+        assert sink.last()                                                    # 有没有自选都要有句话
+    finally:
+        with Session(get_engine()) as db:
+            automations.delete(db, 0, task_id)
+            for row in db.exec(select(PortfolioHolding).where(PortfolioHolding.fund_code == "600519", PortfolioHolding.user_id == 0)).all():
+                db.delete(row)
+            db.commit()

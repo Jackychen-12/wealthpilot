@@ -407,6 +407,81 @@ def cmd_import(args, *, out: Out = print) -> int:
     return 0
 
 
+_CHANNEL_FIELDS = {
+    "telegram": (("token", "telegram_bot_token"),),
+    "feishu": (("app_id", "feishu_app_id"), ("app_secret", "feishu_app_secret")),
+    "wecom": (("corp_id", "wecom_corp_id"), ("agent_id", "wecom_agent_id"), ("secret", "wecom_secret"), ("token", "wecom_token"), ("aes_key", "wecom_aes_key")),
+}
+_CHANNEL_HOW = {
+    "telegram": "找 @BotFather 建一个机器人，把它给的令牌填进来：wealthpilot channels setup telegram --token <令牌>",
+    "feishu": "在飞书开放平台建一个企业自建应用，开通机器人和「接收消息」事件（长连接方式）：wealthpilot channels setup feishu --app-id <ID> --app-secret <密钥>",
+    "wecom": "在企业微信后台建一个自建应用并配好接收消息：wealthpilot channels setup wecom --corp-id … --agent-id … --secret … --token … --aes-key …（要有公网能访问到的回调地址）",
+}
+
+
+def cmd_channels(args, *, out: Out = print) -> int:
+    """手机上的渠道：配了没、绑了没；配置、生成配对码、发一条测试消息。"""
+    from wealthpilot.services import channels
+
+    action, name = args.action or "list", (args.name or "").lower()
+    if action == "list":
+        for c in channels.status_all():
+            state = "已绑定，可以在里面提问和收简报" if c["paired"] else "配好了，还没绑定" if c["configured"] else "没有配置"
+            out(f"  {c['channel']:<9} {_pad(c['label'], 10)} {state}")
+            if not c["configured"]:
+                out(f"            {_CHANNEL_HOW[c['channel']]}")
+            elif not c["paired"]:
+                out(f"            下一步：wealthpilot channels pair {c['channel']}")
+        out("消息是 WealthPilot 开着的时候收发的：运行着 wealthpilot，手机上才有回应。")
+        return 0
+    if name not in channels.CHANNELS:
+        out(f"要说是哪个渠道：{' / '.join(channels.CHANNELS)}")
+        return 2
+    label = channels.CHANNELS[name]
+    if action == "setup":
+        changes = {field: getattr(args, flag) for flag, field in _CHANNEL_FIELDS[name] if getattr(args, flag, None)}
+        if not changes:
+            out(_CHANNEL_HOW[name])
+            return 2
+        try:
+            _apply(changes)
+        except ValueError as e:
+            out(f"✗ 没有保存：{e}")
+            return 1
+        if not channels.configured(name):
+            missing = [f"--{flag.replace('_', '-')}" for flag, field in _CHANNEL_FIELDS[name] if not getattr(_settings(), field)]
+            out(f"已保存，但{label}还缺：{' '.join(missing)}")
+            return 1
+        out(f"✓ {label}配好了。下一步：wealthpilot channels pair {name}")
+        return 0
+    if action == "pair":
+        if not channels.configured(name):
+            out(f"先把{label}配好。{_CHANNEL_HOW[name]}")
+            return 1
+        code = channels.new_pair_code(name)
+        out(f"配对码：{code}（{channels.PAIR_TTL // 60} 分钟内有效）")
+        out(f"保持 wealthpilot 开着，在{label}里给机器人发：/pair {code}")
+        out("谁先发出这个码，谁就成为机器人的主人 —— 别把它给别人。")
+        return 0
+    if action == "unpair":
+        channels.set_owner(None, name)
+        out(f"✓ 已解除{label}的绑定。它不会再收到简报，也不再回应任何人。")
+        return 0
+    if action == "test":
+        api, target = channels._api_for(name), channels.owner(name)
+        if api is None or target is None:
+            out(f"{label}还没有配置好或还没有绑定。wealthpilot channels 看卡在哪一步。")
+            return 1
+        try:
+            asyncio.run(api.send(target, "这是 WealthPilot 发来的测试消息。收到就说明这个渠道已经通了。"))
+        except Exception as e:  # noqa: BLE001 — 把对方返回的原因告诉用户
+            out(f"✗ 没有发出去：{str(e)[:200]}")
+            return 1
+        out(f"✓ 已发到{label}，看一眼手机。")
+        return 0
+    return 2
+
+
 def cmd_backup(args, *, out: Out = print) -> int:
     """把你的东西打成一个文件：数据库、配置、研究方法、数据连接。"""
     from wealthpilot.services import backup
@@ -526,6 +601,11 @@ def register(sub) -> dict:
     logs.add_argument("--errors", action="store_true", help="只看警告和错误")
     logs.add_argument("-f", "--follow", action="store_true", help="一直跟着看新写进来的（Ctrl-C 停）")
     logs.add_argument("--path", action="store_true", help="只打印日志文件在哪")
+    ch = sub.add_parser("channels", help="手机上的渠道：Telegram / 飞书 / 企业微信（channels / setup / pair / unpair / test）")
+    ch.add_argument("action", nargs="?", choices=["list", "setup", "pair", "unpair", "test"])
+    ch.add_argument("name", nargs="?", help="telegram / feishu / wecom")
+    for flag in ("token", "app-id", "app-secret", "corp-id", "agent-id", "secret", "aes-key"):
+        ch.add_argument(f"--{flag}", dest=flag.replace("-", "_"))
     backup = sub.add_parser("backup", help="把你的东西打成一个文件：数据库、配置、研究方法（换电脑、重装时用）")
     backup.add_argument("dest", nargs="?", help="存到哪（文件或目录）；不给就放在数据目录的 backups/ 下")
     backup.add_argument("--no-keys", action="store_true", help="不带模型 Key 和机器人令牌（要交给别人或放网盘时用）")
@@ -534,4 +614,5 @@ def register(sub) -> dict:
     restore.add_argument("file", help="备份文件")
     restore.add_argument("--yes", action="store_true", help="不再确认")
     return {"setup": cmd_setup, "model": cmd_model, "config": cmd_config, "status": cmd_status, "skills": cmd_skills,
-            "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs, "backup": cmd_backup, "restore": cmd_restore}
+            "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs, "backup": cmd_backup, "restore": cmd_restore,
+            "channels": cmd_channels}
