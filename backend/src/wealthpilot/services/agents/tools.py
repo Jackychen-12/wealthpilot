@@ -6,7 +6,7 @@ import json
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services import filings, screener
-from wealthpilot.services.agents import insight_tools, web_tools
+from wealthpilot.services.agents import depth_tools, insight_tools, web_tools
 from wealthpilot.services.analysis import (
     calculate_attribution_by_fund,
     calculate_correlation,
@@ -553,7 +553,7 @@ REVIEW_TOOLS = [
 
 _ALL_TOOLS = {t["name"]: t for t in [*MARKET_TOOLS, *PORTFOLIO_TOOLS, *RISK_TOOLS, *COMPUTE_TOOLS,
                                      *QUANT_TOOLS, *STOCK_TOOLS, *RESEARCH_TOOLS, *REVIEW_TOOLS, *FILING_TOOLS,
-                                     *insight_tools.INSIGHT_TOOLS, *web_tools.WEB_TOOLS]}
+                                     *insight_tools.INSIGHT_TOOLS, *web_tools.WEB_TOOLS, *depth_tools.DEPTH_TOOLS]}
 
 
 def _pick(*names: str) -> list[dict]:
@@ -564,11 +564,12 @@ def _pick(*names: str) -> list[dict]:
 AGENT_TOOLS: dict[str, list[dict]] = {
     "fundamental": _pick("resolve_security", "get_stock_profile", "get_stock_financials",
                          "get_financial_indicators", "get_business_segments", "get_dividend_history", "read_latest_report"),
-    "valuation": _pick("resolve_security", "get_stock_valuation", "get_valuation_history", "compare_peers_valuation"),
+    "valuation": _pick("resolve_security", "get_stock_valuation", "get_valuation_history", "compare_peers_valuation", "compute_reverse_dcf"),
     "price": _pick("resolve_security", "get_stock_quote", "get_stock_kline", "get_technical_indicators",
                    "calculate_return", "get_max_drawdown", "backtest_rule"),
     "industry": _pick("resolve_security", "get_industry_peers", "get_sector_ranking", "get_stock_announcements",
-                      "read_announcement", "search_market_news", "get_stock_news", "get_market_overview", "web_search", "read_webpage"),
+                      "read_announcement", "search_market_news", "get_stock_news", "get_market_overview", "web_search", "read_webpage",
+                      "get_market_recap", "get_macro_indicators", "get_concept_boards", "get_concept_stocks"),
     # 资金与筹码：钱往哪走、票在谁手里、内部人在干什么
     "capital": _pick("resolve_security", *insight_tools.CAPITAL),
     # 预期与消息：卖方怎么看、公司怎么预告、最近有什么新闻
@@ -605,6 +606,8 @@ async def execute_tool(
         return await insight_tools.execute(name, input_data)
     if name in web_tools.NAMES:
         return await web_tools.execute(name, input_data)
+    if name in depth_tools.NAMES:
+        return await depth_tools.execute(name, input_data)
     # === 事后复盘 ===
     if name in ("get_research_track_record", "list_checkpoints"):
         from sqlmodel import Session

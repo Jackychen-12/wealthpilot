@@ -30,7 +30,7 @@ EDITABLE = (
     "feishu_app_id", "feishu_app_secret", "feishu_api_base", "wecom_corp_id", "wecom_agent_id", "wecom_secret", "wecom_token", "wecom_aes_key",
     "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
     "ai_fallback", "ai_max_retries", "web_search", "web_search_api_key", "web_search_url",
-    "dingtalk_client_id", "dingtalk_client_secret", "vision_model", "stt_base_url", "stt_api_key", "stt_model",
+    "recap_push", "dingtalk_client_id", "dingtalk_client_secret", "vision_model", "stt_base_url", "stt_api_key", "stt_model",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 

@@ -161,10 +161,17 @@ async def run(db: Session, user_id: int, *, today: date | None = None, push: boo
     db.refresh(digest)
     result = serialize(digest)
     fresh = [e for e in notable if e["kind"] not in ("task", "alert")]   # 任务与提醒发生时已经单独推过
-    if push and fresh:
+    review = ""
+    if push and getattr(settings, "recap_push", False) and today == date.today():
+        with contextlib.suppress(Exception):     # 复盘取不到不该拦住简报
+            from wealthpilot.services import recap
+            report = await recap.build()
+            review = recap.text(report) if report else ""      # 休市那天没有复盘，也就不推
+    if push and (fresh or review):
         from wealthpilot.services import channels  # 放在这里导入：channels 也要用到本模块
         # notify 会发到所有配置了的渠道：Telegram 和群机器人 webhook
-        result["pushed"] = await channels.notify(channels.digest_text({**result, "events": fresh}))
+        parts = ([channels.digest_text({**result, "events": fresh})] if fresh else []) + ([review] if review else [])
+        result["pushed"] = await channels.notify("\n\n".join(parts))
     return result
 
 

@@ -185,9 +185,80 @@ def install_from_gallery(name: str) -> Skill:
 
 
 def raw_url(url: str) -> str:
-    """GitHub 网页上的文件地址换成原始文件地址，其余原样返回。"""
-    match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)/blob/(.+)", url.strip())
-    return f"https://raw.githubusercontent.com/{match.group(1)}/{match.group(2)}/{match.group(3)}" if match else url.strip()
+    """GitHub 网页上的地址换成原始文件地址，其余原样返回。
+
+    文件页（/blob/…）直接换；仓库首页和目录页（/tree/…）当作"这里有一个通用技能包"，去取里面的 SKILL.md。
+    """
+    url = url.strip().rstrip("/")
+    match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)/blob/(.+)", url)
+    if match:
+        return f"https://raw.githubusercontent.com/{match.group(1)}/{match.group(2)}/{match.group(3)}"
+    match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/(.+)", url)
+    if match:
+        return f"https://raw.githubusercontent.com/{match.group(1)}/{match.group(2)}/{match.group(3)}/{match.group(4)}/SKILL.md"
+    match = re.fullmatch(r"https://github\.com/([^/]+)/([^/#?]+?)(?:\.git)?", url)
+    if match:
+        return f"https://raw.githubusercontent.com/{match.group(1)}/{match.group(2)}/HEAD/SKILL.md"
+    return url
+
+
+GENERIC_NOTE = ("> 这是从通用技能包（SKILL.md）导入的方法。原文里让 Agent 运行脚本、读写文件、安装依赖、调用别的工具的步骤，在这里不会执行；"
+                "保留下来的是“怎么判断”的那部分，Agent 会用自己已有的取数工具照着做。")
+
+
+def adapt_generic(text: str, source: str = "") -> str | None:
+    """把一个通用的 SKILL.md（只有 name / description，没有 WealthPilot 的编排信息）改写成这里能用的方法文件。
+
+    改写只做三件事：补上派哪几个 Agent、报告分哪几节的默认值；去掉代码块（脚本在这里跑不了）；太长就截断并说明。
+    认不出是技能文件（没有 frontmatter，或没有 name 和 description）返回 None。
+    """
+    match = _FRONT_RE.match(text.lstrip("\ufeff"))
+    if not match:
+        return None
+    try:
+        front = yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        return None
+    if not isinstance(front, dict) or not front.get("description"):
+        return None
+    original = str(front.get("name") or "").strip()
+    slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", original.lower())).strip("-")
+    if not slug:
+        import hashlib
+        slug = "imported-" + hashlib.sha1((original or text[:200]).encode()).hexdigest()[:8]
+    description = re.sub(r"\s+", " ", str(front["description"])).strip()
+    body = re.sub(r"```.*?```", "（这里原本是一段脚本或命令，导入时去掉了）", match.group(2), flags=re.DOTALL).strip()
+    lowered = (description + body[:1500]).lower()
+    needs = "holdings" if any(w in lowered for w in ("持仓", "组合", "portfolio")) else \
+        "none" if any(w in lowered for w in ("题材", "产业链", "行业", "宏观", "theme", "sector", "macro", "supply chain")) else "stock"
+    agents = ["portfolio", "fundamental", "valuation"] if needs == "holdings" else ["industry", "fundamental", "expectation"] if needs == "none" \
+        else ["fundamental", "valuation", "industry", "expectation"]
+    room = MAX_BODY - len(GENERIC_NOTE) - 120
+    cut = len(body) > room
+    meta = {"name": slug[:60], "description": description[:200], "user-invocable": True,
+            "metadata": {"wealthpilot": {"label": (original or slug)[:24], "triggers": [t for t in dict.fromkeys([original, slug]) if t][:3], "needs": needs,
+                                         "agents": agents, "sections": ["结论", "按这套方法逐项看", "不符合的地方", "风险", "待验证"],
+                                         "criteria": [], "imported_from": source}}}
+    if front.get("whenToUse") or front.get("when_to_use"):
+        meta["whenToUse"] = str(front.get("whenToUse") or front.get("when_to_use"))[:200]
+    head = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False, width=1000).strip()
+    tail = "\n\n（原文比这里能放下的长，后面的部分没有导入。）" if cut else ""
+    return f"---\n{head}\n---\n\n{GENERIC_NOTE}\n\n{body[:room].rstrip()}{tail}\n"
+
+
+def prepare(content: str, source: str = "") -> tuple[str, Skill | None, list[str], bool]:
+    """一个取回来的技能文件能不能用。本来就是这里的格式就原样用；是通用 SKILL.md 就改写后再用。
+
+    返回（要保存的内容, 技能, 问题, 是不是改写过的）。
+    """
+    skill, problems = parse(content)
+    if skill is not None:
+        return content, skill, [], False
+    adapted = adapt_generic(content, source)
+    if adapted is None:
+        return content, None, problems, False
+    skill, problems = parse(adapted)
+    return adapted, skill, problems, skill is not None
 
 
 async def fetch_remote(url: str) -> str:

@@ -87,6 +87,45 @@ async def get_valuation_series(code: str):
     return {"code": code, "data": [{"date": r["date"], "pe": r["pe_ttm"], "pb": r["pb"]} for r in rows[::5] + rows[-1:]]}
 
 
+@router.get("/recap")
+async def market_recap():
+    """今天市场发生了什么：涨停与连板、题材热点、龙虎榜、情绪刻度。不调用模型。"""
+    from wealthpilot.services import recap
+    report = await recap.build()
+    if not report:
+        raise HTTPException(404, "今天没有可复盘的数据（休市，或者还没开盘）")
+    return report
+
+
+@router.get("/macro")
+async def market_macro():
+    """宏观数据：景气、物价、货币信贷、利率。"""
+    from wealthpilot.services import macro
+    return await macro.snapshot()
+
+
+@router.get("/concepts")
+async def market_concepts(name: str = "", limit: int = 40):
+    """不带 name：全部概念板块按涨跌幅排；带 name：这个板块的成分股。"""
+    from wealthpilot.services import recap
+    if not name.strip():
+        return sorted(await recap.concept_boards(), key=lambda b: -b["change_pct"])
+    found = await recap.concept_stocks(name, limit)
+    if not found:
+        raise HTTPException(404, f"没有找到概念板块「{name}」")
+    return found
+
+
+@router.get("/stock/{code}/reverse-dcf")
+async def stock_reverse_dcf(code: str):
+    """反向 DCF：现价隐含了多高的利润增速。"""
+    from wealthpilot.services.agents.depth_tools import reverse_dcf_for
+    result = await reverse_dcf_for(code)
+    if result is None:
+        raise HTTPException(404, f"没有取到 {code} 的行情")
+    return result
+
+
 @router.get("/stock/{code}/minute")
 async def get_stock_minute(code: str, days: int = 1):
     """分时：每分钟的价格、均价与成交量。days=1 最近一个交易日，days=5 最近五个交易日。"""

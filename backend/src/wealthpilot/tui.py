@@ -38,6 +38,10 @@ COMMANDS: dict[str, str] = {
     "/search": "/search <关键词> — 搜索股票 / ETF / 基金",
     "/screen": "/screen pe<15 roe>15 mv>200 [行业] — 选股（pe pb roe mv rev profit chg）",
     "/market": "大盘与行业强弱",
+    "/recap": "今天大盘复盘：涨停与连板、题材热点、龙虎榜、情绪刻度（不调用模型）",
+    "/macro": "宏观数据：PMI、物价、货币信贷、利率",
+    "/dcf": "/dcf <名称或代码> — 反向 DCF：现在这个价钱隐含了多高的利润增长",
+    "/trades": "/trades <成交记录文件> — 交易记录体检：找追高、交易过勤、越跌越买这类毛病",
     "/holdings": "我的持仓",
     "/watch": "/watch [add|rm <名称或代码>] — 自选股",
     "/review": "验证点成绩单（事后验证）",
@@ -81,8 +85,8 @@ FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '�
 # /help 按用途分组：三十多个命令排成一列没法看
 HELP_GROUPS = [
     ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/retry", "/export", "/evidence", "/history", "/sessions", "/new"]),
-    ("行情", ["/stock", "/search", "/screen", "/market"]),
-    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/proposals", "/approve", "/reject", "/broker", "/order"]),
+    ("行情", ["/stock", "/search", "/screen", "/market", "/recap", "/macro", "/dcf"]),
+    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/trades", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
     ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit"]),
     ("其他", ["/setup", "/model", "/usage", "/sample", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
@@ -449,11 +453,81 @@ class App:
         card = await self.backend.request("GET", "/api/checkpoints/scorecard")
         if not card["total"]:
             self.console.print("[dim]还没有验证点。对一只具体的股票做深度研究后会自动生成。[/]")
+            await self._stances()
             return
         rate = "—" if card["hold_rate_pct"] is None else f"{card['hold_rate_pct']}%"
         self.console.print(f"[bold]成立率 {rate}[/]  成立 [green]{card['held']}[/] · 被证伪 [red]{card['broken']}[/] · 待核对 {card['pending']} · 共 {card['total']}")
         self.console.print(f"[dim]{card['note']}[/]")
         self.show_checkpoints(await self.backend.request("GET", "/api/checkpoints"))
+        await self._stances()
+
+    async def _stances(self) -> None:
+        """立场成绩单：给过立场的那些，之后相对沪深 300 怎么样。"""
+        try:
+            card = await self.backend.request("GET", "/api/stances")
+        except Exception:  # noqa: BLE001 — 行情取不到时不该把验证点那一半也带倒
+            return
+        if not card["total"]:
+            return
+        self.console.print(f"\n[bold]立场成绩单[/] [dim]对比{card['benchmark']}，共 {card['total']} 次给过立场[/]")
+        t = self.table("之后", "已结算", "方向对了", "看多的平均超额", "看空的平均超额", right=(1, 2, 3, 4))
+        for horizon, item in card["horizons"].items():
+            pct = lambda v: "—" if v is None else f"{v:+.1f}%"  # noqa: E731
+            t.add_row(f"{horizon} 个交易日", str(item["settled"]), f"{item['right']}（{item['hit_rate_pct']:g}%）" if item["settled"] else "未到期",
+                      pct(item["看多_avg_excess_pct"]), pct(item["看空_avg_excess_pct"]))
+        self.console.print(t)
+        if card["note"]:
+            self.console.print(f"[dim]{card['note']}[/]")
+
+    async def cmd_recap(self, _: str) -> None:
+        from wealthpilot.services import recap
+        try:
+            report = await self.backend.request("GET", "/api/market/recap")
+        except RuntimeError as e:
+            self.console.print(f"[dim]{e}[/]")
+            return
+        self.console.print(recap.text(report), highlight=False, markup=False)
+
+    async def cmd_macro(self, _: str) -> None:
+        from wealthpilot.services import macro
+        self.console.print(macro.text(await self.backend.request("GET", "/api/market/macro")), highlight=False, markup=False)
+
+    async def cmd_dcf(self, args: str) -> None:
+        if not args.strip():
+            raise ValueError("用法：/dcf <名称或代码>，如 /dcf 贵州茅台")
+        sec = await self.resolve(args)
+        r = await self.backend.request("GET", f"/api/market/stock/{sec['code']}/reverse-dcf")
+        if not r["ok"]:
+            self.console.print(f"[yellow]{r['name'] or sec['name']}：{r['reason']}[/]")
+            return
+        c = self.console
+        c.print(f"[bold]{r['name']}[/] [cyan]{r['code']}[/] 市值 {r['market_cap_yi']:g} 亿 · {r['profit_period']}归母净利润 {r['profit_ttm_yi']:g} 亿 · PE {r['pe_ttm']:g}", highlight=False)
+        c.print("现价隐含的利润增速（未来十年，每年）：" + "，".join(
+            f"折现率 {i['discount_pct']:g}% → " + (f"{i['growth_pct']:g}%" if i["growth_pct"] is not None else "解释不了") for i in r["implied_growth"]), highlight=False)
+        if r.get("past_profit_cagr_3y_pct") is not None:
+            c.print(f"过去三年利润的实际年化增速：{r['past_profit_cagr_3y_pct']:g}%", highlight=False)
+        t = self.table("假设每年增长", f"算出来的价值是市值的几倍（折现率 {r['scenarios']['discount_pct']:g}%）", right=(0, 1))
+        for row in r["scenarios"]["rows"]:
+            t.add_row(f"{row['growth_pct']}%", f"{row['value_vs_market_cap']:.2f}")
+        c.print(t)
+        for note in r["notes"]:
+            c.print(f"[dim]{note}[/]", highlight=False)
+
+    async def cmd_trades(self, args: str) -> None:
+        from wealthpilot.services import trades
+        if not args.strip():
+            raise ValueError("用法：/trades <成交记录文件>。券商 App 里导出交割单（CSV），或自己写：每行“日期 代码 买/卖 价格 数量”")
+        path = Path(args.strip()).expanduser()
+        if not path.is_file():
+            raise ValueError(f"没有这个文件：{path}")
+        raw = path.read_bytes()
+        try:
+            content = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            content = raw.decode("gb18030", "replace")      # 券商导出的表多半是 GBK
+        with self.console.status("[dim]取行情、配对买卖…", spinner="dots"):
+            report = await self.backend.request("POST", "/api/trades/check", json={"text": content})
+        self.console.print(trades.text(report), highlight=False, markup=False)
 
     async def cmd_verify(self, _: str) -> None:
         r = await self.backend.request("POST", "/api/checkpoints/verify")

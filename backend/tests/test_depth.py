@@ -249,3 +249,121 @@ async def test_too_few_trades_or_missing_prices_are_said_plainly():
     report = await trades.check(CSV, kline=nothing, today=date(2026, 4, 1))
     assert report["ok"] and report["missing_prices"] == ["600001", "600002", "600003"] and "chasing" not in {f["key"] for f in report["findings"]}
     assert "没取到行情" in trades.text(report)
+
+
+# ── 接到工具、接口、命令、推送上 ─────────────────────────
+
+RECAP = {"day": "2026-10-08", "indices": [{"name": "上证指数", "change": "-0.79%"}], "breadth": {"up": 1698, "down": 3748, "median_change_pct": -1.0},
+         "limits": {"limit_up": 5, "broken": 3, "limit_down": 1, "seal_rate_pct": 62.5, "first_board": 2, "multi_board": 3, "max_streak": 8,
+                    "ladder": [{"boards": 8, "names": ["新华传媒"]}], "yesterday_limit_up_today_pct": 2.0, "yesterday_limit_up_count": 3},
+         "limit_up_stocks": [{"code": "002058", "name": "紫竹高科", "streak": 3, "reason": "固态电池+锂电池", "industry": "电池"}],
+         "themes": [{"theme": "固态电池", "count": 3, "names": ["紫竹高科"], "basis": "涨停原因"}], "concepts": None, "billboard": None,
+         "mood": {"label": "一般", "points": 0, "basis": ["涨停 5 只"]}}
+
+
+def _patch_recap(monkeypatch, report=RECAP):
+    async def build(day=None):
+        return report
+    monkeypatch.setattr(recap, "build", build)
+
+
+async def test_agents_get_the_new_tools_with_their_caveats(monkeypatch):
+    from wealthpilot.services.agents import depth_tools, registry
+    from wealthpilot.services.agents.tools import AGENT_TOOLS, execute_tool
+    names = lambda agent: {t["name"] for t in AGENT_TOOLS[agent]}  # noqa: E731
+    assert "compute_reverse_dcf" in names("valuation") and {"get_market_recap", "get_macro_indicators", "get_concept_boards", "get_concept_stocks"} <= names("industry")
+    assert "不得把它或情景表里的倍数说成目标价" in registry.build_prompt("valuation", [], {}, None, True)
+    assert "不得据此预测明天涨跌" in registry.build_prompt("industry", [], {}, None, True)
+    _patch_recap(monkeypatch)
+    out = json.loads(await execute_tool("get_market_recap", {}, [], {}))
+    assert out["limits"]["limit_up"] == 5 and "不是预测" in out["note"] and out["themes"][0]["theme"] == "固态电池"
+    _patch_recap(monkeypatch, None)
+    assert (await execute_tool("get_market_recap", {}, [], {})).startswith("未获取到")
+
+    async def quote(code):
+        return {"name": "贵州茅台", "price": 1250.0, "total_mv_yi": 15700.0}
+
+    async def indicators(code, periods=8):
+        return ROWS
+
+    async def profile(code):
+        return {"industry": "白酒"}
+    monkeypatch.setattr(depth_tools, "fetch_stock_quote", quote)
+    monkeypatch.setattr(depth_tools, "fetch_financial_indicators", indicators)
+    monkeypatch.setattr(depth_tools, "fetch_stock_profile", profile)
+    dcf = json.loads(await execute_tool("compute_reverse_dcf", {"code": "sh600519"}, [], {}))
+    assert dcf["code"] == "600519" and dcf["ok"] and dcf["implied_growth"][1]["discount_pct"] == 9.0 and "不是目标价" in dcf["notes"][0]
+
+    async def losing(code, periods=8):
+        return [{"report_date": "2025-12-31", "net_profit_yi": -2.0}]
+    monkeypatch.setattr(depth_tools, "fetch_financial_indicators", losing)
+    assert "亏损" in await execute_tool("compute_reverse_dcf", {"code": "600519"}, [], {})
+
+    async def boards():
+        return [{"node": "gn_a", "name": "固态电池", "stocks": 40, "change_pct": 1.2, "leader": {"code": "002058", "name": "紫竹高科", "change_pct": 10.0}},
+                {"node": "gn_b", "name": "钙钛矿", "stocks": 30, "change_pct": -5.9, "leader": {"code": "1", "name": "x", "change_pct": 0.1}}]
+    monkeypatch.setattr(recap, "concept_boards", boards)
+    ranked = json.loads(await execute_tool("get_concept_boards", {"top": 1}, [], {}))
+    assert ranked["top"][0]["name"] == "固态电池" and ranked["bottom"][0]["name"] == "钙钛矿" and "node" not in ranked["top"][0]
+
+    async def none(name, limit=40):
+        return None
+    monkeypatch.setattr(recap, "concept_stocks", none)
+    assert "get_concept_boards" in await execute_tool("get_concept_stocks", {"name": "不存在的题材"}, [], {})
+
+
+def test_routes_and_commands(monkeypatch):
+    import argparse
+
+    from fastapi.testclient import TestClient
+
+    from wealthpilot import cli
+    from wealthpilot.main import app
+    client = TestClient(app)
+    _patch_recap(monkeypatch)
+    assert client.get("/api/market/recap").json()["limits"]["max_streak"] == 8
+    out: list[str] = []
+    assert cli.cmd_recap(argparse.Namespace(), out=out.append) == 0 and "8 连板：新华传媒" in out[0]
+    _patch_recap(monkeypatch, None)
+    assert client.get("/api/market/recap").status_code == 404 and cli.cmd_recap(argparse.Namespace(), out=out.append) == 1
+
+    async def check(text, **kw):
+        return {"ok": False, "reason": "认出来的成交不到 4 笔，看不出规律。", "problems": [], "trades": 0}
+    monkeypatch.setattr(trades, "check", check)
+    assert client.post("/api/trades/check", json={"text": "x"}).json()["ok"] is False
+    assert client.get("/api/stances").json()["total"] >= 0
+
+
+async def test_the_stateless_daily_brief_needs_no_database_and_skips_holidays(monkeypatch):
+    from wealthpilot import cli
+    from wealthpilot.services import channels
+    _patch_recap(monkeypatch)
+
+    async def find(word, limit=1):
+        return {"茅台": [{"code": "600519", "name": "贵州茅台"}], "002058": [{"code": "002058", "name": "紫竹高科"}]}.get(word, [])
+
+    async def quotes(codes):
+        return {"600519": {"price": 1255.79, "change_pct": -0.22}, "002058": {"price": 22.22, "change_pct": 10.0}}
+    text = await cli.daily_brief(["茅台", "002058", "不存在"], quotes=quotes, find=find)
+    assert "2026-10-08 大盘复盘" in text and "· 贵州茅台 600519  1255.79  -0.22%" in text
+    assert "· 紫竹高科 002058  22.22  +10.00%，涨停（固态电池+锂电池）" in text and "不存在" not in text
+    _patch_recap(monkeypatch, None)
+    assert await cli.daily_brief(["茅台"], quotes=quotes, find=find) == ""             # 休市：什么都不发
+    assert await channels.push_stateless("x") == []                                    # 没配地址：不发，也不报错
+
+
+def test_generic_skill_packages_can_be_installed_as_methods():
+    from wealthpilot.services import skills
+    generic = "---\nname: Buffett Moat\ndescription: Judge whether a company has a durable moat.\n---\n# Moat\n\nAsk what stops a competitor.\n\n```bash\npython run.py\n```\n" + "细则。" * 3000
+    content, skill, problems, adapted = skills.prepare(generic, "https://github.com/x/y")
+    assert adapted and problems == [] and skill.name == "buffett-moat" and skill.agents == ["fundamental", "valuation", "industry", "expectation"]
+    assert "python run.py" not in content and "不会执行" in content and "后面的部分没有导入" in content and "imported_from: https://github.com/x/y" in content
+    from pathlib import Path
+    native = (Path(__file__).resolve().parents[1] / "skills-gallery" / "theme-chain.md").read_text(encoding="utf-8")
+    same, parsed, _, touched = skills.prepare(native)
+    assert same == native and touched is False and parsed.needs == "none" and parsed.agents == ["industry", "fundamental", "expectation"]
+    assert skills.prepare("just some text")[1] is None and skills.prepare("---\nname: x\n---\nno description")[1] is None
+    assert skills.raw_url("https://github.com/muxuuu/serenity-skill") == "https://raw.githubusercontent.com/muxuuu/serenity-skill/HEAD/SKILL.md"
+    assert skills.raw_url("https://github.com/a/b/tree/main/skills/buffett/") == "https://raw.githubusercontent.com/a/b/main/skills/buffett/SKILL.md"
+    assert skills.raw_url("https://github.com/a/b/blob/main/x.md") == "https://raw.githubusercontent.com/a/b/main/x.md"
+    assert skills.adapt_generic("---\nname: 巴菲特护城河\ndescription: 判断护城河\n---\n正文").startswith("---\nname: imported-")
