@@ -2,6 +2,16 @@
 
 升级：在终端运行 `wealthpilot update`（会先备份数据库；Docker 部署见 README）。
 
+## 0.7.0 — 2026-10-08
+
+- 备用模型：主模型余额不足、Key 失效、被限流、连不上时，这一轮研究自动换到备用模型接着跑，回答上会注明（`wealthpilot model fallback <服务>`，或网页设置）
+- 日志：研究失败、推送没发出去、盯盘出错都记进文件，`wealthpilot logs --errors` 看出问题的；写入前抹掉 Key
+- 备份与恢复：`wealthpilot backup` / `restore`，换电脑、重装、回到某一天；恢复前自动备份现状
+- 手机里补齐命令：`/stop` `/deep` `/rewrite` `/status` `/usage` `/holdings` `/watch` `/tasks`；连发两条不再同时跑两次研究
+- `wealthpilot channels`：不开网页也能配 Telegram、飞书、企业微信并生成配对码
+- 找以前的会话：`wealthpilot sessions 宁德时代`、终端 `/sessions 关键词`、网页历史会话里的搜索框；`wealthpilot -c` 接着上一个会话
+- 终端新增 `/model`（换模型、设备用）、`/usage`、`/retry`、`/export`、`/logs`；`wealthpilot completion zsh|bash` 生成 Tab 补全
+
 ## 0.6.0 — 2026-10-08
 
 - 一条命令安装：`curl … install.sh | bash`。没有 uv 会先装，代码放在 `~/.wealthpilot/app`，数据（配置、数据库、研究方法）单独放在 `~/.wealthpilot`，升级和重装都不动它

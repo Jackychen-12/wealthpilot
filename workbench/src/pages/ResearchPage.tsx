@@ -279,7 +279,7 @@ const ResearchPage: React.FC = () => {
                       <div className="mt-8">
                         <div className="mb-2 flex items-center justify-between">
                           <span className="eyebrow">接着之前的聊</span>
-                          {sessions.data.length > 4 ? <button type="button" onClick={() => setSessionsOpen(true)} className="text-[13px] text-steel hover:text-ink">全部 {sessions.data.length} 个会话</button> : null}
+                          <button type="button" onClick={() => setSessionsOpen(true)} className="text-[13px] text-steel hover:text-ink">{sessions.data.length > 4 ? `全部 ${sessions.data.length} 个会话 · 搜索` : '搜索'}</button>
                         </div>
                         <Sessions items={sessions.data} current="" onOpen={openSession} limit={4} />
                         {sessionError ? <p className="mt-2 text-[13px] text-on-rose">{sessionError}</p> : null}
