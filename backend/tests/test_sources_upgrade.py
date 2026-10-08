@@ -183,9 +183,14 @@ def test_check_does_not_crash_when_git_cannot_compare(monkeypatch):
 
 
 def test_check_survives_no_network_and_no_git(monkeypatch):
-    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "aaa0001"), ("fetch",): (1, "TimeoutExpired")})
+    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "aaa0001"), ("rev-parse", "--abbrev-ref"): (0, "main"), ("fetch",): (1, "TimeoutExpired")})
     status = upgrade.check(force=True)
-    assert status["checked"] is False and status["behind"] == 0
+    assert status["checked"] is False and status["behind"] == 0 and "没能连上" in status["how"]
+    # 不在 main 上：和 main 差多少没有意义，不联网、不比较
+    calls: list = []
+    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "aaa0001"), ("rev-parse", "--abbrev-ref"): (0, "feat/x")}, calls)
+    status = upgrade.check(force=True)
+    assert status["checked"] is False and "feat/x" in status["how"] and not any(c[0] == "fetch" for c in calls)
     monkeypatch.setattr(upgrade, "is_checkout", lambda: False)
     assert "docker compose" in upgrade.check(force=True)["how"]
 

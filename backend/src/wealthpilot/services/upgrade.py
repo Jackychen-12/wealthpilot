@@ -85,6 +85,8 @@ def check(*, force: bool = False) -> dict:
     info = current()
     if not info["git"]:
         return {**info, "checked": False, "behind": 0, "notes": [], "how": _DOCKER_HOW}
+    if info["branch"] != BRANCH:   # 在别的分支上，和 main 差多少个提交没有意义，升级命令也不会在这里动手
+        return {**info, "checked": False, "behind": 0, "notes": [], "how": f"现在在分支 {info['branch']} 上，不是 {BRANCH}，这里不检查更新"}
     hit = None if force else cache.read("upgrade:check", 12 * cache.HOUR)
     if hit and hit.get("commit") == info["commit"]:
         return {**info, **hit, "cached": True}
