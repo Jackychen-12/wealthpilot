@@ -71,6 +71,8 @@ class Settings(BaseSettings):
 
     skills_dir: Path = Field(default=Path("./skills"), description="技能目录：用户自己写的研究方法（Markdown）")
     light_model: str = Field(default="", description="提取证券名、审核证据、提出验证点等轻活用的模型；留空则与主模型相同")
+    ai_fallback: str = Field(default="", description="备用模型用哪一家（deepseek / anthropic / openai）：主模型余额不足、Key 失效、限流、连不上时，这一轮自动换过去。留空不启用")
+    ai_max_retries: int = Field(default=3, ge=0, le=8, description="限流、超时、服务端出错时自动重试几次（按服务商给的等待时间退避）")
     checkpoints_enabled: bool = Field(default=True, description="研究发布后提出可事后核对的验证点")
     debate_enabled: bool = Field(default=True, description="个股深度研究时，撰写前先让看多、看空两方就同一批证据各自陈述")
     advice_mode: bool = Field(

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from anthropic import Anthropic
 from openai import OpenAI
+
+log = logging.getLogger("wealthpilot.model")
 
 
 @dataclass
@@ -193,8 +196,8 @@ class AnthropicStreamContext:
 
 
 class AnthropicAIClient:
-    def __init__(self, api_key: str, timeout: float | None = None):
-        self._client = Anthropic(api_key=api_key, **({"timeout": timeout} if timeout else {}))
+    def __init__(self, api_key: str, timeout: float | None = None, *, max_retries: int = 3):
+        self._client = Anthropic(api_key=api_key, max_retries=max_retries, **({"timeout": timeout} if timeout else {}))
         self.usage = Usage()
 
     @staticmethod
@@ -341,13 +344,14 @@ class DeepSeekAIClient:
     supports_json_mode = True
 
     def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com",
-                 timeout: float | None = None, *, json_mode: bool = True, max_output: int = 8192):
+                 timeout: float | None = None, *, json_mode: bool = True, max_output: int = 8192, max_retries: int = 3):
         self.usage = Usage()
         # 有的服务不认 response_format（会直接报 400）：关掉后各处退回用正则从回复里取 JSON
         self.supports_json_mode = json_mode
         self.max_output = max_output
         # 本机模型一般不要 Key，但 SDK 不接受空串
-        self._client = OpenAI(api_key=api_key or "not-needed", base_url=base_url,
+        # 限流（429）、超时、5xx 由 SDK 自己退避重试，服务商给了 Retry-After 就照它等
+        self._client = OpenAI(api_key=api_key or "not-needed", base_url=base_url, max_retries=max_retries,
                               **({"timeout": timeout} if timeout else {}))
 
     def create(self, *, model: str, max_tokens: int, system, messages: list[dict],
@@ -469,18 +473,127 @@ def raise_if_unavailable(exc: BaseException) -> None:
         raise found from exc
 
 
-def create_ai_client(settings) -> AIClient:
+PROVIDER_LABEL = {"deepseek": "DeepSeek", "anthropic": "Claude", "openai": "兼容服务"}
+
+
+def _model_of(settings, provider: str) -> str:
+    return {"deepseek": settings.deepseek_model, "openai": settings.openai_model}.get(provider, settings.anthropic_model)
+
+
+def _client_for(settings, provider: str) -> AIClient:
     timeout = getattr(settings, "ai_timeout_seconds", None)
-    if settings.ai_provider == "openai":
+    retries = max(0, int(getattr(settings, "ai_max_retries", 3)))
+    if provider == "openai":
         if not settings.openai_base_url.strip() or not settings.openai_model.strip():
             raise ValueError("还没有填模型服务的接口地址和模型名")
         return DeepSeekAIClient(settings.openai_api_key, settings.openai_base_url.strip(), timeout,
-                                json_mode=settings.openai_json_mode, max_output=settings.openai_max_tokens)
-    if settings.ai_provider == "deepseek":
+                                json_mode=settings.openai_json_mode, max_output=settings.openai_max_tokens, max_retries=retries)
+    if provider == "deepseek":
         if settings.deepseek_api_key.strip() in _PLACEHOLDER_KEYS:
             raise ValueError("还没有填 DeepSeek 的 API Key")
-        return DeepSeekAIClient(settings.deepseek_api_key, settings.deepseek_base_url, timeout)
-    else:
-        if settings.anthropic_api_key.strip() in _PLACEHOLDER_KEYS:
-            raise ValueError("还没有填 Claude 的 API Key")
-        return AnthropicAIClient(settings.anthropic_api_key, timeout)
+        return DeepSeekAIClient(settings.deepseek_api_key, settings.deepseek_base_url, timeout, max_retries=retries)
+    if settings.anthropic_api_key.strip() in _PLACEHOLDER_KEYS:
+        raise ValueError("还没有填 Claude 的 API Key")
+    return AnthropicAIClient(settings.anthropic_api_key, timeout, max_retries=retries)
+
+
+class _FailoverStream:
+    """流式调用的换路：请求刚发出去就被拒（余额、Key、限流……）时改走备用模型；已经开始出字之后的错不接管。"""
+
+    def __init__(self, owner: FailoverClient, kwargs: dict):
+        self._owner, self._kwargs, self._ctx = owner, kwargs, None
+
+    def __enter__(self):
+        owner = self._owner
+        if owner.switched is None:
+            ctx = owner.primary.stream(**self._kwargs)
+            try:
+                ctx.__enter__()
+                self._ctx = ctx
+                return self
+            except Exception as e:  # noqa: BLE001 — 认得出是"主模型这一轮用不了"才换，其余照常抛
+                owner.switch(e)
+        self._ctx = owner.fallback.stream(**owner.fit(self._kwargs, streaming=True))
+        self._ctx.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._ctx.__exit__(*args) if self._ctx is not None else False
+
+    @property
+    def text_stream(self) -> Iterator[str]:
+        return self._ctx.text_stream
+
+    def get_final_result(self) -> CompletionResult:
+        return self._ctx.get_final_result()
+
+
+class FailoverClient:
+    """主模型这一轮肯定用不了时（余额、Key、模型名、限流、连不上），换到备用模型接着跑，而不是整轮作废。
+
+    换过去之后这个实例上后面的调用都走备用模型 —— 一轮研究里不来回切。两边的用量记在同一本账上。
+    调用方传进来的模型名是主模型的，换路之后在这里替换成备用模型的名字。
+    """
+
+    def __init__(self, primary: AIClient, fallback: AIClient, fallback_model: str, fallback_label: str = ""):
+        self.primary, self.fallback = primary, fallback
+        self.fallback_model, self.fallback_label = fallback_model, fallback_label or fallback_model
+        self.switched: ModelUnavailableError | None = None
+        self.usage = getattr(primary, "usage", None) or Usage()
+        fallback.usage = self.usage   # 流式调用是在发起时取 usage 的，所以换成同一个对象就够了
+
+    @property
+    def supports_json_mode(self) -> bool:
+        return bool(getattr(self.fallback if self.switched else self.primary, "supports_json_mode", False))
+
+    def switch(self, exc: BaseException) -> None:
+        found = diagnose(exc)
+        if found is None:
+            raise exc
+        if self.switched is None:
+            self.switched = found
+            log.warning("主模型用不了（%s），这一轮改用备用模型 %s", found.kind, self.fallback_label)
+
+    def fit(self, kwargs: dict, *, streaming: bool = False) -> dict:
+        out = {**kwargs, "model": self.fallback_model}
+        if streaming or not getattr(self.fallback, "supports_json_mode", False):
+            out.pop("json_mode", None)       # 备用模型不认这个参数就别带过去
+        return out
+
+    def create(self, **kwargs) -> CompletionResult:
+        if self.switched is None:
+            try:
+                return self.primary.create(**kwargs)
+            except Exception as e:  # noqa: BLE001
+                self.switch(e)
+        return self.fallback.create(**self.fit(kwargs))
+
+    def stream(self, **kwargs) -> _FailoverStream:
+        return _FailoverStream(self, kwargs)
+
+    def fallback_info(self) -> dict | None:
+        """换没换过路；换了的话是因为什么、换到了哪个模型。给界面如实显示用。"""
+        if self.switched is None:
+            return None
+        return {"model": self.fallback_label, "reason": self.switched.kind, "message": self.switched.message}
+
+
+def fallback_provider(settings) -> str:
+    """配置里的备用模型是哪一家；没配、配成和主模型同一家、或那一家没填全，都算没有。"""
+    name = (getattr(settings, "ai_fallback", "") or "").strip().lower()
+    if name not in PROVIDER_LABEL or name == settings.ai_provider:
+        return ""
+    try:
+        _client_for(settings, name)
+    except ValueError:
+        return ""
+    return name
+
+
+def create_ai_client(settings) -> AIClient:
+    primary = _client_for(settings, settings.ai_provider)
+    backup = fallback_provider(settings)
+    if not backup:
+        return primary
+    model = _model_of(settings, backup)
+    return FailoverClient(primary, _client_for(settings, backup), model, f"{PROVIDER_LABEL[backup]} · {model}")

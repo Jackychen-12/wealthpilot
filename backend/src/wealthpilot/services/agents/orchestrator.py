@@ -208,12 +208,23 @@ async def _run_pipeline(
         await emit({"type": "done", "content": over, "meta": {"status": "failed", "reason": "budget"}})
         return
     run = {"kind": "rewrite" if rewrite_of is not None else "free"}
+
+    def switched() -> dict | None:
+        info = getattr(client, "fallback_info", None)
+        return info() if callable(info) else None
+
+    async def tell(event: dict) -> None:
+        # 中途换到了备用模型：在收尾事件里如实带上，界面上要看得见这一轮不是主模型答的
+        if event.get("type") == "done" and switched():
+            event = {**event, "meta": {**(event.get("meta") or {}), "fallback": switched()}}
+        await emit(event)
     try:
         await _research(client, settings, started, run, message, history, holdings, nav_data, nav_history,
-                        conversation_id, db_session, profile, user_id, emit, depth, rewrite_of)
+                        conversation_id, db_session, profile, user_id, tell, depth, rewrite_of)
     finally:
         # 不管成没成、是不是中途被取消，花掉的 token 都记一笔
-        budget.record(user_id or 0, getattr(client, "usage", None) or Usage(), settings.active_model, run["kind"])
+        used = switched()
+        budget.record(user_id or 0, getattr(client, "usage", None) or Usage(), used["model"] if used else settings.active_model, run["kind"])
 
 
 def compact_history(messages: list[dict], keep: int = 6) -> list[dict]:

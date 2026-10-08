@@ -71,6 +71,7 @@ COMMANDS: dict[str, str] = {
     "/login": "/login <用户名> — 远程模式登录（密码单独输入）",
     "/quit": "退出",
 }
+FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
 # /help 按用途分组：三十多个命令排成一列没法看
 HELP_GROUPS = [
     ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/evidence", "/history", "/sessions", "/new"]),
@@ -289,6 +290,9 @@ class App:
             c.print("[dim]在网页版「设置」里处理，或在这里运行 /setup 换一个模型；/doctor 可以看是哪一环不通。[/]")
             return
         c.print(Markdown(cite(answer or "没有生成回答。")))
+        if done.get("fallback"):
+            why = FALLBACK_WHY.get(done["fallback"].get("reason", ""), "用不了")
+            c.print(f"[yellow]◆ 主模型{why}，这一轮是备用模型 {done['fallback'].get('model', '')} 答的。[/]", highlight=False)
         color, label = STATUS.get(done.get("status", ""), ("dim", done.get("status", "")))
         usage = done.get("usage") or {}
         cost = (f" · {(usage['input_tokens'] + usage['output_tokens']) / 1000:.0f}k token（缓存 {usage['cache_hit_pct']}%）"

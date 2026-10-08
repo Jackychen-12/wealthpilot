@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from wealthpilot.services import memory, providers
+from wealthpilot.services.ai_client import fallback_provider
 from wealthpilot.settings import HOME, Settings, get_settings, reload_settings
 from wealthpilot.storage.db import get_engine
 
@@ -28,6 +29,7 @@ EDITABLE = (
     "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
     "feishu_app_id", "feishu_app_secret", "feishu_api_base", "wecom_corp_id", "wecom_agent_id", "wecom_secret", "wecom_token", "wecom_aes_key",
     "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
+    "ai_fallback", "ai_max_retries",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -50,7 +52,7 @@ def _view() -> dict:
         "secrets": {k: {"set": bool(getattr(s, k)) and not getattr(s, k).endswith("xxx"), "hint": _mask(getattr(s, k))} for k in _SECRETS},
         # 进程环境变量（Docker、shell 里 export 的）优先级高于 .env，这些项在网页上改了也不会生效
         "overridden": [k for k in EDITABLE if k.upper() in os.environ],
-        "active_model": s.active_model, "env_file": str(ENV_FILE.resolve()),
+        "active_model": s.active_model, "fallback_active": fallback_provider(s), "env_file": str(ENV_FILE.resolve()),
         "presets": [p for p in providers.PRESETS if p["provider"] == "openai"],
     }
 
@@ -118,6 +120,8 @@ def apply_changes(body: dict) -> list[str]:
             raise ValueError(f"{k} 不能包含换行")
     if changes.get("ai_provider") not in (None, "anthropic", "deepseek", "openai") or changes.get("broker") not in (None, "none", "paper"):
         raise ValueError("取值不合法")
+    if str(changes.get("ai_fallback") or "").strip().lower() not in ("", "anthropic", "deepseek", "openai"):
+        raise ValueError("备用模型只能是 deepseek、anthropic、openai 之一，或留空")
     try:   # 先用模型校验一遍，别把写不合法的值落到文件里
         Settings(**{**get_settings().model_dump(), **changes})
     except ValidationError as e:

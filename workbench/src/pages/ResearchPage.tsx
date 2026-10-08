@@ -55,6 +55,7 @@ const REWRITES = ['更短一点', '只讲风险', '换成给新手的说法', '�
 const STANCE_TONE: Record<string, Tone> = { 看多: 'pink', 中性偏多: 'pink', 看空: 'green', 中性偏空: 'green', 中性: 'gray' }
 const STAGES = ['规划', '取证', '审核证据', '辩论与撰写', '核对'] as const
 // 研究没成是因为模型这边的问题：给一个直接去处理的入口，而不是让用户自己猜
+const FALLBACK_WHY: Record<string, string> = { balance: '余额不足', auth: '的 Key 无效', model: '模型名不对', rate_limit: '被限流', network: '连不上' }
 const REASON_ACTION: Record<string, string> = {
   balance: '去设置换一个模型', auth: '去设置重填 Key', model: '去设置核对模型名', network: '去设置检查接口地址',
   budget: '去设置调整上限', not_configured: '去设置填模型', rate_limit: '',
@@ -336,6 +337,11 @@ const ResearchPage: React.FC = () => {
                           ? <>这是 <b>{t.reused.age}</b>那次研究的原文，这次没有重新跑，也没有花 token。</>
                           : <>这次没有重新取数：用的是 <b>{t.reused.age}</b>那次研究取到的数据，只重写了回答。</>}
                         {t.reused.saved_tokens ? ` 重新取数大约要 ${wan(t.reused.saved_tokens)}。` : ''} 行情和消息在这之后可能有变化。
+                      </Callout>
+                    ) : null}
+                    {t.fallback ? (
+                      <Callout tone="warning" action={<Link to="/settings" className="shrink-0 text-[13px] font-medium underline underline-offset-2">去设置</Link>}>
+                        主模型{FALLBACK_WHY[t.fallback.reason] ?? '用不了'}，这一轮是备用模型 <b>{t.fallback.model}</b> 答的。
                       </Callout>
                     ) : null}
                     <div className="mt-4" onClick={(e) => e.stopPropagation()}>

@@ -31,6 +31,7 @@ CHUNK = 3800   # Telegram 单条上限 4096
 HELP = ("直接发问题就是一次研究，例如：帮我分析一下宁德时代\n"
         "/quick 问题 — 快速回答（十来秒）\n/digest — 今天的简报\n/review — 当初的判断现在怎么样\n"
         "/proposals — 等我决定的建议\n/stock 名称 — 行情与估值分位\n/help — 这份说明")
+FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
 STATUS = {"passed": "已通过校验", "partial": "部分证据缺失", "rejected": "未通过校验，未发布", "insufficient_data": "证据不足，未发布", "failed": "执行失败"}
 
 
@@ -250,6 +251,8 @@ class Bot:
         state = STATUS.get(meta.get("status", ""), meta.get("status", ""))
         card = meta.get("summary")
         head = f"{state} · {meta.get('seconds') or '?'} 秒"
+        if meta.get("fallback"):
+            head += f"\n主模型{FALLBACK_WHY.get(meta['fallback'].get('reason', ''), '用不了')}，这一轮是备用模型 {meta['fallback'].get('model', '')} 答的。"
         if card:   # 长回答：先给结论，再给正文
             stance = f"\n立场：{card['stance']}" if card.get("stance") else ""
             await self.api.send(chat_id, f"【结论】{card['conclusion']}{'……' if card.get('truncated') else ''}{stance}\n\n{head}")

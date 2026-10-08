@@ -202,6 +202,8 @@ const VersionAndDoctor: React.FC = () => {
   )
 }
 
+// 模型有三个位置，各自存一套 Key 和模型名；主模型和备用模型各占一个
+const SLOTS = [{ value: 'anthropic', label: 'Claude（Anthropic）' }, { value: 'deepseek', label: 'DeepSeek' }, { value: 'openai', label: '其他兼容 OpenAI 接口的服务（含本机模型）' }]
 const KIND_LABEL: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '复盘',
   quick: '快速回答', rewrite: '改写 / 沿用证据', free: '自由问答', reuse: '原样复用' }
 const wan = (tokens: number) => (tokens / 1e4).toFixed(tokens >= 1e6 ? 0 : 1)
@@ -302,7 +304,7 @@ const SettingsPage: React.FC = () => {
 
             <Section title="模型" hint={`当前使用 ${data.active_model}`}>
               <div className="grid max-w-2xl gap-3 sm:grid-cols-2">
-                <Select id="s-provider" label="提供商" value={provider} onChange={(v) => set('ai_provider', v)} options={[{ value: 'anthropic', label: 'Claude（Anthropic）' }, { value: 'deepseek', label: 'DeepSeek' }, { value: 'openai', label: '其他兼容 OpenAI 接口的服务（含本机模型）' }]} />
+                <Select id="s-provider" label="提供商" value={provider} onChange={(v) => set('ai_provider', v)} options={SLOTS} />
                 <Input id="s-model" label="模型" value={String(form[modelField] ?? '')} onChange={(e) => set(modelField, e.target.value)}
                   placeholder={provider === 'openai' ? '照服务商文档里的模型名写' : undefined} />
                 {provider === 'openai' ? (
@@ -341,6 +343,16 @@ const SettingsPage: React.FC = () => {
                     hint={`${provider === 'openai' ? '本机模型可以留空。' : ''}只保存在你这台机器上（${data.env_file}）；保存后页面不会再显示它`}
                     value={keys[keyField] ?? ''} onChange={(e) => setKeys((k) => ({ ...k, [keyField]: e.target.value }))} />
                 </div>
+              </div>
+              <div className="mt-4 max-w-2xl">
+                <Select id="s-fallback" label="备用模型" value={String(form.ai_fallback ?? '')} onChange={(v) => set('ai_fallback', v)}
+                  options={[{ value: '', label: '不用' }, ...SLOTS.filter((o) => o.value !== provider)]} />
+                <p className="mt-1 text-[13px] text-steel">
+                  主模型余额不足、Key 失效、被限流或连不上时，这一轮研究自动换到备用模型接着跑，回答上会注明。
+                  {form.ai_fallback && form.ai_fallback === data.values.ai_fallback && !data.fallback_active
+                    ? <span className="text-ink"> 现在还没生效：先把提供商切到那一家，把它的 Key 和模型名填好保存，再切回来。</span>
+                    : ' 备用的那一家要先配好自己的 Key 和模型名。'}
+                </p>
               </div>
               <Button variant="secondary" size="sm" className="mt-3" loading={testing} onClick={() => void test()}>测试当前配置</Button>
             </Section>

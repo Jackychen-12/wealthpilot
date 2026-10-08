@@ -129,3 +129,123 @@ def test_settings_route_accepts_the_third_provider():
 def test_model_unavailable_is_an_exception_with_a_kind():
     err = ModelUnavailableError("balance", "余额不足")
     assert err.kind == "balance" and str(err) == "余额不足" and diagnose(err) is err
+
+
+# ── 备用模型：主模型这一轮用不了时换过去，而不是整轮作废 ──────────────────
+
+def _working():
+    from tests.test_pipeline import _evidence_id
+    from wealthpilot.services.ai_client import CompletionResult
+
+    def on_stream(kwargs):
+        if kwargs["messages"][-1]["role"] == "user" and isinstance(kwargs["messages"][-1]["content"], str):
+            return _tool_use()
+        return CompletionResult(text=f"最新净值 1.5983 [{_evidence_id(kwargs)}]")
+    return FakeClient(on_stream, creates=[PLAN, '{"missing":[]}'])
+
+
+class _Broke(FakeClient):
+    def __init__(self, exc):
+        super().__init__(lambda kw: _tool_use())
+        self.exc, self.calls = exc, 0
+
+    def create(self, **kwargs):
+        self.calls += 1
+        raise self.exc
+
+    def stream(self, **kwargs):
+        self.calls += 1
+        raise self.exc
+
+
+async def test_the_backup_model_takes_over_when_the_main_one_has_no_balance(monkeypatch):
+    from wealthpilot.services.ai_client import FailoverClient
+    primary, backup = _Broke(ApiError(402, "Insufficient Balance")), _working()
+    events = await _run(monkeypatch, FailoverClient(primary, backup, "backup-model", "DeepSeek · backup-model"))
+    done = _done(events)
+    assert done["meta"]["status"] == "passed" and "1.5983" in done["content"]            # 这一轮照样出了结果
+    assert done["meta"]["fallback"]["model"] == "DeepSeek · backup-model" and done["meta"]["fallback"]["reason"] == "balance"   # 而且如实说了是谁答的
+    assert primary.calls == 1                                                              # 撞了一次墙就换，后面不再回头试主模型
+    assert backup.stream_calls and all(c["model"] == "backup-model" for c in backup.stream_calls)   # 模型名换成了备用模型自己的
+
+
+async def test_when_the_backup_fails_too_the_run_stops_with_the_usual_message(monkeypatch):
+    from wealthpilot.services.ai_client import FailoverClient
+    client = FailoverClient(_Broke(ApiError(429, "Rate limit reached")), _Broke(ApiError(401, "Incorrect API key provided")), "m")
+    done = _done(await _run(monkeypatch, client))
+    assert done["meta"]["status"] == "failed" and done["meta"]["reason"] == "auth"        # 报的是备用模型为什么也不行
+
+
+def test_an_ordinary_error_does_not_trigger_the_switch():
+    from wealthpilot.services.ai_client import FailoverClient
+    client = FailoverClient(_Broke(ValueError("bad request: messages too long")), _working(), "m")
+    with pytest.raises(ValueError):
+        client.create(model="x", max_tokens=10, system="", messages=[])
+    assert client.switched is None and client.fallback_info() is None                    # 不是"模型用不了"的错：不换，照常抛
+
+
+def test_a_refused_stream_switches_before_any_text_is_shown():
+    from wealthpilot.services.ai_client import CompletionResult, FailoverClient
+
+    class Refuses(FakeClient):
+        def stream(self, **kwargs):
+            class Ctx:
+                def __enter__(self):
+                    raise ApiError(402, "Insufficient Balance")      # 真实的 SDK 是在这一步发请求、被拒的
+
+                def __exit__(self, *a):
+                    return False
+            return Ctx()
+    backup = FakeClient(lambda kw: CompletionResult(text="来自备用模型"))
+    backup.supports_json_mode = False
+    client = FailoverClient(Refuses(lambda kw: None), backup, "backup-model")
+    with client.stream(model="main-model", max_tokens=10, system="", messages=[], json_mode=True) as s:
+        assert "".join(s.text_stream) == "来自备用模型" and s.get_final_result().text == "来自备用模型"
+    assert backup.stream_calls[0]["model"] == "backup-model" and "json_mode" not in backup.stream_calls[0]
+    assert client.supports_json_mode is False and client.usage is backup.usage           # 之后按备用模型的能力来；两边记同一本账
+
+
+def test_which_backup_is_in_effect():
+    from wealthpilot.services.ai_client import FailoverClient, fallback_provider
+    main = dict(ai_provider="deepseek", deepseek_api_key="sk-test-000000", deepseek_base_url="https://api.deepseek.com", deepseek_model="deepseek-chat",
+                anthropic_model="claude-sonnet-5-5")
+    assert fallback_provider(_settings(**main)) == ""                                     # 没设
+    assert fallback_provider(_settings(**main, ai_fallback="deepseek")) == ""             # 和主模型同一家：不算
+    assert fallback_provider(_settings(**main, ai_fallback="anthropic")) == ""            # 那一家没填 Key：不算
+    assert fallback_provider(_settings(**main, ai_fallback="openai")) == "openai"         # 本机 Ollama 配好了：算
+    client = create_ai_client(_settings(**main, ai_fallback="openai"))
+    assert isinstance(client, FailoverClient) and client.fallback_model == "qwen2.5:14b" and "兼容服务" in client.fallback_label
+    assert isinstance(create_ai_client(_settings(**main)), DeepSeekAIClient)              # 没设备用：和以前一样
+    assert create_ai_client(_settings(**main, ai_max_retries=5))._client.max_retries == 5
+
+
+def test_setting_a_backup_from_the_command_line():
+    import argparse
+
+    from wealthpilot import cli
+    from wealthpilot.routes.config import ENV_FILE
+    from wealthpilot.settings import get_settings, reload_settings
+
+    def model(*words, **flags):
+        out: list[str] = []
+        args = argparse.Namespace(action=words[0] if words else None, name=words[1] if len(words) > 1 else None,
+                                  key=flags.get("key"), model=flags.get("model"), base_url=None)
+        return cli.cmd_model(args, out=out.append), "\n".join(out)
+    ENV_FILE.unlink(missing_ok=True)
+    reload_settings()
+    try:
+        cli._apply({"ai_provider": "deepseek"})
+        assert "没有" in model()[1]
+        code, text = model("fallback", "deepseek", key="sk-x")
+        assert code == 1 and "不同的位置" in text                                          # 和主模型同一个位置：不行，说清楚为什么
+        code, text = model("fallback", "ollama", model="qwen2.5:7b")
+        s = get_settings()
+        assert code == 0 and (s.ai_fallback, s.ai_provider, s.openai_model) == ("openai", "deepseek", "qwen2.5:7b") and "qwen2.5:7b" in text
+        code, text = model("fallback", "claude")                                          # 没给 Key：存了，但如实说还没生效
+        assert code == 0 and "还没生效" in text
+        assert model("fallback", "off")[0] == 0 and get_settings().ai_fallback == ""
+        with pytest.raises(ValueError, match="备用模型"):
+            cli._apply({"ai_fallback": "gpt"})
+    finally:
+        ENV_FILE.unlink(missing_ok=True)
+        reload_settings()

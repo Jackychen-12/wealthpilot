@@ -200,10 +200,55 @@ def cmd_model(args, *, ask: Ask = input, secret: Ask = getpass.getpass, out: Out
         except ValueError as e:
             out(f"✗ 没有保存：{e}")
             return 1
+    if action == "fallback":
+        return _fallback(args, out)
     from wealthpilot.routes.onboarding import model_ready
     where = f" @ {s.openai_base_url}" if s.ai_provider == "openai" else ""
     out(f"现在用的：{s.ai_provider} · {s.active_model or '（没填模型名）'}{where}" + ("" if model_ready() else "  ← 还没配好，运行 wealthpilot setup"))
+    out(_fallback_line())
     out("wealthpilot model list  看能接哪些；wealthpilot model set <服务> --key <Key>  换一个；wealthpilot model test  实测一次")
+    return 0
+
+
+def _fallback_line() -> str:
+    from wealthpilot.services.ai_client import PROVIDER_LABEL, _model_of, fallback_provider
+
+    s = _settings()
+    active = fallback_provider(s)
+    if active:
+        return f"备用模型：{PROVIDER_LABEL[active]} · {_model_of(s, active)}（主模型余额不足、Key 失效、限流、连不上时，这一轮自动换过去）"
+    if s.ai_fallback:
+        return f"备用模型：设成了 {s.ai_fallback}，但还没生效 —— 和主模型是同一家，或者那一家的 Key / 模型名没填全"
+    return "备用模型：没有。主模型用不了时研究会直接停下。设一个：wealthpilot model fallback <服务> --key <Key>"
+
+
+def _fallback(args, out: Out) -> int:
+    """备用模型：主模型这一轮用不了时自动换过去。三个位置（DeepSeek / Claude / 兼容服务）里挑一个和主模型不同的。"""
+    s = _settings()
+    name = (args.name or "").strip()
+    if not name:
+        out(_fallback_line())
+        return 0
+    if name.lower() in ("off", "none", "关", "关掉"):
+        _apply({"ai_fallback": ""})
+        out("✓ 已关掉备用模型")
+        return 0
+    preset = providers.find(name)
+    if preset is None:
+        out(f"不认识「{name}」。可选：{'、'.join(p['key'] for p in providers.PRESETS)}；关掉用 off")
+        return 2
+    if preset["provider"] == s.ai_provider:
+        out("备用模型要和主模型分属不同的位置：DeepSeek、Claude、兼容服务（其余几家和本机模型共用这一个位置）各算一个。"
+            f"现在主模型用的就是「{preset['label']}」这个位置，换一家当备用。")
+        return 1
+    changes = {k: v for k, v in providers.changes_for(preset, (args.key or "").strip(), args.model or "", args.base_url or "").items()
+               if k != "ai_provider" and v != ""}
+    try:
+        _apply({**changes, "ai_fallback": preset["provider"]})
+    except ValueError as e:
+        out(f"✗ 没有保存：{e}")
+        return 1
+    out(_fallback_line())
     return 0
 
 
@@ -279,6 +324,10 @@ def cmd_status(_args, *, out: Out = print) -> int:
     out(f"WealthPilot v{__version__}")
     out(f"  数据目录   {HOME}")
     out(f"  模型       {s.ai_provider} · {s.active_model}" + ("" if ready else "  ← 还没配好：wealthpilot setup"))
+    from wealthpilot.services.ai_client import PROVIDER_LABEL, _model_of, fallback_provider
+    backup = fallback_provider(s)
+    if backup:
+        out(f"  备用模型   {PROVIDER_LABEL[backup]} · {_model_of(s, backup)}")
     out(f"  持仓与自选 {holdings} 只持仓，{watching} 只自选" + ("" if holdings or watching else "  ← 还是空的：wealthpilot setup 或 wealthpilot import"))
     out(f"  每日盯盘   {'开着，' + s.watch_time if s.watch_enabled else '关着'}；自动任务 {len(autos)} 条开着")
     out(f"  手机       {'、'.join(paired) + ' 已绑定' if paired else '没有绑定（网页版「设置 → 手机触达」）'}")
@@ -384,9 +433,9 @@ def register(sub) -> dict:
     setup.add_argument("--test", action="store_true", help="保存后实测一次模型（会花几十个 token）")
     setup.add_argument("--no-test", dest="no_test", action="store_true", help="不测试，也不问")
 
-    model = sub.add_parser("model", help="现在用的是哪个模型；换一个（model list / set / test）")
-    model.add_argument("action", nargs="?", choices=["show", "list", "set", "test"])
-    model.add_argument("name", nargs="?", help="set 时：服务的名字")
+    model = sub.add_parser("model", help="现在用的是哪个模型；换一个；设备用模型（model list / set / test / fallback）")
+    model.add_argument("action", nargs="?", choices=["show", "list", "set", "test", "fallback"])
+    model.add_argument("name", nargs="?", help="set / fallback 时：服务的名字（fallback off 关掉备用）")
     model.add_argument("--key")
     model.add_argument("--model")
     model.add_argument("--base-url", dest="base_url")
