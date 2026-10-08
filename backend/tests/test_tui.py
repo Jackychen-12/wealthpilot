@@ -357,3 +357,19 @@ async def test_model_can_be_switched_to_a_service_that_is_already_set_up(monkeyp
     assert app.backend.sent[-1] == ("PUT", "/api/settings", {"ai_fallback": ""})
     await app.handle("/model 不存在的")
     assert "不认识「不存在的」" in out.getvalue()
+
+
+async def test_persona_can_be_picked_or_written_from_the_terminal():
+    presets = [{"key": "friend", "label": "懂行的朋友", "text": "像一个懂行的朋友在跟我聊。\n- 先说结论"}]
+    state = {"text": "", "path": "/tmp/SOUL.md", "max_chars": 1200, "presets": presets}
+    app, out = run_api({("GET", "/api/settings/persona"): state, ("PUT", "/api/settings/persona"): lambda kw: {**state, "text": kw["json"]["text"]}})
+    await app.handle("/persona")
+    assert "还没有写" in out.getvalue() and "只管语气和详略" in out.getvalue()
+    await app.handle("/persona use")
+    assert "friend" in out.getvalue() and not any(s[0] == "PUT" for s in app.backend.sent)
+    await app.handle("/persona use 懂行的朋友")
+    assert app.backend.sent[-1] == ("PUT", "/api/settings/persona", {"text": presets[0]["text"]}) and "已换成「懂行的朋友」" in out.getvalue()
+    await app.handle("/persona set 说短点，别用套话")
+    assert app.backend.sent[-1][2] == {"text": "说短点，别用套话"}
+    await app.handle("/persona clear")
+    assert app.backend.sent[-1][2] == {"text": ""} and "已清空" in out.getvalue()

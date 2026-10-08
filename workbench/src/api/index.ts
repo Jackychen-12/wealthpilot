@@ -180,6 +180,8 @@ export const api = {
   removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
   runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
   parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
+  persona: () => request<Persona>('/api/settings/persona'),
+  savePersona: (text: string) => request<Persona>('/api/settings/persona', { method: 'PUT', body: JSON.stringify({ text }) }),
   conversations: (q = '') => request<ConversationInfo[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   conversation: (id: string) => request<{ id: string; turns: ConversationTurn[] }>(`/api/conversations/${encodeURIComponent(id)}`),
   lessons: () => request<MemoryItem[]>('/api/lessons'),
@@ -229,6 +231,7 @@ export interface Backtest {
 export interface FundInfo { code: string; name: string; nav: number; nav_date: string; estimated_change?: number; manager?: string; company?: string; scale?: string; type?: string; benchmark?: string
   return_1w?: string; return_1m?: string; return_3m?: string; return_1y?: string }
 export interface NavPoint { nav_date: string; nav: number; daily_return: number; open?: number; high?: number; low?: number; volume?: number }
+export interface Persona { text: string; path: string; max_chars: number; presets: { key: string; label: string; text: string }[] }
 export interface ModelPreset { key: string; label: string; provider: string; base_url: string; model: string; needs_key: boolean; note: string; key_page: string }
 export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; fallback_active?: string; env_file: string; presets?: ModelPreset[] }
 export interface StockQuote { code: string; name: string; price: number; prev_close: number; open: number; high: number; low: number

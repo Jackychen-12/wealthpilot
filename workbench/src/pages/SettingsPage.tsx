@@ -242,6 +242,48 @@ const UsagePanel: React.FC = () => {
   )
 }
 
+/** 说话方式：用户自己写的一段话，告诉它怎么跟自己说话。单独保存，不和上面的配置搅在一起。 */
+const PersonaPanel: React.FC = () => {
+  const persona = useApi(api.persona)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const data = persona.data
+  useEffect(() => { if (data) setText(data.text) }, [data])
+  if (!data) return null
+  const save = async () => {
+    setBusy(true); setNote(null)
+    try {
+      await api.savePersona(text)
+      persona.reload()
+      setNote({ tone: 'success', text: text.trim() ? '已保存，下一个问题起生效' : '已清空，之后按默认的写法回答' })
+    } catch (err) {
+      setNote({ tone: 'danger', text: err instanceof Error ? err.message : '保存失败' })
+    } finally { setBusy(false) }
+  }
+  return (
+    <Section title="说话方式" hint="你希望它怎么跟你说话。只管语气、措辞和详略">
+      <div className="grid max-w-2xl gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[13px] text-steel">现成的：</span>
+          {data.presets.map((p) => (
+            <button key={p.key} type="button" onClick={() => setText(p.text)}
+              className={`rounded-full border px-2.5 py-0.5 text-[13px] transition-colors ${text.trim() === p.text.trim() ? 'border-primary text-ink' : 'border-hairline text-slate hover:bg-hover hover:text-ink'}`}>{p.label}</button>
+          ))}
+        </div>
+        <textarea id="s-persona" aria-label="说话方式" value={text} onChange={(e) => setText(e.target.value)} rows={7} maxLength={data.max_chars}
+          placeholder="例如：像一个懂行的朋友在跟我聊。先用大白话说结论，再说为什么；别用“综上所述”这类套话。"
+          className="w-full rounded-md border border-hairline-strong bg-canvas px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-stone focus:border-primary focus:ring-1 focus:ring-primary" />
+        <p className="text-[13px] text-steel">
+          这段话每次研究都会带给模型（{text.length} / {data.max_chars} 字）。它不会让证据引用、数字核对、必须有的章节和风险提示消失——那些规则优先。留空就是默认的写法。
+        </p>
+        {note ? <Callout tone={note.tone}>{note.text}</Callout> : null}
+        <div><Button variant="secondary" size="sm" loading={busy} onClick={() => void save()}>保存说话方式</Button></div>
+      </div>
+    </Section>
+  )
+}
+
 /** 设置：在网页上改配置，不用编辑 .env。保存后立即生效。 */
 const SettingsPage: React.FC = () => {
   const settings = useApi(api.settings)
@@ -356,6 +398,8 @@ const SettingsPage: React.FC = () => {
               </div>
               <Button variant="secondary" size="sm" className="mt-3" loading={testing} onClick={() => void test()}>测试当前配置</Button>
             </Section>
+
+            <PersonaPanel />
 
             <Section title="用量与预算" hint="token 是服务商计费的单位；想看折成多少钱，把你那家的单价填上">
               <UsagePanel />

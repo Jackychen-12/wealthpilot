@@ -64,6 +64,7 @@ COMMANDS: dict[str, str] = {
     "/tasks": "/tasks [add <时间> | <问题>] [run|on|off|rm <编号>] — 定时任务，如 /tasks add 工作日 08:30 | 诊断一下我的持仓",
     "/alert": "/alert [<名称或代码> price<=1350] [rm <编号>] — 提醒（price 价格 / chg 涨跌幅 / pe、pb 历史分位）",
     "/model": "/model [服务名 | fallback <服务名|off>] — 现在用哪个模型；换一家已经配好的；设备用模型",
+    "/persona": "/persona [use <预设> | set <一段话> | clear] — 说话方式：你希望它怎么跟你说话（只管语气和详略）",
     "/usage": "今天、近 7 天、近 30 天用了多少 token，都花在哪类问题上",
     "/logs": "/logs [errors] — 后台出了什么事（研究失败、推送没发出去、盯盘出错）",
     "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
@@ -83,7 +84,7 @@ HELP_GROUPS = [
     ("行情", ["/stock", "/search", "/screen", "/market"]),
     ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
-    ("调教与追责", ["/skills", "/memory", "/lessons", "/audit"]),
+    ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit"]),
     ("其他", ["/setup", "/model", "/usage", "/sample", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
 ]
 ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
@@ -847,6 +848,32 @@ class App:
         data = await self.backend.request("PUT", "/api/settings", json=payload)
         self.backend.label = f"本机 · {data['values']['ai_provider']} / {data['active_model']}"
         self.console.print(f"[green]已换成[/] {data['values']['ai_provider']} · {data['active_model']} [dim]下一个问题起生效。没实测过，不放心就运行 /doctor[/]", highlight=False)
+
+    async def cmd_persona(self, args: str) -> None:
+        action, _, rest = args.strip().partition(" ")
+        rest = rest.strip()
+        data = await self.backend.request("GET", "/api/settings/persona")
+        if action == "use":
+            preset = next((p for p in data["presets"] if rest in (p["key"], p["label"])), None)
+            if preset is None:
+                t = self.table("名字", "是什么", "第一句")
+                for p in data["presets"]:
+                    t.add_row(p["key"], p["label"], p["text"].splitlines()[0])
+                self.console.print(t)
+                self.console.print("[dim]/persona use <名字>[/]")
+                return
+            data = await self.backend.request("PUT", "/api/settings/persona", json={"text": preset["text"]})
+            self.console.print(f"[green]已换成「{preset['label']}」[/] [dim]下一个问题起生效[/]")
+        elif action == "set" and rest:
+            data = await self.backend.request("PUT", "/api/settings/persona", json={"text": rest})
+            self.console.print("[green]已保存[/] [dim]下一个问题起生效[/]")
+        elif action == "clear":
+            data = await self.backend.request("PUT", "/api/settings/persona", json={"text": ""})
+            self.console.print("[dim]已清空，之后按默认的写法回答[/]")
+            return
+        self.console.print(data["text"] or "[dim]还没有写，现在按默认的写法回答[/]", highlight=False, markup=not data["text"])
+        if action not in ("use", "set"):
+            self.console.print(f"[dim]/persona use 看现成的；/persona set <一段话> 自己写；也可以直接编辑 {data['path']}。它只管语气和详略，证据引用和数字核对不受影响[/]", highlight=False)
 
     async def cmd_logs(self, args: str) -> None:
         if not isinstance(self.backend, LocalBackend):

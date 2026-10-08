@@ -78,6 +78,7 @@ def build_synthesizer_prompt(
             "各节先给一句判断，再给支撑它的两三个数字，不要把证据逐条复述一遍；除结论外每节不超过五句话或一张小表。\n"
         )
 
+    from wealthpilot.services import persona
     from wealthpilot.settings import get_settings
     advice = get_settings().advice_mode
     stance_line = ("可以给出立场与操作建议，但不得承诺收益。" if advice else "不预测股价，不给目标价。")
@@ -109,7 +110,7 @@ def build_synthesizer_prompt(
 
 {section_block}{advice_block}
 {build_profile_context(profile)}
-
+{persona.block()}
 ## 输出
 中文，专业但通俗。引用财务数据时写明报告期。{stance_line}每条事实或数字在同一行用 [E-证据ID] 引用给定证据。
 区分事实、研究假设和反面证据；说明成立条件、失效条件、数据日期与下一步要验证的内容。

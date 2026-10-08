@@ -482,6 +482,43 @@ def cmd_channels(args, *, out: Out = print) -> int:
     return 2
 
 
+def cmd_persona(args, *, out: Out = print) -> int:
+    """说话方式：你希望它怎么跟你说话。只管语气和详略，不改变事实和校验规则。"""
+    from wealthpilot.services import persona
+
+    action = args.action or "show"
+    try:
+        if action == "path":
+            out(str(persona.FILE))
+        elif action == "clear":
+            persona.write("")
+            out("✓ 已清空。之后按默认的写法回答。")
+        elif action == "use":
+            if not args.text:
+                for key, (label, text) in persona.PRESETS.items():
+                    out(f"  {key:<8} {label}：{text.splitlines()[0]}")
+                out("用其中一个：wealthpilot persona use <第一列>；用了之后可以再改，文件在 " + str(persona.FILE))
+                return 0
+            persona.use(args.text)
+            out(f"✓ 已换成「{args.text}」。下一个问题起生效：\n\n{persona.read()}")
+        elif action == "set":
+            if not args.text:
+                out('用法：wealthpilot persona set "先说结论，用大白话，别用套话"')
+                return 2
+            persona.write(args.text)
+            out("✓ 已保存，下一个问题起生效。")
+        else:
+            text = persona.read()
+            out(text or "还没有写。它现在按默认的写法回答。")
+            out(f"\n现成的：wealthpilot persona use（{'、'.join(label for label, _ in persona.PRESETS.values())}）"
+                f"\n自己写：wealthpilot persona set \"……\"，或直接编辑 {persona.FILE}"
+                "\n它只管语气和详略；证据引用、数字核对、风险提示不会因为它被省掉。")
+    except ValueError as e:
+        out(f"✗ {e}")
+        return 1
+    return 0
+
+
 def cmd_backup(args, *, out: Out = print) -> int:
     """把你的东西打成一个文件：数据库、配置、研究方法、数据连接。"""
     from wealthpilot.services import backup
@@ -636,6 +673,9 @@ def register(sub) -> dict:
     logs.add_argument("--errors", action="store_true", help="只看警告和错误")
     logs.add_argument("-f", "--follow", action="store_true", help="一直跟着看新写进来的（Ctrl-C 停）")
     logs.add_argument("--path", action="store_true", help="只打印日志文件在哪")
+    persona = sub.add_parser("persona", help="说话方式：你希望它怎么跟你说话（persona / use <预设> / set \"…\" / clear / path）")
+    persona.add_argument("action", nargs="?", choices=["show", "use", "set", "clear", "path"])
+    persona.add_argument("text", nargs="?", help="use 时是预设的名字，set 时是你写的那段话")
     ch = sub.add_parser("channels", help="手机上的渠道：Telegram / 飞书 / 企业微信（channels / setup / pair / unpair / test）")
     ch.add_argument("action", nargs="?", choices=["list", "setup", "pair", "unpair", "test"])
     ch.add_argument("name", nargs="?", help="telegram / feishu / wecom")
@@ -650,4 +690,4 @@ def register(sub) -> dict:
     restore.add_argument("--yes", action="store_true", help="不再确认")
     return {"setup": cmd_setup, "model": cmd_model, "config": cmd_config, "status": cmd_status, "skills": cmd_skills,
             "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs, "backup": cmd_backup, "restore": cmd_restore,
-            "channels": cmd_channels}
+            "channels": cmd_channels, "persona": cmd_persona}

@@ -24,7 +24,7 @@ BACKUP_DIR = HOME / "backups"
 SECRET_KEYS = ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN", "FEISHU_APP_SECRET",
                "WECOM_SECRET", "WECOM_TOKEN", "WECOM_AES_KEY", "JWT_SECRET")
 _KEY_RE = re.compile(r"\s*([A-Z0-9_]+)\s*=")
-_ALLOWED = re.compile(r"^(manifest\.json|env|connectors\.json|data/wealthpilot\.db|skills/[A-Za-z0-9_\-./]+)$")
+_ALLOWED = re.compile(r"^(manifest\.json|env|connectors\.json|SOUL\.md|data/wealthpilot\.db|skills/[A-Za-z0-9_\-./]+)$")
 
 
 def _env_file() -> Path:
@@ -92,6 +92,10 @@ def create(dest: Path | str | None = None, *, keys: bool = True, label: str = "b
         if connectors.is_file():
             _add(tar, "connectors.json", connectors.read_bytes())
             contents.append("数据连接")
+        soul = HOME / "SOUL.md"
+        if soul.is_file():
+            _add(tar, "SOUL.md", soul.read_bytes())
+            contents.append("说话方式")
         manifest = {"app": "wealthpilot", "version": __version__, "created_at": datetime.now().isoformat(timespec="seconds"),
                     "with_keys": keys, "contents": contents}
         _add(tar, "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"))
@@ -160,6 +164,9 @@ def restore(archive: Path | str) -> dict:
         if "connectors.json" in manifest["files"]:
             Path(settings.connectors_file).write_bytes(read("connectors.json"))
             restored.append("数据连接")
+        if "SOUL.md" in manifest["files"]:
+            (HOME / "SOUL.md").write_bytes(read("SOUL.md"))
+            restored.append("说话方式")
     reload_settings()
     prune()
     return {"restored": restored, "saved_current_to": str(saved), "manifest": manifest}

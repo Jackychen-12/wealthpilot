@@ -133,6 +133,27 @@ def apply_changes(body: dict) -> list[str]:
     return sorted(changes)
 
 
+@router.get("/persona")
+def get_persona():
+    """说话方式：现在写的是什么、有哪些现成的可以直接用。"""
+    from wealthpilot.services import persona
+    return {"text": persona.read(), "path": str(persona.FILE), "max_chars": persona.MAX_CHARS,
+            "presets": [{"key": k, "label": label, "text": text} for k, (label, text) in persona.PRESETS.items()]}
+
+
+@router.put("/persona")
+def put_persona(body: dict, request: Request):
+    from wealthpilot.services import persona
+    _local_only(request)
+    try:
+        text = persona.write(str(body.get("text") or ""))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    with Session(get_engine()) as db:
+        memory.record(db, get_settings().local_user_id, "settings/changed", "说话方式", {"keys": ["persona"], "chars": len(text)}, actor="user")
+    return {**get_persona(), "text": text}
+
+
 @router.put("")
 def update_settings(body: dict, request: Request):
     _local_only(request)
