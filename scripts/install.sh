@@ -109,8 +109,8 @@ case ":$PATH:" in
   *) say "注意：$BIN 不在 PATH 里。把这一行加进 ~/.zshrc 或 ~/.bashrc，然后新开一个终端：
   export PATH=\"$BIN:\$PATH\"" ;;
 esac
-if [ -n "${WEALTHPILOT_KEY:-}" ]; then
-  say "下一步：  wealthpilot          直接开始用"
+if "$BIN/wealthpilot" status >/dev/null 2>&1; then   # status 在模型配好时返回 0
+  say "下一步：  wealthpilot          模型已经配好，直接开始用"
 else
   say "下一步：  wealthpilot setup    选一家模型、贴一个 Key（一分钟）
           wealthpilot          开始用"
