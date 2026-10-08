@@ -160,7 +160,7 @@ async def check(text: str, *, kline=fetch_stock_kline, today: date | None = None
     chased = [(t, v) for t, v in run_ups if v >= CHASE_PCT]
     if run_ups:
         share = len(chased) / len(run_ups) * 100
-        findings.append({"key": "chasing", "label": "追高", "flag": share >= 30,
+        findings.append({"key": "chasing", "label": "追涨", "flag": share >= 30,
                          "text": f"{len(run_ups)} 次买入里有 {len(chased)} 次（{share:.0f}%）是在此前 5 个交易日已经涨了 {CHASE_PCT:g}% 以上之后买的；"
                                  f"所有买入前 5 日涨幅的中位数是 {median(v for _, v in run_ups):+.1f}%。",
                          "examples": [f"{t['date']} {t['name']} 买入前 5 日 {v:+.1f}%" for t, v in sorted(chased, key=lambda x: -x[1])[:3]]})
@@ -169,22 +169,23 @@ async def check(text: str, *, kline=fetch_stock_kline, today: date | None = None
         holds = [c["days"] for c in closed]
         short = sum(1 for d in holds if d <= SHORT_HOLD_DAYS)
         per_month = len(trades) / months
-        findings.append({"key": "overtrading", "label": "交易频率", "flag": per_month >= 20 or short / len(holds) >= 0.5,
+        findings.append({"key": "overtrading", "label": "交易频率与持有期", "flag": per_month >= 20 or short / len(holds) >= 0.5,
                          "text": f"{first} 到 {last} 一共 {len(trades)} 笔成交，平均每月 {per_month:.1f} 笔；了结的 {len(closed)} 笔里持有天数的中位数是 {median(holds):g} 天，"
                                  f"{short} 笔（{short / len(holds) * 100:.0f}%）持有不到 {SHORT_HOLD_DAYS} 天。", "examples": []})
     # 亏损加仓
     if adds:
         down = [a for a in adds if a["below_cost_pct"] <= -5]
-        findings.append({"key": "averaging_down", "label": "越跌越买", "flag": len(down) >= 3 and len(down) / len(adds) >= 0.4,
-                         "text": f"{len(adds)} 次加仓里有 {len(down)} 次是在比持仓成本低 5% 以上的位置补的。",
+        findings.append({"key": "averaging_down", "label": "亏损加仓", "flag": len(down) >= 3 and len(down) / len(adds) >= 0.4,
+                         "text": f"{len(adds)} 次加仓里有 {len(down)} 次是在比持仓成本低 5% 以上的位置买的（摊平成本）。",
                          "examples": [f"{a['date']} {a['name']} 买在成本下方 {abs(a['below_cost_pct']):.1f}%" for a in sorted(down, key=lambda a: a["below_cost_pct"])[:3]]})
     # 处置效应、盈亏比
     wins, losses = [c for c in closed if c["pnl"] > 0], [c for c in closed if c["pnl"] < 0]
     if wins and losses:
         win_days, loss_days = median(c["days"] for c in wins), median(c["days"] for c in losses)
         avg_win, avg_loss = mean(c["return_pct"] for c in wins), mean(c["return_pct"] for c in losses)
-        findings.append({"key": "disposition", "label": "赚的跑得快、亏的拿得久", "flag": loss_days >= win_days * 1.5 and loss_days - win_days >= 3,
-                         "text": f"赚钱的 {len(wins)} 笔持有天数的中位数是 {win_days:g} 天，亏钱的 {len(losses)} 笔是 {loss_days:g} 天。", "examples": []})
+        findings.append({"key": "disposition", "label": "处置效应", "flag": loss_days >= win_days * 1.5 and loss_days - win_days >= 3,
+                         "text": f"盈利的 {len(wins)} 笔持有天数的中位数是 {win_days:g} 天，亏损的 {len(losses)} 笔是 {loss_days:g} 天"
+                                 + ("——赚的急着卖，亏的一直拿着。" if loss_days >= win_days * 1.5 and loss_days - win_days >= 3 else "。"), "examples": []})
         findings.append({"key": "payoff", "label": "胜率和盈亏比", "flag": abs(avg_loss) > avg_win and len(wins) / len(closed) < 0.6,
                          "text": f"了结的 {len(closed)} 笔里 {len(wins)} 笔赚钱（胜率 {len(wins) / len(closed) * 100:.0f}%）；赚的平均 {avg_win:+.1f}%，亏的平均 {avg_loss:+.1f}%，"
                                  f"盈亏比 {avg_win / abs(avg_loss):.2f}。合计盈亏 {sum(c['pnl'] for c in closed):+,.0f} 元（不含手续费）。", "examples": []})
@@ -192,7 +193,7 @@ async def check(text: str, *, kline=fetch_stock_kline, today: date | None = None
     after = [(t, v) for t in sells if (v := _after(closes.get(t["code"]) or [], t["date"], 20)) is not None]
     if len(after) >= 3:
         rose = [(t, v) for t, v in after if v >= 10]
-        findings.append({"key": "sold_early", "label": "卖出之后", "flag": len(rose) / len(after) >= 0.4,
+        findings.append({"key": "sold_early", "label": "卖出后走势", "flag": len(rose) / len(after) >= 0.4,
                          "text": f"{len(after)} 次卖出之后的 20 个交易日，股价中位数变动 {median(v for _, v in after):+.1f}%；其中 {len(rose)} 次卖出后又涨了 10% 以上。",
                          "examples": [f"{t['date']} 卖出 {t['name']}，之后 20 日 {v:+.1f}%" for t, v in sorted(rose, key=lambda x: -x[1])[:3]]})
     # 亏在哪
@@ -205,20 +206,20 @@ async def check(text: str, *, kline=fetch_stock_kline, today: date | None = None
             "findings": findings, "flagged": [f["label"] for f in flagged],
             "worst_stocks": [{"name": n, "pnl": round(v, 2)} for n, v in worst if v < 0], "problems": parsed["problems"],
             "missing_prices": [c for c in codes if not closes.get(c)],
-            "note": "只看行为，不评价你选的股票。盈亏按先进先出配对，不含手续费和分红；追高和卖出之后用的是前复权日线。"}
+            "note": "只诊断交易行为，不评价选股。盈亏按先进先出配对，不含手续费和分红；追涨和卖出后走势用前复权日线计算。"}
 
 
 def text(report: dict) -> str:
     if not report.get("ok"):
         return report.get("reason", "没有看出什么。") + "".join(f"\n  {p}" for p in report.get("problems") or [])
     lines = [f"{report['period']['from']} 到 {report['period']['to']}：{report['trades']} 笔成交，{report['stocks']} 只股票，了结 {report['closed']} 笔"]
-    lines.append("值得留意：" + "、".join(report["flagged"]) if report["flagged"] else "没有发现明显反复出现的毛病。")
+    lines.append("需要留意：" + "、".join(report["flagged"]) if report["flagged"] else "没有发现反复出现的行为偏差。")
     for f in report["findings"]:
         lines.append(f"{'!' if f['flag'] else '·'} {f['label']}：{f['text']}")
         lines += [f"    {e}" for e in f["examples"]]
     if report["worst_stocks"]:
         lines.append("亏得最多的：" + "，".join(f"{w['name']} {w['pnl']:+,.0f} 元" for w in report["worst_stocks"]))
     if report["missing_prices"]:
-        lines.append(f"这些代码没取到行情，追高和卖出之后两项没算上它们：{'、'.join(report['missing_prices'][:8])}")
+        lines.append(f"这些代码没取到行情，追涨和卖出后走势两项没算上它们：{'、'.join(report['missing_prices'][:8])}")
     lines.append(report["note"])
     return "\n".join(lines)

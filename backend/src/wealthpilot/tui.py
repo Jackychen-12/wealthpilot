@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import json
 import re
 import sys
@@ -29,7 +30,7 @@ from rich.table import Table
 from rich.text import Text
 
 from wealthpilot import __version__
-from wealthpilot.services import providers
+from wealthpilot.services import glossary, providers
 
 HOME = Path.home() / ".wealthpilot"
 COMMANDS: dict[str, str] = {
@@ -38,10 +39,10 @@ COMMANDS: dict[str, str] = {
     "/search": "/search <关键词> — 搜索股票 / ETF / 基金",
     "/screen": "/screen pe<15 roe>15 mv>200 [行业] — 选股（pe pb roe mv rev profit chg）",
     "/market": "大盘与行业强弱",
-    "/recap": "今天大盘复盘：涨停与连板、题材热点、龙虎榜、情绪刻度（不调用模型）",
+    "/recap": "大盘复盘：涨停与连板、涨停题材、龙虎榜、市场情绪（不调用模型）",
     "/macro": "宏观数据：PMI、物价、货币信贷、利率",
-    "/dcf": "/dcf <名称或代码> — 反向 DCF：现在这个价钱隐含了多高的利润增长",
-    "/trades": "/trades <成交记录文件> — 交易记录体检：找追高、交易过勤、越跌越买这类毛病",
+    "/dcf": "/dcf <名称或代码> — 反向 DCF：现价的隐含增长率（不是目标价）",
+    "/trades": "/trades <成交记录文件> — 交易行为诊断：追涨、交易过频、亏损加仓、处置效应",
     "/holdings": "我的持仓",
     "/watch": "/watch [add|rm <名称或代码>] — 自选股",
     "/review": "验证点成绩单（事后验证）",
@@ -54,7 +55,8 @@ COMMANDS: dict[str, str] = {
     "/order": "/order <buy|sell> <名称或代码> <数量> — 在模拟盘下单（会再确认一次）",
     "/sample": "/sample [clear] — 载入或清除示例持仓与自选",
     "/skills": "/skills [gallery | install <名称> | draft <一句描述>] — 研究方法：已有的、现成可装的、让 AI 起草",
-    "/memory": "/memory [add <内容> | rm <编号>] — AI 记住的事",
+    "/memory": "/memory [add <内容> | rm <编号>] — 记忆：它记住的关于你的事",
+    "/glossary": "/glossary [词] — 名词解释：封板率、处置效应、隐含增长率……一个词一两句话",
     "/audit": "审计日志（只追加，带完整性校验）",
     "/history": "/history [编号] — 研究记录；带编号则调出那一次，接着追问或 /rewrite",
     "/evidence": "/evidence [证据ID前4位] — 上一次回答的证据",
@@ -68,7 +70,7 @@ COMMANDS: dict[str, str] = {
     "/tasks": "/tasks [add <时间> | <问题>] [run|on|off|rm <编号>] — 定时任务，如 /tasks add 工作日 08:30 | 诊断一下我的持仓",
     "/alert": "/alert [<名称或代码> price<=1350] [rm <编号>] — 提醒（price 价格 / chg 涨跌幅 / pe、pb 历史分位）",
     "/model": "/model [服务名 | fallback <服务名|off>] — 现在用哪个模型；换一家已经配好的；设备用模型",
-    "/persona": "/persona [use <预设> | set <一段话> | clear] — 说话方式：你希望它怎么跟你说话（只管语气和详略）",
+    "/persona": "/persona [use <预设> | set <一段话> | clear] — 回答风格：你希望它怎么跟你说话（只管语气和详略）",
     "/usage": "今天、近 7 天、近 30 天用了多少 token，都花在哪类问题上",
     "/logs": "/logs [errors] — 后台出了什么事（研究失败、推送没发出去、盯盘出错）",
     "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
@@ -88,7 +90,7 @@ HELP_GROUPS = [
     ("行情", ["/stock", "/search", "/screen", "/market", "/recap", "/macro", "/dcf"]),
     ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/trades", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
-    ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit"]),
+    ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit", "/glossary"]),
     ("其他", ["/setup", "/model", "/usage", "/sample", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
 ]
 ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
@@ -469,8 +471,8 @@ class App:
             return
         if not card["total"]:
             return
-        self.console.print(f"\n[bold]立场成绩单[/] [dim]对比{card['benchmark']}，共 {card['total']} 次给过立场[/]")
-        t = self.table("之后", "已结算", "方向对了", "看多的平均超额", "看空的平均超额", right=(1, 2, 3, 4))
+        self.console.print(f"\n[bold]立场回溯[/] [dim]对比{card['benchmark']}，共 {card['total']} 次给过立场[/]")
+        t = self.table("期限", "已结算", "胜率", "看多平均超额收益", "看空平均超额收益", right=(1, 2, 3, 4))
         for horizon, item in card["horizons"].items():
             pct = lambda v: "—" if v is None else f"{v:+.1f}%"  # noqa: E731
             t.add_row(f"{horizon} 个交易日", str(item["settled"]), f"{item['right']}（{item['hit_rate_pct']:g}%）" if item["settled"] else "未到期",
@@ -502,7 +504,7 @@ class App:
             return
         c = self.console
         c.print(f"[bold]{r['name']}[/] [cyan]{r['code']}[/] 市值 {r['market_cap_yi']:g} 亿 · {r['profit_period']}归母净利润 {r['profit_ttm_yi']:g} 亿 · PE {r['pe_ttm']:g}", highlight=False)
-        c.print("现价隐含的利润增速（未来十年，每年）：" + "，".join(
+        c.print("隐含增长率（现价对应的未来十年利润年增速）：" + "，".join(
             f"折现率 {i['discount_pct']:g}% → " + (f"{i['growth_pct']:g}%" if i["growth_pct"] is not None else "解释不了") for i in r["implied_growth"]), highlight=False)
         if r.get("past_profit_cagr_3y_pct") is not None:
             c.print(f"过去三年利润的实际年化增速：{r['past_profit_cagr_3y_pct']:g}%", highlight=False)
@@ -949,6 +951,9 @@ class App:
         if action not in ("use", "set"):
             self.console.print(f"[dim]/persona use 看现成的；/persona set <一段话> 自己写；也可以直接编辑 {data['path']}。它只管语气和详略，证据引用和数字核对不受影响[/]", highlight=False)
 
+    async def cmd_glossary(self, args: str) -> None:
+        self.console.print(glossary.explain(args), highlight=False, markup=False)
+
     async def cmd_logs(self, args: str) -> None:
         if not isinstance(self.backend, LocalBackend):
             raise ValueError("日志在运行后端的那台机器上：到那边运行 wealthpilot logs")
@@ -1106,6 +1111,8 @@ class App:
                 t.add_row(f"[cyan]{name}[/]", escape(COMMANDS[name]))   # 说明里的 [可选参数] 不是样式标记
             self.console.print(t)
             self.console.print()
+        words = "、".join(sorted({w for w, cmd in glossary.COMMAND_WORDS.items() if hasattr(self, f"cmd_{cmd[1:]}")}, key=len)[:14])
+        self.console.print(f"[dim]不想记命令：直接打这些词也行（不调用模型）—— {words}。看不懂的词：/glossary 封板率[/]", highlight=False)
         self.console.print("[dim]直接输入问题就是一次研究，例如：帮我深度分析一下宁德时代 / 对比茅台和五粮液 / 复盘一下之前的研究[/]")
 
     # —— 主循环 ——
@@ -1118,11 +1125,16 @@ class App:
         if line in ("/quit", "/exit", "quit", "exit"):
             return False
         try:
+            word = line.lstrip("/")
+            if word in glossary.COMMAND_WORDS and hasattr(self, f"cmd_{glossary.COMMAND_WORDS[word][1:]}"):
+                line = glossary.COMMAND_WORDS[word]      # 整句话正好是"复盘""持仓"这类词：直接给，不调用模型
             if line.startswith("/"):
                 name, _, args = line.partition(" ")
                 handler = getattr(self, f"cmd_{name[1:]}", None)
                 if handler is None:
-                    self.console.print(f"[red]没有这个命令：{name}[/]（/help 看全部）")
+                    close = difflib.get_close_matches(name, list(COMMANDS), n=2, cutoff=0.6)
+                    hint = f"是不是想用 {' 或 '.join(close)}？" if close else "/help 看全部"
+                    self.console.print(f"[red]没有这个命令：{name}[/]（{hint}）")
                 else:
                     await handler(args.strip())
             else:

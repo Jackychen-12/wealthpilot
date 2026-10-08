@@ -29,14 +29,14 @@ CHANNELS = {"telegram": "Telegram", "feishu": "飞书", "dingtalk": "钉钉", "w
 _FOREVER = 3650 * cache.DAY
 PAIR_TTL = 600
 CHUNK = 3800   # Telegram 单条上限 4096
-HELP = ("直接发问题就是一次研究，例如：帮我分析一下宁德时代\n"
-        "/quick 问题 — 快速回答（十来秒）\n/deep 问题 — 重新取数，完整研究\n"
-        "/rewrite 要求 — 不重新取数，把上一个回答换个写法（更短一点 / 只讲风险）\n/stop — 停掉正在查的这一个\n"
-        "/stock 名称 — 行情与估值分位\n/holdings — 我的持仓\n/watch — 自选\n"
-        "/recap — 今天大盘复盘（涨停、连板、题材、龙虎榜）\n/macro — 宏观数据\n"
-        "/digest — 今天的简报\n/review — 当初的判断现在怎么样\n/proposals — 等我决定的建议\n/tasks — 定时任务与提醒\n"
-        "/status — 模型、今天用量、正在查什么\n/usage — 用了多少\n/new — 开始新会话\n/help — 这份说明\n"
-        "也可以发截图（别人的观点、持仓、图表）或语音，我先转成文字给你看一眼，再照着查。")
+HELP = ("直接发问题就是一次研究，例如：帮我分析一下宁德时代。也可以发截图或语音。\n\n"
+        "不用模型、马上就有的（直接发这几个词）：\n"
+        "复盘 — 今天的大盘：涨停、连板、题材、龙虎榜\n宏观 — PMI、物价、利率\n持仓 / 自选 — 现价和盈亏\n"
+        "简报 — 你的股票今天有什么事\n回溯 — 之前的判断对不对\n建议单 — 等你决定的操作建议\n"
+        "状态 / 用量 — 模型、今天花了多少\n停 — 停掉正在查的这一个\n解释 封板率 — 看不懂的词\n\n"
+        "要它研究的：\n/quick 问题 — 快速回答（十来秒）\n/deep 问题 — 重新取数，完整研究\n"
+        "/rewrite 要求 — 把上一个回答换个写法\n/stock 名称 — 行情与估值分位\n/new — 开始新会话\n\n"
+        "斜杠命令照旧可用：/recap /macro /holdings /watch /digest /review /proposals /tasks /status /usage /stop /help")
 FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
 STATUS = {"passed": "已通过校验", "partial": "部分证据缺失", "rejected": "未通过校验，未发布", "insufficient_data": "证据不足，未发布", "failed": "执行失败"}
 
@@ -228,8 +228,15 @@ class Bot:
     # —— 文字消息 ——
 
     async def _text(self, chat_id: int, text: str) -> None:
+        from wealthpilot.services import glossary
+        word = text.strip().lstrip("/")
+        if word in glossary.COMMAND_WORDS:          # 手机上打斜杠和英文不方便：整句话正好是"复盘""持仓"就当命令
+            text = glossary.COMMAND_WORDS[word]
         command, _, rest = text.partition(" ")
         rest = rest.strip()
+        if command in ("解释", "/解释", "/glossary", "什么是") and rest:
+            await self.api.send(chat_id, glossary.explain(rest))
+            return
         if command in ("/start", "/help"):
             await self.api.send(chat_id, HELP)
         elif command == "/digest":

@@ -78,7 +78,7 @@ def test_api_command_and_backup():
     assert run("use", "不存在")[0] == 1 and run("set")[0] == 2
     assert run("set", "先说结论")[0] == 0 and persona.read() == "先说结论"
     archive = backup.create()
-    assert "说话方式" in backup.inspect(archive)["contents"]
+    assert "回答风格" in backup.inspect(archive)["contents"]
     assert run("clear")[0] == 0 and persona.read() == "" and "还没有写" in run()[1]
     backup.restore(archive)
     assert persona.read() == "先说结论"

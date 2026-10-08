@@ -501,7 +501,7 @@ def cmd_macro(_args, *, out: Out = print) -> int:
 
 
 def cmd_trades(args, *, out: Out = print) -> int:
-    """交易记录体检：从你自己的成交记录里找反复出现的毛病。记录不保存。"""
+    """交易行为诊断：从你自己的成交记录里找反复出现的行为偏差。记录不保存。"""
     from wealthpilot.services import trades
     try:
         raw = sys.stdin.buffer.read() if args.file == "-" else Path(args.file).expanduser().read_bytes()
@@ -566,7 +566,7 @@ def cmd_daily(args, *, out: Out = print) -> int:
 
 
 def cmd_persona(args, *, out: Out = print) -> int:
-    """说话方式：你希望它怎么跟你说话。只管语气和详略，不改变事实和校验规则。"""
+    """回答风格：你希望它怎么跟你说话。只管语气和详略，不改变事实和校验规则。"""
     from wealthpilot.services import persona
 
     action = args.action or "show"
@@ -756,14 +756,14 @@ def register(sub) -> dict:
     logs.add_argument("--errors", action="store_true", help="只看警告和错误")
     logs.add_argument("-f", "--follow", action="store_true", help="一直跟着看新写进来的（Ctrl-C 停）")
     logs.add_argument("--path", action="store_true", help="只打印日志文件在哪")
-    sub.add_parser("recap", help="今天市场发生了什么：涨停与连板、题材热点、龙虎榜、情绪刻度（不调用模型）")
+    sub.add_parser("recap", help="大盘复盘：涨停与连板、涨停题材、龙虎榜、市场情绪（不调用模型）")
     sub.add_parser("macro", help="宏观数据：PMI、物价、货币信贷、利率")
-    trades = sub.add_parser("trades", help="交易记录体检：从成交记录里找追高、交易过勤、越跌越买这类毛病（trades 交割单.csv）")
+    trades = sub.add_parser("trades", help="交易行为诊断：从成交记录里找追涨、交易过频、亏损加仓、处置效应（trades 交割单.csv）")
     trades.add_argument("file", help="券商导出的成交记录（CSV），或每行“日期 代码 买/卖 价格 数量”的文本；- 表示从管道读")
     daily = sub.add_parser("daily", help="跑一份日报：大盘复盘 + 你关注的股票（给 GitHub Actions 这类定时环境用）")
     daily.add_argument("--stocks", help="关注的股票，名称或代码，逗号分隔；不给就读环境变量 STOCK_LIST")
     daily.add_argument("--push", action="store_true", help="推到 ALERT_WEBHOOK_URL 或 Telegram（TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID）")
-    persona = sub.add_parser("persona", help="说话方式：你希望它怎么跟你说话（persona / use <预设> / set \"…\" / clear / path）")
+    persona = sub.add_parser("persona", help="回答风格：你希望它怎么跟你说话（persona / use <预设> / set \"…\" / clear / path）")
     persona.add_argument("action", nargs="?", choices=["show", "use", "set", "clear", "path"])
     persona.add_argument("text", nargs="?", help="use 时是预设的名字，set 时是你写的那段话")
     ch = sub.add_parser("channels", help="手机上的渠道：Telegram / 飞书 / 企业微信（channels / setup / pair / unpair / test）")

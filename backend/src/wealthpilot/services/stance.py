@@ -84,7 +84,7 @@ def summarize(settled_calls: list[dict]) -> dict:
         by_horizon[horizon] = item
     total = len(settled_calls)
     note = ("还没有给过立场的个股研究。打开个人模式（设置里的「给出立场与操作建议」）之后，研究才会写立场。" if not total
-            else "样本太少（不到 10 条已结算），这个数只能看个大概，说明不了准不准。" if max(v["settled"] for v in by_horizon.values()) < 10 else "")
+            else "已结算不到 10 条，样本太少，胜率不具统计意义。" if max(v["settled"] for v in by_horizon.values()) < 10 else "")
     return {"total": total, "horizons": by_horizon, "note": note, "benchmark": "沪深 300", "neutral_band_pct": NEUTRAL_BAND}
 
 
@@ -106,15 +106,15 @@ async def scorecard(db: Session, user_id: int, *, today: date | None = None, kli
 def text(card: dict) -> str:
     if not card["total"]:
         return card["note"]
-    lines = [f"立场成绩单（对比{card['benchmark']}，共 {card['total']} 次给过立场）"]
+    lines = [f"立场回溯（对比{card['benchmark']}，共 {card['total']} 次给过立场）"]
     for horizon, item in card["horizons"].items():
         if not item["settled"]:
             lines.append(f"{horizon} 个交易日后：都还没到期")
             continue
-        parts = [f"{horizon} 个交易日后：{item['settled']} 条已结算，方向对了 {item['right']} 条（{item['hit_rate_pct']:g}%）"]
+        parts = [f"{horizon} 个交易日后：{item['settled']} 条已结算，方向正确 {item['right']} 条（胜率 {item['hit_rate_pct']:g}%）"]
         for stance in ("看多", "看空"):
             if item[f"{stance}_count"]:
-                parts.append(f"{stance}的 {item[f'{stance}_count']} 只平均{'跑赢' if item[f'{stance}_avg_excess_pct'] >= 0 else '跑输'}大盘 {abs(item[f'{stance}_avg_excess_pct']):g} 个百分点")
+                parts.append(f"{stance}的 {item[f'{stance}_count']} 只平均超额收益 {item[f'{stance}_avg_excess_pct']:+g} 个百分点")
         lines.append("，".join(parts))
     if card["note"]:
         lines.append(card["note"])

@@ -95,7 +95,7 @@ def create(dest: Path | str | None = None, *, keys: bool = True, label: str = "b
         soul = HOME / "SOUL.md"
         if soul.is_file():
             _add(tar, "SOUL.md", soul.read_bytes())
-            contents.append("说话方式")
+            contents.append("回答风格")
         manifest = {"app": "wealthpilot", "version": __version__, "created_at": datetime.now().isoformat(timespec="seconds"),
                     "with_keys": keys, "contents": contents}
         _add(tar, "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"))
@@ -166,7 +166,7 @@ def restore(archive: Path | str) -> dict:
             restored.append("数据连接")
         if "SOUL.md" in manifest["files"]:
             (HOME / "SOUL.md").write_bytes(read("SOUL.md"))
-            restored.append("说话方式")
+            restored.append("回答风格")
     reload_settings()
     prune()
     return {"restored": restored, "saved_current_to": str(saved), "manifest": manifest}

@@ -168,7 +168,7 @@ async def test_the_scorecard_counts_only_real_stances_and_admits_small_samples()
         assert (five["settled"], five["right"], five["hit_rate_pct"], five["看空_count"]) == (2, 0, 0.0, 2) and five["看空_avg_excess_pct"] > 0
         assert "样本太少" in card["note"]
         out = stance.text(card)
-        assert "方向对了 0 条（0%）" in out and "看空的 2 只平均跑赢大盘" in out and "样本太少" in out
+        assert "方向正确 0 条（胜率 0%）" in out and "看空的 2 只平均超额收益 +" in out and "样本太少" in out
         with Session(get_engine()) as db:
             empty = await stance.scorecard(db, 78, kline=kline)
         assert empty["total"] == 0 and "个人模式" in stance.text(empty)
@@ -232,12 +232,12 @@ async def test_the_check_names_the_habits_with_numbers_and_examples():
     # 6 次买入里只有 1 次追高：把那一次点出来，但不说成"毛病" —— 要占到三成才算反复出现
     assert not by_key["chasing"]["flag"] and "6 次买入里有 1 次（17%）" in by_key["chasing"]["text"] and "追高股 买入前 5 日 +25.0%" in by_key["chasing"]["examples"][0]
     assert by_key["averaging_down"]["flag"] and "3 次加仓里有 3 次" in by_key["averaging_down"]["text"]
-    assert by_key["disposition"]["flag"] and "赚钱的 1 笔持有天数的中位数是 2 天" in by_key["disposition"]["text"]
+    assert by_key["disposition"]["flag"] and "盈利的 1 笔持有天数的中位数是 2 天，亏损的 5 笔是 28 天——赚的急着卖，亏的一直拿着。" in by_key["disposition"]["text"]
     assert by_key["payoff"]["flag"] and "胜率 17%" in by_key["payoff"]["text"]
     assert report["worst_stocks"][0]["name"] == "摊平股" and report["worst_stocks"][0]["pnl"] == -8250.0
     out = trades.text(report)
-    assert "值得留意：越跌越买、赚的跑得快、亏的拿得久、胜率和盈亏比" in out and "· 追高：" in out and "! 越跌越买：" in out
-    assert "亏得最多的：摊平股 -8,250 元" in out and "不评价你选的股票" in out
+    assert "需要留意：亏损加仓、处置效应、胜率和盈亏比" in out and "· 追涨：" in out and "! 亏损加仓：" in out
+    assert "亏得最多的：摊平股 -8,250 元" in out and "不评价选股" in out
 
 
 async def test_too_few_trades_or_missing_prices_are_said_plainly():

@@ -136,9 +136,22 @@ def apply_changes(body: dict) -> list[str]:
     return sorted(changes)
 
 
+@router.get("/glossary")
+def glossary(q: str = ""):
+    """名词解释。带 q 返回那一个词，不带返回全部。"""
+    from wealthpilot.services import glossary as terms
+    if q.strip():
+        found = terms.lookup(q)
+        if not found:
+            raise HTTPException(404, f"没有「{q}」这个词条")
+        name, (plain, how, aliases) = found
+        return {"term": name, "plain": plain, "how": how, "aliases": list(aliases)}
+    return terms.as_list()
+
+
 @router.get("/persona")
 def get_persona():
-    """说话方式：现在写的是什么、有哪些现成的可以直接用。"""
+    """回答风格：现在写的是什么、有哪些现成的可以直接用。"""
     from wealthpilot.services import persona
     return {"text": persona.read(), "path": str(persona.FILE), "max_chars": persona.MAX_CHARS,
             "presets": [{"key": k, "label": label, "text": text} for k, (label, text) in persona.PRESETS.items()]}
@@ -153,7 +166,7 @@ def put_persona(body: dict, request: Request):
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     with Session(get_engine()) as db:
-        memory.record(db, get_settings().local_user_id, "settings/changed", "说话方式", {"keys": ["persona"], "chars": len(text)}, actor="user")
+        memory.record(db, get_settings().local_user_id, "settings/changed", "回答风格", {"keys": ["persona"], "chars": len(text)}, actor="user")
     return {**get_persona(), "text": text}
 
 

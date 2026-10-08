@@ -181,7 +181,7 @@ def build_prompt(name: str, holdings: list[PortfolioHolding], nav_data: dict[str
     holdings_block = (f"\n## 用户当前持仓\n{_build_holdings_context(holdings, nav_data)}\n"
                       if (spec.needs_holdings or holdings) and not stable_prefix else "")
     from wealthpilot.services import persona
-    # 说话方式放在最后：它是固定的一段文字，不影响前面那一大段命中上下文缓存
+    # 回答风格放在最后：它是固定的一段文字，不影响前面那一大段命中上下文缓存
     return f"""{spec.role}
 {holdings_block}
 ## 规则

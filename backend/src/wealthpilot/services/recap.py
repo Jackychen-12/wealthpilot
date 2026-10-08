@@ -212,7 +212,7 @@ def gauge(board: dict, breadth: dict | None) -> dict:
     points += 1 if down_count <= 5 else -1 if down_count >= 20 else 0
     parts.append(f"跌停 {down_count} 只")
     score(board.get("seal_rate_pct"), 60, 80, "封板率", "%")
-    score(board.get("yesterday_limit_up_today_pct"), 0, 3, "昨日涨停今日平均", "%")
+    score(board.get("yesterday_limit_up_today_pct"), 0, 3, "昨日涨停溢价", "%")
     up, down = (breadth or {}).get("up"), (breadth or {}).get("down")
     if up is not None and down:
         score(round(up / (up + down) * 100, 1), 35, 60, "上涨家数占比", "%")
@@ -256,7 +256,7 @@ def text(recap: dict | None) -> str:
     """复盘写成几行字：推到手机、打在终端里用。"""
     if not recap:
         return "今天没有可复盘的数据（休市，或者还没开盘）。"
-    lines = [f"{recap['day']} 大盘复盘 · 情绪{recap['mood']['label']}"]
+    lines = [f"{recap['day']} 大盘复盘 · 市场情绪：{recap['mood']['label']}"]
     if recap["indices"]:
         lines.append("指数：" + "，".join(f"{i['name']} {i.get('change', '')}" for i in recap["indices"][:4]))
     b, lim = recap.get("breadth"), recap["limits"]
@@ -265,11 +265,11 @@ def text(recap: dict | None) -> str:
     seal = f"，封板率 {lim['seal_rate_pct']:g}%" if lim.get("seal_rate_pct") is not None else ""
     lines.append(f"涨停 {lim['limit_up']}（首板 {lim['first_board']}，连板 {lim['multi_board']}），炸板 {lim['broken']}{seal}，跌停 {lim['limit_down']}")
     if lim.get("yesterday_limit_up_today_pct") is not None:
-        lines.append(f"昨天涨停的 {lim['yesterday_limit_up_count']} 只今天平均 {lim['yesterday_limit_up_today_pct']:+.2f}%")
+        lines.append(f"昨日涨停溢价 {lim['yesterday_limit_up_today_pct']:+.2f}%（昨天涨停的 {lim['yesterday_limit_up_count']} 只今天的平均涨跌幅）")
     for step in lim["ladder"][:4]:
         lines.append(f"{step['boards']} 连板：{'、'.join(step['names'][:6])}")
     if recap["themes"]:
-        lines.append("涨停集中在：" + "；".join(f"{t['theme']} {t['count']} 只（{'、'.join(t['names'][:3])}）" for t in recap["themes"][:4]))
+        lines.append("涨停题材：" + "；".join(f"{t['theme']} {t['count']} 只（{'、'.join(t['names'][:3])}）" for t in recap["themes"][:4]))
     if recap.get("concepts"):
         lines.append("概念领涨：" + "，".join(f"{c['name']} {c['change_pct']:+.2f}%" for c in recap["concepts"]["top"][:4])
                      + "；领跌：" + "，".join(f"{c['name']} {c['change_pct']:+.2f}%" for c in recap["concepts"]["bottom"][:3]))
@@ -281,5 +281,5 @@ def text(recap: dict | None) -> str:
         active = [s for s in lhb["seats"] if s["kind"] == "营业部"][:3]
         if active:
             lines.append("活跃营业部：" + "；".join(f"{s['seat'].replace('股份有限公司', '').replace('有限责任公司', '')[:20]} {s['net_yi']:+.2f} 亿（{'、'.join(s['stocks'][:2])}）" for s in active))
-    lines.append("情绪刻度的依据：" + "，".join(recap["mood"]["basis"]))
+    lines.append("市场情绪的打分依据：" + "，".join(recap["mood"]["basis"]) + "。五项固定打分，描述今天，不预测明天。")
     return "\n".join(lines)

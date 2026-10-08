@@ -223,14 +223,53 @@ def cmd_ask(args: argparse.Namespace) -> None:
     print()
 
 
+OVERVIEW = """WealthPilot — 你自己的 A 股投研 Agent
+
+第一次用
+  wealthpilot setup     选一家模型、贴一个 Key、放进股票（一分钟）
+  wealthpilot           进入终端直接提问；网页版同时在 http://localhost:8000
+
+不调用模型、马上就有的
+  recap                 大盘复盘：涨停与连板、涨停题材、龙虎榜、市场情绪
+  macro                 宏观数据：PMI、物价、货币信贷、利率
+  watch                 每日简报：你的持仓和自选今天有什么事
+  trades <文件>         交易行为诊断：追涨、交易过频、亏损加仓、处置效应
+  status                现在的状态：模型、持仓、盯盘、手机、今天的用量
+
+我的数据
+  import <文件>         从文件录入持仓
+  sessions [关键词]     以前的会话；wealthpilot -c 接着上一个聊
+  backup / restore      备份与恢复（换电脑、重装时用）
+
+调整它
+  model                 看 / 换模型，设备用模型（model list / set / fallback）
+  persona               回答风格：你希望它怎么跟你说话
+  skills                研究方法（skills gallery / install）
+  channels              手机渠道：Telegram / 飞书 / 钉钉 / 企业微信
+  config                看和改其他配置（config list / get / set）
+
+出了问题
+  doctor                自检：哪一环不通、怎么修
+  logs                  后台出了什么事（logs --errors）
+  update                升级到最新版本
+  completion            生成 Tab 补全脚本
+
+给脚本和别的程序用
+  ask "问题"            单次提问（会调用模型）
+  daily                 不靠数据库的日报（GitHub Actions 用）
+  run / mcp             只启动接口服务 / MCP Server
+
+每个命令后面加 --help 看细节，例如：wealthpilot model --help
+看不懂的词：进入终端后输入 /glossary 封板率"""
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="wealthpilot",
-        description="WealthPilot — 你自己的 A 股投研 Agent。第一次用：wealthpilot setup；之后直接敲 wealthpilot。",
-    )
+    # 二十多个命令排成一列没法看：帮助按"想做什么"分组写在 OVERVIEW 里，argparse 自己那张平铺的表收起来
+    parser = argparse.ArgumentParser(prog="wealthpilot", usage="wealthpilot [命令] [参数]", description=OVERVIEW,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     from wealthpilot import __version__
     parser.add_argument("-V", "--version", action="version", version=f"wealthpilot {__version__}")
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command", metavar="命令", help=argparse.SUPPRESS)
 
     run_p = sub.add_parser("run", help="启动 API 服务")
     run_p.add_argument("--reload", action="store_true", help="热重载（开发模式）")
