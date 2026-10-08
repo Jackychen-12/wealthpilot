@@ -11,6 +11,7 @@ token 花了，结果没存。现在每次研究是一个独立的任务，事�
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -65,6 +66,7 @@ async def _drive(run: Run, source: AsyncIterator[dict]) -> None:
     except asyncio.CancelledError:
         run.push({"type": "done", "content": "已停止。", "meta": {"status": "stopped"}})
     except Exception as e:  # noqa: BLE001 — 任务自己兜住：没人在等它的时候也不能留下未处理的异常
+        logging.getLogger("wealthpilot.run").exception("研究执行异常")
         run.push({"type": "error", "content": f"研究执行异常：{e}"})
         run.push({"type": "done", "content": "研究执行异常，没有完成。", "meta": {"status": "failed"}})
     finally:

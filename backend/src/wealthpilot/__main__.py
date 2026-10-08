@@ -267,6 +267,8 @@ def main() -> None:
         "ask": cmd_ask,
     }
 
+    from wealthpilot.services import logs
+    logs.setup()   # 终端入口、盯盘、单次提问出的事也记进同一个文件
     if args.command in extra:
         sys.exit(extra[args.command](args))
     if args.command in commands:

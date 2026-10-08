@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date, datetime, time, timedelta
 
@@ -251,6 +252,7 @@ async def run_task(db: Session, auto: Automation, *, manual: bool = False, ask=N
                 error = str(event.get("content") or "")
     except Exception as e:  # noqa: BLE001 — 一条任务失败不能带倒调度循环
         error = f"{type(e).__name__}: {e}"
+        logging.getLogger("wealthpilot.tasks").exception("定时任务执行出错")
 
     card = meta.get("summary") or {}
     if answer and meta.get("status") in ("passed", "partial"):

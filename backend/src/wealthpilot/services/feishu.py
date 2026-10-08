@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import threading
 import time
@@ -104,6 +105,7 @@ class Listener:
             self.error = "没有安装飞书的 SDK：在仓库的 backend 目录运行 uv sync --extra feishu（或重新 make setup）"
         except Exception as e:  # noqa: BLE001 — 连不上、凭证不对：记下来给自检和设置页看
             self.error = f"飞书长连接断开：{e}"
+            logging.getLogger("wealthpilot.channel").warning("%s", self.error)
 
     def start(self) -> threading.Thread:
         thread = threading.Thread(target=self._run, daemon=True, name="wp-feishu")

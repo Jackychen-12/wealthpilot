@@ -407,6 +407,27 @@ def cmd_import(args, *, out: Out = print) -> int:
     return 0
 
 
+def cmd_logs(args, *, out: Out = print) -> int:
+    """后台出的事：研究失败、推送没发出去、盯盘出错、模型换路。"""
+    from wealthpilot.services import logs
+
+    if args.path:
+        out(str(logs.LOG_FILE))
+        return 0
+    lines = logs.tail(args.lines, errors=args.errors)
+    if not lines:
+        out("最近没有警告和错误。" if args.errors and logs.LOG_FILE.is_file() else f"还没有日志（{logs.LOG_FILE}）。WealthPilot 运行起来之后才会有。")
+    for line in lines:
+        out(line)
+    if args.follow:
+        try:
+            for line in logs.follow():
+                out(line)
+        except KeyboardInterrupt:
+            pass
+    return 0
+
+
 def cmd_sessions(_args, *, out: Out = print) -> int:
     from sqlmodel import Session
 
@@ -457,5 +478,10 @@ def register(sub) -> dict:
     imp.add_argument("--yes", action="store_true", help="不再确认，直接写入认出来的")
 
     sub.add_parser("sessions", help="以前的会话")
+    logs = sub.add_parser("logs", help="后台出了什么事：研究失败、推送没发出去、盯盘出错（logs --errors 只看出问题的）")
+    logs.add_argument("-n", "--lines", type=int, default=40, help="看最近多少条，默认 40")
+    logs.add_argument("--errors", action="store_true", help="只看警告和错误")
+    logs.add_argument("-f", "--follow", action="store_true", help="一直跟着看新写进来的（Ctrl-C 停）")
+    logs.add_argument("--path", action="store_true", help="只打印日志文件在哪")
     return {"setup": cmd_setup, "model": cmd_model, "config": cmd_config, "status": cmd_status, "skills": cmd_skills,
-            "import": cmd_import, "sessions": cmd_sessions}
+            "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs}

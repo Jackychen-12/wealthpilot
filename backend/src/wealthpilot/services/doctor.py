@@ -140,7 +140,7 @@ async def _reach() -> dict:
 def _extras() -> list[dict]:
     from sqlmodel import Session
 
-    from wealthpilot.services import automations, skills, upgrade
+    from wealthpilot.services import automations, logs, skills, upgrade
     from wealthpilot.storage.db import get_engine
 
     found, problems = skills.discover()
@@ -156,6 +156,9 @@ def _extras() -> list[dict]:
     else:
         tail = "已是最新" if status.get("checked") else status.get("how") or "没能检查更新"
         out.append(_item("版本", "ok", f"v{__version__} · {status.get('commit') or '无 git 信息'}（{tail}）"))
+    bad = logs.recent_problems(24)
+    out.append(_item("日志", "warn" if bad else "ok", f"最近 24 小时有 {bad} 条警告或错误" if bad else "最近 24 小时没有警告和错误",
+                     "运行 wealthpilot logs --errors 看是什么" if bad else ""))
     return out
 
 

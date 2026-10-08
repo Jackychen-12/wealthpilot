@@ -24,3 +24,5 @@ backend/.env
 backend/connectors.json
 .claude/
 workbench/dist-app/
+backend/logs/
+backend/backups/

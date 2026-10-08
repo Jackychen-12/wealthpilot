@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import secrets
 import time
@@ -167,6 +168,7 @@ class Bot:
         try:
             await self._text(chat_id, text)
         except Exception as e:  # noqa: BLE001 — 出错要告诉用户，而不是沉默
+            logging.getLogger("wealthpilot.channel").exception("%s 里处理消息出错", self.channel)
             await self.api.send(chat_id, f"出错了：{e}")
 
     def _session(self) -> Session:
@@ -431,8 +433,8 @@ async def notify(text: str, buttons: list[list[tuple[str, str]]] | None = None) 
         try:
             await api.send(chat_id, text, buttons)
             sent = True
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger("wealthpilot.channel").warning("推送到 %s 没发出去：%s: %s", channel, type(e).__name__, e)
     url = get_settings().alert_webhook_url
     if url:
         sent = await send_webhook(url, plain(text)) or sent
@@ -461,5 +463,6 @@ async def run_bot() -> None:
                 task.add_done_callback(running.discard)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 — 网络抖动、令牌失效：等一会儿再试，不让循环退出
+        except Exception as e:  # noqa: BLE001 — 网络抖动、令牌失效：等一会儿再试，不让循环退出
+            logging.getLogger("wealthpilot.channel").warning("Telegram 收消息出错，10 秒后重试：%s: %s", type(e).__name__, e)
             await asyncio.sleep(10)
