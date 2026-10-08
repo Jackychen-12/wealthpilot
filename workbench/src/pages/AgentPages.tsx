@@ -1,4 +1,4 @@
-/** Agent 的三个"可调教、可追责"的页面：研究方法（技能）、AI 记住的事（记忆）、审计日志。 */
+/** Agent 的三个"可调教、可追责"的页面：研究方法（技能）、记忆（记忆）、审计日志。 */
 import type React from 'react'
 import { useState } from 'react'
 import { DEMO, api, useApi, type MemoryItem, type SkillInfo, type SkillPreview, type SkillSuggestion } from '../api'
@@ -180,7 +180,7 @@ export const MemoryPage: React.FC = () => {
   const run = (work: Promise<unknown>) => work.then(() => { setDraft(''); setError(''); list.reload() }).catch((e) => setError(e instanceof Error ? e.message : '操作失败'))
   const rows = list.data ?? []
   return (
-    <Page title="AI 记住的事" description="你说过的偏好和纪律、你对建议做过的决定。每次研究都会带上；不想让它记的可以删掉">
+    <Page title="记忆" description="你说过的偏好和纪律、你对建议做过的决定。每次研究都会带上；不想让它记的可以删掉">
       {DEMO ? null : (
         <form className="flex max-w-2xl items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (draft.trim()) void run(api.addMemory(draft.trim())) }}>
           <div className="flex-1"><Input id="mem-new" label="告诉它一件要记住的事" placeholder="比如：我只做长线，单只股票不超过两成仓位" value={draft} onChange={(e) => setDraft(e.target.value)} /></div>

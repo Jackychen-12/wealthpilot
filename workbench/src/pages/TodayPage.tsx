@@ -245,7 +245,7 @@ const TodayPage: React.FC = () => {
             </Section>
 
             {d.verified_recent.length > 0 ? (
-              <Section title="最近核对出结果的判断" actions={<More to="/review">验证与复盘</More>}>
+              <Section title="最近核对出结果的判断" actions={<More to="/review">验证与回溯</More>}>
                 <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
                   {d.verified_recent.map((c) => (
                     <li key={c.id} className="flex items-baseline gap-3 px-4 py-2.5 text-sm">

@@ -1,6 +1,7 @@
 import type React from 'react'
 import { DEMO, api, useApi } from '../api'
 import { Callout, Tag } from '../components/kit'
+import { Terms } from '../components/Terms'
 import { DataState, Metric, Metrics, Section, Table, Td, signClass } from '../components/ui'
 
 const pct = (v: number | null | undefined, digits = 1) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(digits)}%`)
@@ -12,7 +13,7 @@ export const RecapSection: React.FC = () => {
   const r = recap.data
   if (DEMO || (!recap.loading && !r)) return null     // 休市、没开盘、演示：这一块不占地方
   return (
-    <Section title="今天的市场" hint={r ? `${r.day} · 情绪${r.mood.label}（按固定尺子得出的粗略刻度，不是预测）` : undefined}>
+    <Section title="大盘复盘" hint={r ? `${r.day} 收盘 · 市场情绪：${r.mood.label}（五项指标固定打分，描述今天，不预测明天）` : undefined}>
       <DataState loading={recap.loading && !r}>
         {r ? (
           <div className="grid gap-4">
@@ -21,8 +22,8 @@ export const RecapSection: React.FC = () => {
               <Metric label="炸板" value={r.limits.broken} hint={r.limits.seal_rate_pct != null ? `封板率 ${r.limits.seal_rate_pct}%` : undefined} />
               <Metric label="跌停" value={r.limits.limit_down} />
               <Metric label="最高连板" value={r.limits.max_streak} hint={r.limits.ladder[0]?.names.slice(0, 2).join('、')} />
-              <Metric label="昨日涨停今日" value={pct(r.limits.yesterday_limit_up_today_pct, 2)} tone={signClass(r.limits.yesterday_limit_up_today_pct ?? 0)} hint={`${r.limits.yesterday_limit_up_count} 只的平均`} />
-              <Metric label="情绪" value={r.mood.label} tone={MOOD_TONE[r.mood.label]} hint={r.breadth ? `${r.breadth.up} 涨 / ${r.breadth.down} 跌` : undefined} />
+              <Metric label="昨日涨停溢价" value={pct(r.limits.yesterday_limit_up_today_pct, 2)} tone={signClass(r.limits.yesterday_limit_up_today_pct ?? 0)} hint={`${r.limits.yesterday_limit_up_count} 只的平均`} />
+              <Metric label="市场情绪" value={r.mood.label} tone={MOOD_TONE[r.mood.label]} hint={r.breadth ? `${r.breadth.up} 涨 / ${r.breadth.down} 跌` : undefined} />
             </Metrics>
             <div className="grid gap-4 lg:grid-cols-2">
               <div>
@@ -36,7 +37,7 @@ export const RecapSection: React.FC = () => {
                 ) : <p className="text-[13px] text-steel">今天没有连板股。</p>}
               </div>
               <div>
-                <p className="mb-1.5 text-[13px] font-medium text-charcoal">涨停集中在{r.themes[0] ? `（按${r.themes[0].basis}）` : ''}</p>
+                <p className="mb-1.5 text-[13px] font-medium text-charcoal">涨停题材分布{r.themes[0] ? `（按${r.themes[0].basis}归类）` : ''}</p>
                 {r.themes.length ? (
                   <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline text-sm">
                     {r.themes.slice(0, 6).map((t) => (
@@ -55,8 +56,9 @@ export const RecapSection: React.FC = () => {
               </p>
             ) : null}
             {r.concepts ? (
-              <p className="text-[13px] text-slate">概念领涨：{r.concepts.top.slice(0, 5).map((c) => `${c.name} ${pct(c.change_pct, 2)}`).join('，')}；领跌：{r.concepts.bottom.slice(0, 3).map((c) => `${c.name} ${pct(c.change_pct, 2)}`).join('，')}。</p>
+              <p className="text-[13px] text-slate">概念板块领涨：{r.concepts.top.slice(0, 5).map((c) => `${c.name} ${pct(c.change_pct, 2)}`).join('，')}；领跌：{r.concepts.bottom.slice(0, 3).map((c) => `${c.name} ${pct(c.change_pct, 2)}`).join('，')}。</p>
             ) : null}
+            <Terms words={['封板率', '炸板', '连板', '昨日涨停溢价', '市场情绪', '涨停题材', '龙虎榜', '席位']} />
           </div>
         ) : null}
       </DataState>
@@ -87,7 +89,8 @@ export const MacroSection: React.FC = () => {
               ))}
             </Table>
             {m.spread ? <p className="mt-2 text-[13px] text-slate">{m.spread.label} <b className="text-ink">{m.spread.value > 0 ? '+' : ''}{m.spread.value} {m.spread.unit}</b>：{m.spread.how_to_read}。</p> : null}
-            {m.missing?.length ? <p className="mt-1 text-[13px] text-steel">没有的：{m.missing.join('；')}</p> : null}
+            {m.missing?.length ? <p className="mt-1 text-[13px] text-steel">暂缺：{m.missing.join('；')}</p> : null}
+            <Terms className="mt-2" words={['PMI', 'CPI', 'PPI', 'M2', 'LPR', '中美利差']} />
           </>
         ) : null}
       </DataState>
@@ -95,17 +98,17 @@ export const MacroSection: React.FC = () => {
   )
 }
 
-/** 立场成绩单：给过立场的个股研究，之后相对沪深 300 的表现。 */
+/** 立场回溯：给过立场的个股研究，之后相对沪深 300 的表现。 */
 export const StanceSection: React.FC = () => {
   const card = useApi(() => (DEMO ? Promise.reject(new Error('demo')) : api.stances()))
   const c = card.data
   if (DEMO) return null
   return (
-    <Section title="立场成绩单" hint="当时说看多、看空的那些，后来相对沪深 300 怎么样。看多要跑赢、看空要跑输才算对">
+    <Section title="立场回溯" hint="给过立场的个股研究，之后相对沪深 300 的超额收益。看多须跑赢、看空须跑输，才算方向正确">
       <DataState loading={card.loading && !c} error={card.error} onRetry={card.reload}>
         {c && c.total ? (
           <>
-            <Table head={[{ label: '之后' }, { label: '已结算', right: true }, { label: '方向对了', right: true }, { label: '看多的平均超额', right: true }, { label: '看空的平均超额', right: true }]} minWidth={560}>
+            <Table head={[{ label: '期限' }, { label: '已结算', right: true }, { label: '胜率', right: true }, { label: '看多平均超额收益', right: true }, { label: '看空平均超额收益', right: true }]} minWidth={560}>
               {Object.entries(c.horizons).map(([h, item]) => (
                 <tr key={h} className="border-t border-hairline-soft">
                   <Td>{h} 个交易日</Td>
@@ -118,7 +121,7 @@ export const StanceSection: React.FC = () => {
             </Table>
             {c.note ? <p className="mt-2 text-[13px] text-steel">{c.note}</p> : null}
             <div className="mt-3">
-              <Table head={[{ label: '日期' }, { label: '股票' }, { label: '立场' }, { label: '5 日超额', right: true }, { label: '20 日超额', right: true }, { label: '60 日超额', right: true }]} minWidth={560}>
+              <Table head={[{ label: '研究日期' }, { label: '股票' }, { label: '立场' }, { label: '5 日超额收益', right: true }, { label: '20 日', right: true }, { label: '60 日', right: true }]} minWidth={560}>
                 {c.calls.slice(0, 12).map((call) => (
                   <tr key={call.message_id} className="border-t border-hairline-soft">
                     <Td className="text-steel">{call.asked}</Td><Td>{call.name}</Td><Td><Tag>{call.stance}</Tag></Td>
@@ -130,6 +133,7 @@ export const StanceSection: React.FC = () => {
                 ))}
               </Table>
             </div>
+            <Terms className="mt-3" words={['立场', '超额收益', '胜率']} />
           </>
         ) : c ? <p className="text-[13px] text-steel">{c.note}</p> : null}
       </DataState>
@@ -143,13 +147,13 @@ export const ReverseDcfSection: React.FC<{ code: string }> = ({ code }) => {
   const d = dcf.data
   if (DEMO) return null
   return (
-    <Section title="现价隐含了什么" hint="反向 DCF：按现在的市值倒推，利润要以多高的速度涨十年才配得上。不是目标价">
+    <Section title="隐含增长率（反向 DCF）" hint="按现在的市值倒推：利润要以多高的速度增长十年，才配得上这个价钱。不是目标价">
       <DataState loading={dcf.loading && !d} error={dcf.error} onRetry={dcf.reload}>
         {d && d.ok ? (
           <div className="grid gap-3">
             <Metrics>
               {d.implied_growth!.map((i) => (
-                <Metric key={i.discount_pct} label={`折现率 ${i.discount_pct}% 时`} value={i.growth_pct == null ? '解释不了' : `${i.growth_pct}%`} hint="隐含的利润年增速" />
+                <Metric key={i.discount_pct} label={`折现率 ${i.discount_pct}% 时`} value={i.growth_pct == null ? '解释不了' : `${i.growth_pct}%`} hint="隐含增长率（每年）" />
               ))}
               <Metric label="过去三年实际" value={d.past_profit_cagr_3y_pct == null ? '—' : `${d.past_profit_cagr_3y_pct}%`} hint="归母净利润年化增速" />
             </Metrics>
@@ -161,6 +165,7 @@ export const ReverseDcfSection: React.FC<{ code: string }> = ({ code }) => {
               </tr>
             </Table>
             <ul className="list-disc space-y-0.5 pl-5 text-[13px] text-steel">{d.notes!.map((n) => <li key={n}>{n}</li>)}</ul>
+            <Terms words={['反向 DCF', '隐含增长率', '折现率', 'PE']} />
           </div>
         ) : d ? <Callout tone="neutral">{d.reason}</Callout> : null}
       </DataState>

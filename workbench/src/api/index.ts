@@ -189,6 +189,7 @@ export const api = {
   reverseDcf: (code: string) => request<ReverseDcf>(`/api/market/stock/${code}/reverse-dcf`),
   stances: () => request<StanceCard>('/api/stances'),
   checkTrades: (text: string) => request<TradesReport>('/api/trades/check', json('POST', { text })),
+  glossary: () => request<GlossaryTerm[]>('/api/settings/glossary'),
   persona: () => request<Persona>('/api/settings/persona'),
   savePersona: (text: string) => request<Persona>('/api/settings/persona', json('PUT', { text })),
   conversations: (q = '') => request<ConversationInfo[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
@@ -260,6 +261,7 @@ export interface StanceCard { total: number; calls: StanceCall[]; horizons: Reco
 export interface TradesReport { ok: boolean; reason?: string; problems: string[]; trades: number; stocks?: number; closed?: number; period?: { from: string; to: string }
   findings?: { key: string; label: string; flag: boolean; text: string; examples: string[] }[]; flagged?: string[]; worst_stocks?: { name: string; pnl: number }[]
   missing_prices?: string[]; note?: string }
+export interface GlossaryTerm { term: string; plain: string; how: string; aliases: string[] }
 export interface Persona { text: string; path: string; max_chars: number; presets: { key: string; label: string; text: string }[] }
 export interface ModelPreset { key: string; label: string; provider: string; base_url: string; model: string; needs_key: boolean; note: string; key_page: string }
 export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; fallback_active?: string; env_file: string; presets?: ModelPreset[] }
