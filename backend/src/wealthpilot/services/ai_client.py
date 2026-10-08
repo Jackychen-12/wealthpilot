@@ -327,16 +327,27 @@ _DEEPSEEK_MAX_OUTPUT = 8192
 
 
 def _record_openai_usage(usage: Usage, u) -> None:
-    usage.add(getattr(u, "prompt_tokens", 0), getattr(u, "prompt_cache_hit_tokens", 0) or 0, getattr(u, "completion_tokens", 0))
+    # 命中缓存的 token 数：DeepSeek 放在 prompt_cache_hit_tokens，OpenAI 及多数兼容服务放在 prompt_tokens_details.cached_tokens
+    cached = getattr(u, "prompt_cache_hit_tokens", None)
+    if cached is None:
+        details = getattr(u, "prompt_tokens_details", None)
+        cached = getattr(details, "cached_tokens", 0) if details is not None else 0
+    usage.add(getattr(u, "prompt_tokens", 0) or 0, cached or 0, getattr(u, "completion_tokens", 0) or 0)
 
 
 class DeepSeekAIClient:
+    """兼容 OpenAI 接口的客户端。DeepSeek 用它，其他兼容服务（含本机的 Ollama）也用它，只是地址和几个开关不同。"""
+
     supports_json_mode = True
 
     def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com",
-                 timeout: float | None = None):
+                 timeout: float | None = None, *, json_mode: bool = True, max_output: int = 8192):
         self.usage = Usage()
-        self._client = OpenAI(api_key=api_key, base_url=base_url,
+        # 有的服务不认 response_format（会直接报 400）：关掉后各处退回用正则从回复里取 JSON
+        self.supports_json_mode = json_mode
+        self.max_output = max_output
+        # 本机模型一般不要 Key，但 SDK 不接受空串
+        self._client = OpenAI(api_key=api_key or "not-needed", base_url=base_url,
                               **({"timeout": timeout} if timeout else {}))
 
     def create(self, *, model: str, max_tokens: int, system, messages: list[dict],
@@ -347,7 +358,7 @@ class DeepSeekAIClient:
             oai_messages = [{"role": "system", "content": sys_text}] + oai_messages
         oai_messages = _convert_messages_to_openai(oai_messages)
 
-        kwargs: dict = dict(model=model, max_tokens=min(max_tokens, _DEEPSEEK_MAX_OUTPUT),
+        kwargs: dict = dict(model=model, max_tokens=min(max_tokens, self.max_output),
                             messages=oai_messages)
         if tools:
             kwargs["tools"] = _convert_tools_to_openai(tools)
@@ -365,7 +376,7 @@ class DeepSeekAIClient:
                tools: list[dict] | None = None, tool_choice: str | None = None) -> DeepSeekStreamContext:
         return DeepSeekStreamContext(
             self._client,
-            model=model, max_tokens=min(max_tokens, _DEEPSEEK_MAX_OUTPUT),
+            model=model, max_tokens=min(max_tokens, self.max_output),
             system=system, messages=messages, tools=tools, tool_choice=tool_choice, usage=self.usage,
         )
 
@@ -412,13 +423,64 @@ AIClient = AnthropicAIClient | DeepSeekAIClient
 _PLACEHOLDER_KEYS = ("", "sk-ant-xxx", "sk-xxx")
 
 
+class ModelUnavailableError(RuntimeError):
+    """模型这一轮肯定用不了（余额、Key、模型名、连不上）。
+
+    这类错误重试也没用。认出来之后整轮研究立刻停，给用户一句能照着做的话，
+    而不是让六个 Agent 各自报一串英文错误、再走完审核和重写。
+    """
+
+    def __init__(self, kind: str, message: str):
+        super().__init__(message)
+        self.kind, self.message = kind, message
+
+
+_UNAVAILABLE = (
+    ("balance", (402,), ("insufficient balance", "insufficient_quota", "insufficient quota", "exceeded your current quota", "payment required",
+                         "余额不足", "欠费", "arrearage", "account balance"),
+     "模型账户余额不足，这次没法研究。充值之后再试；或者到「设置」把模型换成别的服务 —— 任何兼容 OpenAI 接口的都行，包括本机的 Ollama。"
+     "行情、选股、持仓、盯盘这些不用模型的功能不受影响。"),
+    ("auth", (401, 403), ("invalid api key", "incorrect api key", "invalid_api_key", "authentication", "unauthorized", "api key not valid"),
+     "模型的 API Key 无效或已过期。到「设置」重新填一个，填完点「测试当前配置」。"),
+    ("model", (404,), ("model not found", "model_not_found", "no such model", "does not exist", "model not exist"),
+     "模型名不对：服务商那边没有这个模型。到「设置」核对模型名和接口地址。"),
+    ("rate_limit", (429,), ("rate limit", "rate_limit", "too many requests"),
+     "模型服务限流了：请求太密，或者这个时段的额度用完了。等一两分钟再试。"),
+)
+
+
+def diagnose(exc: BaseException) -> ModelUnavailableError | None:
+    """这个异常是不是"模型肯定用不了"。是就返回带人话的 ModelUnavailableError，不是返回 None。"""
+    if isinstance(exc, ModelUnavailableError):
+        return exc
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    for kind, codes, phrases, message in _UNAVAILABLE:
+        if any(p in text for p in phrases) or (status in codes and kind != "model") or (kind == "model" and status == 404 and "model" in text):
+            return ModelUnavailableError(kind, message)
+    if "connect" in type(exc).__name__.lower() or "connection error" in text:
+        return ModelUnavailableError("network", "连不上模型服务：网络不通，或者接口地址不对。用的是本机模型的话，先确认它已经启动。")
+    return None
+
+
+def raise_if_unavailable(exc: BaseException) -> None:
+    found = diagnose(exc)
+    if found is not None:
+        raise found from exc
+
+
 def create_ai_client(settings) -> AIClient:
     timeout = getattr(settings, "ai_timeout_seconds", None)
+    if settings.ai_provider == "openai":
+        if not settings.openai_base_url.strip() or not settings.openai_model.strip():
+            raise ValueError("还没有填模型服务的接口地址和模型名")
+        return DeepSeekAIClient(settings.openai_api_key, settings.openai_base_url.strip(), timeout,
+                                json_mode=settings.openai_json_mode, max_output=settings.openai_max_tokens)
     if settings.ai_provider == "deepseek":
         if settings.deepseek_api_key.strip() in _PLACEHOLDER_KEYS:
-            raise ValueError("未配置 DEEPSEEK_API_KEY，请在 backend/.env 中设置")
+            raise ValueError("还没有填 DeepSeek 的 API Key")
         return DeepSeekAIClient(settings.deepseek_api_key, settings.deepseek_base_url, timeout)
     else:
         if settings.anthropic_api_key.strip() in _PLACEHOLDER_KEYS:
-            raise ValueError("未配置 ANTHROPIC_API_KEY，请在 backend/.env 中设置")
+            raise ValueError("还没有填 Claude 的 API Key")
         return AnthropicAIClient(settings.anthropic_api_key, timeout)

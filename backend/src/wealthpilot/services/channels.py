@@ -1,8 +1,12 @@
-"""手机触达：通过 Telegram 机器人收简报、提问、处理建议单。
+"""手机触达：在 Telegram、飞书、企业微信里收简报、提问、处理建议单。
 
-机器人跟着 WealthPilot 进程跑（长轮询，不需要公网地址）；进程没开时手机上也就没有回应。
-只认一个聊天：先在本机生成配对码，再从手机把它发给机器人，这个聊天才成为"主人"。
-其他任何人发来的消息一律不处理 —— 这个机器人能看持仓、能授权建议单。
+三个渠道共用同一个机器人逻辑（Bot），区别只在消息怎么收、怎么发：
+- Telegram：长轮询，不需要公网地址；
+- 飞书：官方 SDK 的长连接，也不需要公网地址（见 services/feishu.py）；
+- 企业微信：只支持回调，需要一个公网能访问到的地址（见 services/wecom.py）。
+
+都跟着 WealthPilot 进程跑，进程没开时手机上就没有回应。每个渠道只认一个聊天：先在本机生成配对码，
+再从手机把它发给机器人，这个聊天才成为"主人"。其他任何人发来的消息一律不处理 —— 这个机器人能看持仓、能授权建议单。
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import re
 import secrets
 import time
 import uuid
+from urllib.parse import urlparse
 
 import httpx
 from sqlmodel import Session
@@ -19,7 +24,7 @@ from sqlmodel import Session
 from wealthpilot.services import cache
 from wealthpilot.settings import get_settings
 
-_OWNER_KEY, _PAIR_KEY = "channel:telegram:owner", "channel:telegram:pair"
+CHANNELS = {"telegram": "Telegram", "feishu": "飞书", "wecom": "企业微信"}
 _FOREVER = 3650 * cache.DAY
 PAIR_TTL = 600
 CHUNK = 3800   # Telegram 单条上限 4096
@@ -31,32 +36,53 @@ STATUS = {"passed": "已通过校验", "partial": "部分证据缺失", "rejecte
 
 # ── 配对 ────────────────────────────────────────────────
 
-def owner() -> int | None:
-    data = cache.read(_OWNER_KEY, _FOREVER) or {}
+def owner(channel: str = "telegram") -> int | str | None:
+    """这个渠道的主人：Telegram 是聊天编号，飞书是会话 ID，企业微信是成员账号。"""
+    data = cache.read(f"channel:{channel}:owner", _FOREVER) or {}
     return data.get("chat_id")
 
 
-def set_owner(chat_id: int | None) -> None:
-    cache.write(_OWNER_KEY, {"chat_id": chat_id})
+def set_owner(chat_id: int | str | None, channel: str = "telegram") -> None:
+    cache.write(f"channel:{channel}:owner", {"chat_id": chat_id})
 
 
-def new_pair_code() -> str:
+def new_pair_code(channel: str = "telegram") -> str:
     code = f"{secrets.randbelow(1_000_000):06d}"
-    cache.write(_PAIR_KEY, {"code": code, "at": time.time()})
+    cache.write(f"channel:{channel}:pair", {"code": code, "at": time.time()})
     return code
 
 
-def _pair_matches(text: str) -> bool:
-    data = cache.read(_PAIR_KEY, PAIR_TTL) or {}
+def _pair_matches(text: str, channel: str = "telegram") -> bool:
+    data = cache.read(f"channel:{channel}:pair", PAIR_TTL) or {}
     code = data.get("code")
     if not code or time.time() - data.get("at", 0) > PAIR_TTL:
         return False
     return secrets.compare_digest(code, text.strip())
 
 
-def status() -> dict:
+def configured(channel: str) -> bool:
     s = get_settings()
-    return {"channel": "telegram", "configured": bool(s.telegram_bot_token), "paired": owner() is not None}
+    if channel == "feishu":
+        return bool(s.feishu_app_id and s.feishu_app_secret)
+    if channel == "wecom":
+        return bool(s.wecom_corp_id and s.wecom_agent_id and s.wecom_secret and s.wecom_token and s.wecom_aes_key)
+    return bool(s.telegram_bot_token)
+
+
+def status(channel: str = "telegram") -> dict:
+    return {"channel": channel, "label": CHANNELS.get(channel, channel), "configured": configured(channel), "paired": owner(channel) is not None}
+
+
+def status_all() -> list[dict]:
+    return [status(c) for c in CHANNELS]
+
+
+def with_hints(text: str, buttons: list[list[tuple[str, str]]] | None) -> str:
+    """没有按钮的渠道：把按钮写成可以回复的命令。按钮的数据是 "动作:编号"，对应命令 "/动作 编号"。"""
+    if not buttons:
+        return text
+    hints = [f"回复 /{data.replace(':', ' ')} {label}" for row in buttons for label, data in row]
+    return f"{text}\n\n" + " ｜ ".join(hints)
 
 
 # ── Telegram 接口 ───────────────────────────────────────
@@ -110,12 +136,37 @@ def plain(markdown: str) -> str:
 
 # ── 机器人 ──────────────────────────────────────────────
 
+_PREFIX = {"telegram": "tg", "feishu": "fs", "wecom": "wx"}
+
+
 class Bot:
-    def __init__(self, api: Telegram, ask=None) -> None:
+    """api 只要有 send(chat_id, text, buttons) 就行：Telegram、飞书、企业微信各给一个。"""
+
+    def __init__(self, api, ask=None, channel: str = "telegram") -> None:
         self.api = api
         self._ask = ask            # 测试时换成假的研究入口
+        self.channel = channel
         self.history: list[dict] = []
-        self.conversation = f"tg-{uuid.uuid4()}"
+        self.conversation = f"{_PREFIX.get(channel, channel)}-{uuid.uuid4()}"
+
+    async def message(self, chat_id, text: str) -> None:
+        """一条文字消息进来（飞书、企业微信走这里；Telegram 的 handle 解析完也到这里）。"""
+        text = (text or "").strip()
+        master = owner(self.channel)
+        if master is None:     # 没绑定：只接受配对码
+            code = re.sub(r"^/(pair|start)\s*", "", text)
+            if _pair_matches(code, self.channel):
+                set_owner(chat_id, self.channel)
+                await self.api.send(chat_id, "已绑定。之后简报和提醒会发到这里，你也可以直接在这里提问。\n\n" + HELP)
+            else:
+                await self.api.send(chat_id, "这个机器人还没有绑定主人。在 WealthPilot 的「设置 → 手机触达」里生成配对码，然后发送：/pair 配对码")
+            return
+        if chat_id != master:
+            return   # 不是主人：不回应，也不透露任何信息
+        try:
+            await self._text(chat_id, text)
+        except Exception as e:  # noqa: BLE001 — 出错要告诉用户，而不是沉默
+            await self.api.send(chat_id, f"出错了：{e}")
 
     def _session(self) -> Session:
         from wealthpilot.storage.db import get_engine
@@ -126,33 +177,21 @@ class Bot:
         return get_settings().local_user_id
 
     async def handle(self, update: dict) -> None:
+        """Telegram 的一条更新：普通消息交给通用入口；点按钮（callback_query）在这里处理。"""
         callback = update.get("callback_query")
         message = (callback or {}).get("message") or update.get("message") or {}
         chat_id = (message.get("chat") or {}).get("id")
         if chat_id is None:
             return
-        text = str((callback or {}).get("data") or message.get("text") or "").strip()
-        master = owner()
-
-        # 没绑定：只接受配对码
-        if master is None:
-            code = re.sub(r"^/(pair|start)\s*", "", text)
-            if _pair_matches(code):
-                set_owner(chat_id)
-                await self.api.send(chat_id, "已绑定。之后简报和提醒会发到这里，你也可以直接在这里提问。\n\n" + HELP)
-            else:
-                await self.api.send(chat_id, "这个机器人还没有绑定主人。在 WealthPilot 的「设置 → 手机触达」里生成配对码，然后发送：/pair 配对码")
+        if not callback:
+            await self.message(chat_id, str(message.get("text") or ""))
             return
-        if chat_id != master:
-            return   # 不是主人：不回应，也不透露任何信息
-
+        if chat_id != owner(self.channel):
+            return
         try:
-            if callback:
-                await self.api.call("answerCallbackQuery", callback_query_id=callback.get("id"))
-                await self._button(chat_id, text)
-            else:
-                await self._text(chat_id, text)
-        except Exception as e:  # noqa: BLE001 — 出错要告诉用户，而不是沉默
+            await self.api.call("answerCallbackQuery", callback_query_id=callback.get("id"))
+            await self._button(chat_id, str(callback.get("data") or "").strip())
+        except Exception as e:  # noqa: BLE001
             await self.api.send(chat_id, f"出错了：{e}")
 
     # —— 文字消息 ——
@@ -178,8 +217,11 @@ class Bot:
         elif command == "/quick":
             await self._research(chat_id, rest, "quick")
         elif command == "/new":
-            self.history, self.conversation = [], f"tg-{uuid.uuid4()}"
+            self.history, self.conversation = [], f"{_PREFIX.get(self.channel, self.channel)}-{uuid.uuid4()}"
             await self.api.send(chat_id, "已开始新会话。")
+        elif command in ("/ap", "/ok", "/no", "/rj") and rest.lstrip("#").isdigit():
+            # 没有按钮的渠道：按钮被写成了这几个命令
+            await self._button(chat_id, f"{command[1:]}:{rest.lstrip('#')}")
         elif text.startswith("/"):
             await self.api.send(chat_id, "没有这个命令。\n\n" + HELP)
         elif text:
@@ -329,16 +371,69 @@ def digest_text(digest: dict) -> str:
 
 # ── 推送与轮询 ──────────────────────────────────────────
 
-async def notify(text: str, buttons: list[list[tuple[str, str]]] | None = None) -> bool:
-    """给主人发一条消息。没配置、没绑定或发送失败都返回 False，不抛异常。"""
-    token, chat_id = get_settings().telegram_bot_token, owner()
-    if not token or chat_id is None:
+def webhook_payload(url: str, text: str) -> dict:
+    """群机器人的 webhook 各家格式不同，发错了对方直接拒收。按地址认出是哪家，发它认的那一种。"""
+    host = urlparse(url).netloc.lower()
+    if "feishu.cn" in host or "larksuite.com" in host:
+        return {"msg_type": "text", "content": {"text": text}}
+    if "qyapi.weixin.qq.com" in host or "dingtalk.com" in host:
+        return {"msgtype": "text", "text": {"content": text[:1800]}}   # 企业微信单条上限 2048 字节
+    if "hooks.slack.com" in host:
+        return {"text": text}
+    if "discord.com" in host or "discordapp.com" in host:
+        return {"content": text[:1900]}
+    # 认不出来的自建服务：几种常见字段都带上，接收方取它认识的那个
+    return {"text": text, "content": text, "msgtype": "text", "source": "wealthpilot"}
+
+
+async def send_webhook(url: str, text: str) -> bool:
+    if not url:
         return False
     try:
-        await Telegram(token, get_settings().telegram_api_base).send(chat_id, text, buttons)
-        return True
-    except Exception:  # noqa: BLE001
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.post(url, json=webhook_payload(url, text))
+        if resp.status_code >= 300:
+            return False
+        try:   # 飞书、企业微信、钉钉即使拒收也回 200，要看返回体里的错误码
+            body = resp.json()
+        except ValueError:
+            return True
+        return not (isinstance(body, dict) and (body.get("code") or body.get("errcode") or body.get("StatusCode")))
+    except httpx.HTTPError:
         return False
+
+
+def _api_for(channel: str):
+    """这个渠道用来发消息的客户端；没配置返回 None。"""
+    settings = get_settings()
+    if not configured(channel):
+        return None
+    if channel == "feishu":
+        from wealthpilot.services.feishu import Feishu
+        return Feishu(settings.feishu_app_id, settings.feishu_app_secret, settings.feishu_api_base)
+    if channel == "wecom":
+        from wealthpilot.services.wecom import WeCom
+        return WeCom(settings.wecom_corp_id, settings.wecom_agent_id, settings.wecom_secret)
+    return Telegram(settings.telegram_bot_token, settings.telegram_api_base)
+
+
+async def notify(text: str, buttons: list[list[tuple[str, str]]] | None = None) -> bool:
+    """把一条消息发到用户接通的所有地方：绑定了的 Telegram / 飞书 / 企业微信，和群机器人 webhook。有一处发出去就算成功，不抛异常。"""
+    sent = False
+    for channel in CHANNELS:
+        chat_id = owner(channel)
+        api = _api_for(channel) if chat_id is not None else None
+        if api is None:
+            continue
+        try:
+            await api.send(chat_id, text, buttons)
+            sent = True
+        except Exception:  # noqa: BLE001
+            pass
+    url = get_settings().alert_webhook_url
+    if url:
+        sent = await send_webhook(url, plain(text)) or sent
+    return sent
 
 
 async def run_bot() -> None:

@@ -29,6 +29,7 @@ from rich.table import Table
 from rich.text import Text
 
 from wealthpilot import __version__
+from wealthpilot.services import providers
 
 HOME = Path.home() / ".wealthpilot"
 COMMANDS: dict[str, str] = {
@@ -63,6 +64,8 @@ COMMANDS: dict[str, str] = {
     "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
     "/update": "有没有新版本、怎么升级",
     "/setup": "重新走一遍首次配置（模型 Key、示例数据）",
+    "/sessions": "/sessions [序号] — 以前的会话；带序号则回到那个会话接着聊",
+    "/lessons": "/lessons [reflect] — 它自己记下的经验（reflect：让模型归纳一次规律，会调用一次模型）",
     "/new": "开始新会话（清空上下文）",
     "/status": "当前模式、后端与模型",
     "/login": "/login <用户名> — 远程模式登录（密码单独输入）",
@@ -70,11 +73,11 @@ COMMANDS: dict[str, str] = {
 }
 # /help 按用途分组：三十多个命令排成一列没法看
 HELP_GROUPS = [
-    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/evidence", "/history", "/new"]),
+    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/evidence", "/history", "/sessions", "/new"]),
     ("行情", ["/stock", "/search", "/screen", "/market"]),
     ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
-    ("调教与追责", ["/skills", "/memory", "/audit"]),
+    ("调教与追责", ["/skills", "/memory", "/lessons", "/audit"]),
     ("其他", ["/setup", "/sample", "/doctor", "/update", "/status", "/login", "/help", "/quit"]),
 ]
 ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
@@ -261,6 +264,9 @@ class App:
                     else:
                         c.print(f"[dim]◆ {gate}[/] [yellow]打回[/] [dim]{'；'.join(e.get('issues', []))[:110]}[/]")
                     status.update("[dim]撰写并校验回答…")
+                elif kind == "reused":
+                    how = "原样给出那次的结果，没有花 token" if e.get("mode") == "replay" else "只用那次取到的数据重写，没有重新取数"
+                    c.print(f"[yellow]◆ {e.get('age', '')}研究过这只股票：{how}。要最新数据用 /deep <问题>[/]")
                 elif kind == "debate":
                     c.print("[dim]◆ 多空辩论[/]")
                     for side, color, label in (("bull", "red", "看多"), ("bear", "green", "看空")):
@@ -277,8 +283,12 @@ class App:
                     answer, meta["done"] = e.get("content", ""), e.get("meta", {})
 
         c.print()
-        c.print(Markdown(cite(answer or "没有生成回答。")))
         done = meta.get("done", {})
+        if done.get("reason"):
+            # 模型这边的问题（余额、Key、上限……）：错误那一行已经说清楚了，不再当成一篇回答重排一遍
+            c.print("[dim]在网页版「设置」里处理，或在这里运行 /setup 换一个模型；/doctor 可以看是哪一环不通。[/]")
+            return
+        c.print(Markdown(cite(answer or "没有生成回答。")))
         color, label = STATUS.get(done.get("status", ""), ("dim", done.get("status", "")))
         usage = done.get("usage") or {}
         cost = (f" · {(usage['input_tokens'] + usage['output_tokens']) / 1000:.0f}k token（缓存 {usage['cache_hit_pct']}%）"
@@ -542,12 +552,33 @@ class App:
             return
         if not steps.get("model") or forced:
             c.print("\n[bold]第 1 步 · 配置模型[/] [dim]（不配也能看行情、选股、管持仓，只是不能让 AI 研究）[/]")
-            choice = (await self.ask("用哪家的模型？1 DeepSeek  2 Claude  回车跳过：")).strip()
-            if choice in ("1", "2"):
-                provider, field = ("deepseek", "deepseek_api_key") if choice == "1" else ("anthropic", "anthropic_api_key")
-                key = (await self.ask_secret("粘贴 API Key（输入不会显示，只保存在本机）：")).strip()
-                if key:
-                    await self.backend.request("PUT", "/api/settings", json={"ai_provider": provider, field: key})
+            for i, p in enumerate(providers.PRESETS, 1):
+                c.print(f"  {i:>2}) {p['label']}" + (f"  [dim]— {p['note']}[/]" if p["note"] else ""), highlight=False)
+            c.print(f"  {len(providers.PRESETS) + 1:>2}) 其他兼容 OpenAI 接口的服务（自己填地址）", highlight=False)
+            choice = (await self.ask("用哪家？输入序号，回车跳过：")).strip()
+            preset = None
+            if choice.isdigit() and 1 <= int(choice) <= len(providers.PRESETS):
+                preset = providers.PRESETS[int(choice) - 1]
+            elif choice.isdigit() and int(choice) == len(providers.PRESETS) + 1:
+                base = (await self.ask("接口地址（以 /v1 结尾的那种）：")).strip()
+                preset = providers.custom(base) if base else None
+            elif choice:
+                preset = providers.find(choice)
+            if preset:
+                if preset["key_page"]:
+                    c.print(f"[dim]去这里拿 Key：{preset['key_page']}[/]", highlight=False)
+                key = (await self.ask_secret("粘贴 API Key（输入不会显示，只保存在本机" + ("）：" if preset["needs_key"] else "；本机模型直接回车）："))).strip()
+                model = ""
+                if preset["provider"] == "openai":      # DeepSeek、Claude 的模型名有默认值，不在这里问；其余各家的名字常变，给个机会改
+                    hint = f" [{preset['model']}]" if preset["model"] else ""
+                    model = (await self.ask(f"模型名{hint}（回车用默认的；要支持工具调用）：")).strip()
+                payload = {k: v for k, v in providers.changes_for(preset, key, model).items() if v}
+                if preset["provider"] != "openai":
+                    payload = {k: v for k, v in payload.items() if not k.endswith("_model")}
+                if (preset["needs_key"] and not key) or (preset["provider"] == "openai" and not payload.get("openai_model")):
+                    c.print("[dim]没填全，模型没有配置。/setup 可以重来[/]")
+                else:
+                    await self.backend.request("PUT", "/api/settings", json=payload)
                     with c.status("[dim]测试一下…", spinner="dots"):
                         result = await self.backend.request("POST", "/api/settings/test")
                     if result["ok"]:
@@ -657,6 +688,42 @@ class App:
         self.console.print(t if t.row_count else "[dim]还没有研究记录[/]")
         if t.row_count:
             self.console.print("[dim]/history <编号> 调出某一次，接着追问[/]")
+
+    async def cmd_sessions(self, args: str) -> None:
+        rows = await self.backend.request("GET", "/api/conversations")
+        if args.strip().isdigit():
+            index = int(args.strip())
+            if not 1 <= index <= len(rows):
+                raise ValueError("没有这个序号。/sessions 看列表")
+            data = await self.backend.request("GET", f"/api/conversations/{rows[index - 1]['id']}")
+            turns = data["turns"]
+            # 回到那个会话：之后的提问存进同一个会话，带上最近几轮的上下文，/rewrite 用最后一轮的证据
+            self.conversation_id = data["id"]
+            self.history = [m for t in turns[-3:] for m in ({"role": "user", "content": t["question"]}, {"role": "assistant", "content": t["answer"]})]
+            self.evidence = (turns[-1].get("meta") or {}).get("evidence") or []
+            self.last_message_id = turns[-1]["message_id"]
+            for t in turns:
+                card = (t.get("meta") or {}).get("summary") or {}
+                self.console.print(f"[bold cyan]›[/] {t['question']}\n  [dim]{(card.get('conclusion') or t['answer'][:120]).strip()}[/]", highlight=False)
+            self.console.print("\n[dim]已回到这个会话，可以接着问。看某一轮的全文：/history <编号>[/]")
+            return
+        t = self.table("序号", "最近", "轮数", "第一个问题", "来源", right=(0, 2))
+        for i, c in enumerate(rows, 1):
+            t.add_row(str(i), c["last_at"][5:16].replace("T", " "), str(c["turns"]), c["title"][:44], c.get("source") or "")
+        self.console.print(t if rows else "[dim]还没有会话[/]")
+        if rows:
+            self.console.print("[dim]/sessions <序号> 回到那个会话接着聊[/]")
+
+    async def cmd_lessons(self, args: str) -> None:
+        if args.strip() == "reflect":
+            with self.console.status("[dim]归纳中（调用一次模型）…", spinner="dots"):
+                added = (await self.backend.request("POST", "/api/lessons/reflect"))["added"]
+            self.console.print(f"[green]归纳出 {len(added)} 条规律[/]" if added else "[dim]没有找到有两条以上记录支撑的规律，什么都没记[/]")
+        rows = await self.backend.request("GET", "/api/lessons")
+        for m in rows:
+            self.console.print(f"  [bold]#{m['id']}[/] [dim]{'规律' if m['source'] == 'reflection' else '落空'}[/] {m['content']}", highlight=False)
+        if not rows:
+            self.console.print("[dim]还没有。有判断被证伪时会自动记一条；/memory rm <编号> 可以删[/]")
 
     # —— 对话：深度与改写 ——
 

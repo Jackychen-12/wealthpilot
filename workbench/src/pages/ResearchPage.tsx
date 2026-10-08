@@ -1,8 +1,8 @@
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, ChevronRight, ListTree, Square, SquarePen } from 'lucide-react'
+import { ArrowUp, Check, ChevronRight, History, ListTree, Square, SquarePen } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { DEMO, api, runTool, useApi, type Debate, type Depth, type ValuationHistory } from '../api'
+import { DEMO, api, runTool, useApi, type ConversationInfo, type Debate, type Depth, type ValuationHistory } from '../api'
 import { askNotifyPermission, research, useResearch, type Evidence, type Turn } from '../api/researchStore'
 import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
@@ -54,6 +54,12 @@ const REWRITES = ['更短一点', '只讲风险', '换成给新手的说法', '�
 // 和个股页的判断卡同一套颜色：偏多用红、偏空用绿（A 股的习惯）
 const STANCE_TONE: Record<string, Tone> = { 看多: 'pink', 中性偏多: 'pink', 看空: 'green', 中性偏空: 'green', 中性: 'gray' }
 const STAGES = ['规划', '取证', '审核证据', '辩论与撰写', '核对'] as const
+// 研究没成是因为模型这边的问题：给一个直接去处理的入口，而不是让用户自己猜
+const REASON_ACTION: Record<string, string> = {
+  balance: '去设置换一个模型', auth: '去设置重填 Key', model: '去设置核对模型名', network: '去设置检查接口地址',
+  budget: '去设置调整上限', not_configured: '去设置填模型', rate_limit: '',
+}
+const wan = (tokens: number) => `${(tokens / 1e4).toFixed(tokens >= 1e5 ? 0 : 1)} 万 token`
 
 /** 现在进行到哪一步（对应 STAGES 的下标）。 */
 function stageOf(t: Turn): number {
@@ -101,6 +107,35 @@ export const DebateCard: React.FC<{ debate: Debate; onCite?: (id: string) => voi
   )
 }
 
+const when = (iso: string) => {
+  // 按日历上的日子算，不按"过去了多少小时"：昨天下午的事，今天上午看也该写"昨天"
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((day(new Date()) - day(new Date(iso))) / 864e5)
+  return days <= 0 ? `今天 ${iso.slice(11, 16)}` : days === 1 ? `昨天 ${iso.slice(11, 16)}` : iso.slice(5, 10)
+}
+
+/** 以前的会话：点一个就接着聊。来自定时任务和手机的也在这里，标了来源。 */
+const Sessions: React.FC<{ items: ConversationInfo[]; current: string; onOpen: (id: string) => void; limit?: number }> = ({ items, current, onOpen, limit }) => (
+  <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
+    {items.slice(0, limit).map((c) => (
+      <li key={c.id}>
+        <button type="button" onClick={() => onOpen(c.id)} className={cn('flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-surface-soft', c.id === current && 'bg-surface-soft')}>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-ink">{c.title || '（没有记下问题）'}</span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-steel">
+              <span>{when(c.last_at)}</span><span>{c.turns} 轮</span>
+              {c.securities.slice(0, 3).map((s) => <span key={s.code}>{s.name}</span>)}
+              {c.source ? <Tag className="!py-0">{c.source}</Tag> : null}
+              {c.id === current ? <span className="text-primary">当前</span> : null}
+            </span>
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />
+        </button>
+      </li>
+    ))}
+  </ul>
+)
+
 /** 等待中：告诉用户现在在干什么、大概还要多久，而不是只转一个圈。 */
 const Waiting: React.FC<{ t: Turn }> = ({ t }) => {
   const stage = stageOf(t)
@@ -118,6 +153,7 @@ const Waiting: React.FC<{ t: Turn }> = ({ t }) => {
         <span className="min-w-0 truncate font-medium text-ink">{detail}</span>
         <span className="shrink-0 tabular-nums text-steel">
           {left == null ? `已用 ${t.seconds.toFixed(0)} 秒` : left > 0 ? `大约还要 ${left} 秒` : '比平时久一点，快好了'}
+          {t.etaTokens ? ` · 约 ${wan(t.etaTokens)}` : ''}
         </span>
       </div>
       <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface">
@@ -132,7 +168,7 @@ const Waiting: React.FC<{ t: Turn }> = ({ t }) => {
           ))}
         </ol>
       )}
-      <p className="mt-3 text-xs text-stone">没通过核对的草稿不会显示。可以先去看别的页面，好了会提醒你。</p>
+      <p className="mt-3 text-xs text-stone">没通过核对的草稿不会显示。可以去看别的页面，甚至关掉这个标签页：研究在后台照样跑完，结果会存进研究记录。</p>
     </div>
   )
 }
@@ -162,6 +198,13 @@ const ResearchPage: React.FC = () => {
   const [reportOpen, setReportOpen] = useState(() => { try { return localStorage.getItem(REPORT_KEY) === '1' } catch { return false } })
   const [opened, setOpened] = useState<Record<number, boolean>>({})
   const [reuse, setReuse] = useState(false)
+  const sessions = useApi(() => (DEMO ? Promise.resolve([] as ConversationInfo[]) : api.conversations()), [turns.length === 0])
+  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [sessionError, setSessionError] = useState('')
+  const openSession = (id: string) => {
+    setSessionError('')
+    research.open(id).then(() => setSessionsOpen(false)).catch((e) => setSessionError(e instanceof Error ? e.message : '打不开这个会话'))
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
   const skillList = useApi(api.skills)
   const skillQuestions = (skillList.data?.skills ?? []).map((k) => `用「${k.label}」的方法看看贵州茅台`)
@@ -220,6 +263,16 @@ const ResearchPage: React.FC = () => {
                         </button>
                       ))}
                     </div>
+                    {sessions.data?.length ? (
+                      <div className="mt-8">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="eyebrow">接着之前的聊</span>
+                          {sessions.data.length > 4 ? <button type="button" onClick={() => setSessionsOpen(true)} className="text-[13px] text-steel hover:text-ink">全部 {sessions.data.length} 个会话</button> : null}
+                        </div>
+                        <Sessions items={sessions.data} current="" onOpen={openSession} limit={4} />
+                        {sessionError ? <p className="mt-2 text-[13px] text-on-rose">{sessionError}</p> : null}
+                      </div>
+                    ) : null}
                     <details className="mt-4 text-sm text-slate">
                       <summary className="cursor-pointer select-none text-[13px] text-steel hover:text-ink">还能问什么</summary>
                       <div className="mt-1">
@@ -236,7 +289,12 @@ const ResearchPage: React.FC = () => {
             ) : (
               <div className="mb-6 flex items-center justify-between">
                 <span className="text-[13px] text-steel">本次会话 · {turns.length} 个问题</span>
-                {!busy ? <Button size="xs" variant="ghost" onClick={research.clear}><SquarePen className="h-3.5 w-3.5" />新会话</Button> : null}
+                {!busy ? (
+                  <span className="flex gap-1">
+                    {sessions.data?.length ? <Button size="xs" variant="ghost" onClick={() => { sessions.reload(); setSessionsOpen(true) }}><History className="h-3.5 w-3.5" />历史会话</Button> : null}
+                    <Button size="xs" variant="ghost" onClick={research.clear}><SquarePen className="h-3.5 w-3.5" />新会话</Button>
+                  </span>
+                ) : null}
               </div>
             )}
 
@@ -271,8 +329,23 @@ const ResearchPage: React.FC = () => {
                         {t.securities.filter((x) => x.asset_type === 'stock').slice(0, 3).map((x) => <StockSnapshot key={x.code} code={x.code} name={x.name} />)}
                       </div>
                     ) : null}
+                    {t.reused && !t.running ? (
+                      <Callout tone="neutral" className="mt-4"
+                        action={<Button size="xs" variant="secondary" disabled={busy} onClick={(e) => { e.stopPropagation(); void research.ask(t.question, { depth: 'deep' }) }}>重新取数研究</Button>}>
+                        {t.reused.mode === 'replay'
+                          ? <>这是 <b>{t.reused.age}</b>那次研究的原文，这次没有重新跑，也没有花 token。</>
+                          : <>这次没有重新取数：用的是 <b>{t.reused.age}</b>那次研究取到的数据，只重写了回答。</>}
+                        {t.reused.saved_tokens ? ` 重新取数大约要 ${wan(t.reused.saved_tokens)}。` : ''} 行情和消息在这之后可能有变化。
+                      </Callout>
+                    ) : null}
                     <div className="mt-4" onClick={(e) => e.stopPropagation()}>
                       {t.running ? <Waiting t={t} />
+                        : t.reason ? (
+                          <Callout tone={t.reason === 'budget' ? 'warning' : 'danger'}
+                            action={REASON_ACTION[t.reason] ? <Link to="/settings" className="shrink-0 text-[13px] font-medium underline underline-offset-2">{REASON_ACTION[t.reason]}</Link> : undefined}>
+                            {t.answer || t.error}
+                          </Callout>
+                        )
                         : !t.answer ? <p className="text-[15px] text-steel">{t.error || '没有生成回答。'}</p>
                         : t.summary && t.rewriteOf == null ? (
                           <>
@@ -377,6 +450,11 @@ const ResearchPage: React.FC = () => {
       <aside className={cn('hidden h-full w-[360px] shrink-0 flex-col border-l border-hairline bg-surface-soft', showProcess && 'xl:flex')}>
         <Inspector turn={current} focus={focusEvidence} />
       </aside>
+      <Drawer open={sessionsOpen} onClose={() => setSessionsOpen(false)} title="历史会话" width="max-w-lg">
+        {sessionError ? <Callout tone="danger" className="mb-3">{sessionError}</Callout> : null}
+        <p className="mb-3 text-[13px] text-steel">点一个会话就回到当时的对话，接着问。每一轮当时的证据和校验结果都还在。</p>
+        <Sessions items={sessions.data ?? []} current={research.conversationId} onOpen={openSession} />
+      </Drawer>
       {/* 窄屏：过程面板收进抽屉 */}
       <Drawer open={processOpen} onClose={() => setProcessOpen(false)} title="研究过程" width="max-w-[400px]">
         <div className="-mx-6 -my-5 flex h-full flex-col bg-surface-soft"><Inspector turn={current} focus={focusEvidence} compact /></div>

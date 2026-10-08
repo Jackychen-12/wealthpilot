@@ -149,7 +149,7 @@ export const api = {
   valuationSeries: (code: string) => request<{ data: { date: string; pe: number | null; pb: number | null }[] }>(`/api/market/stock/${code}/valuation-history`),
   settings: () => request<AppSettings>('/api/settings'),
   saveSettings: (values: Record<string, unknown>) => request<AppSettings>('/api/settings', json('PUT', values)),
-  testModel: () => request<{ ok: boolean; provider: string; model: string; error?: string; reply?: string }>('/api/settings/test', { method: 'POST' }),
+  testModel: () => request<{ ok: boolean; provider: string; model: string; error?: string; reply?: string; kind?: string }>('/api/settings/test', { method: 'POST' }),
   desk: () => request<Desk>('/api/desk'),
   loadSample: () => request<unknown>('/api/sample', { method: 'POST' }),
   clearSample: () => request<unknown>('/api/sample', { method: 'DELETE' }),
@@ -171,15 +171,24 @@ export const api = {
   dismissOnboarding: () => request<unknown>('/api/onboarding/dismiss', { method: 'POST' }),
   parseHoldings: (text: string) => request<{ rows: ParsedHolding[] }>('/api/portfolio/parse', json('POST', { text })),
   addHoldings: (rows: ParsedHolding[]) => request<{ added: number; skipped: string[] }>('/api/portfolio/batch', json('POST', { rows })),
-  channel: () => request<{ channel: string; configured: boolean; paired: boolean }>('/api/channel'),
-  pairChannel: () => request<{ code: string; ttl_seconds: number }>('/api/channel/pair', { method: 'POST' }),
-  unpairChannel: () => request<unknown>('/api/channel/pair', { method: 'DELETE' }),
-  testChannel: () => request<{ ok: boolean; error: string }>('/api/channel/test', { method: 'POST' }),
+  channel: () => request<{ configured: boolean; paired: boolean; channels: ChannelInfo[] }>('/api/channel'),
+  pairChannel: (channel = 'telegram') => request<{ code: string; ttl_seconds: number }>(`/api/channel/pair?channel=${channel}`, { method: 'POST' }),
+  unpairChannel: (channel = 'telegram') => request<unknown>(`/api/channel/pair?channel=${channel}`, { method: 'DELETE' }),
+  testChannel: (channel = 'telegram') => request<{ ok: boolean; error: string }>(`/api/channel/test?channel=${channel}`, { method: 'POST' }),
   automations: () => request<{ items: Automation[]; metrics: { key: string; label: string; unit: string }[]; daily_runs_max: number; running: boolean }>('/api/automations'),
   saveAutomation: (body: Record<string, unknown>, id?: number) => request<Automation & { current?: number | null; hit?: boolean }>(id ? `/api/automations/${id}` : '/api/automations', json(id ? 'PUT' : 'POST', body)),
   removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
   runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
   parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
+  conversations: () => request<ConversationInfo[]>('/api/conversations'),
+  conversation: (id: string) => request<{ id: string; turns: ConversationTurn[] }>(`/api/conversations/${encodeURIComponent(id)}`),
+  lessons: () => request<MemoryItem[]>('/api/lessons'),
+  reflect: () => request<{ added: MemoryItem[] }>('/api/lessons/reflect', { method: 'POST' }),
+  skillSuggestions: () => request<SkillSuggestion[]>('/api/skills/suggestions'),
+  dismissSuggestion: (key: string) => request<unknown>(`/api/skills/suggestions/${key}/dismiss`, { method: 'POST' }),
+  activeRuns: () => request<ActiveRun[]>('/api/chat/runs/active'),
+  stopRun: (runId: string) => request<unknown>(`/api/chat/runs/${runId}/stop`, { method: 'POST' }),
+  usage: () => request<UsageSummary>('/api/settings/usage'),
   version: (refresh = false) => request<VersionInfo>(`/api/settings/version${refresh ? '?refresh=1' : ''}`),
   doctor: (model = false) => request<{ items: DoctorItem[] }>(`/api/settings/doctor${model ? '?model=1' : ''}`),
   connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
@@ -220,7 +229,8 @@ export interface Backtest {
 export interface FundInfo { code: string; name: string; nav: number; nav_date: string; estimated_change?: number; manager?: string; company?: string; scale?: string; type?: string; benchmark?: string
   return_1w?: string; return_1m?: string; return_3m?: string; return_1y?: string }
 export interface NavPoint { nav_date: string; nav: number; daily_return: number; open?: number; high?: number; low?: number; volume?: number }
-export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; env_file: string }
+export interface ModelPreset { key: string; label: string; provider: string; base_url: string; model: string; needs_key: boolean; note: string; key_page: string }
+export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; env_file: string; presets?: ModelPreset[] }
 export interface StockQuote { code: string; name: string; price: number; prev_close: number; open: number; high: number; low: number
   change: number; change_pct: number; amount_yi: number | null; turnover_pct: number | null; pe_ttm: number | null; pb: number | null
   total_mv_yi: number | null; quote_time: string }
@@ -278,7 +288,7 @@ export interface Desk { sample?: boolean; stocks: DeskStock[]; todo: { proposals
 export interface Thesis { code: string; latest: { id: number; date: string; status: string; playbook: string; conclusion: string; stance: string } | null; research_dates: string[]
   checkpoints: { total: number; pending: number; held: number; broken: number }; broken: Checkpoint[] }
 export interface Mover { code: string; name: string; industry: string; price: number | null; change_pct: number; total_mv_yi: number | null }
-export interface MemoryItem { id: number; kind: 'preference' | 'decision' | 'note'; code: string; content: string; source: string; created_at: string }
+export interface MemoryItem { id: number; kind: 'preference' | 'decision' | 'note' | 'lesson'; code: string; content: string; source: string; created_at: string }
 export interface AuditEntry { id: number; at: string; kind: string; actor: string; summary: string; payload: Record<string, unknown>; hash: string }
 export interface SkillInfo { name: string; label: string; description: string; when_to_use: string; triggers: string[]; needs: string; agents: string[]; sections: string[]; criteria: string[]; path: string; content?: string }
 export interface FlowDay { date: string; close: number | null; change_pct: number | null; net_yi: number | null; net_ratio_pct: number | null; xlarge_net_yi: number | null }
@@ -312,6 +322,18 @@ export interface StockNews { date: string; title: string; summary: string; media
 export interface Survey { notice_date: string; date: string; way: string; place: string; participants: number; content: string }
 export interface Segment { name: string; revenue_yi: number | null; revenue_ratio_pct: number | null; gross_margin_pct: number | null }
 export interface Segments { report_date: string; report_name: string; by_industry: Segment[]; by_product: Segment[]; by_region: Segment[] }
+export interface ConversationInfo { id: string; title: string; turns: number; last_at: string; securities: Security[]; source: string; last_status: string }
+export interface ConversationTurn { message_id: number; created_at: string; question: string; answer: string; checkpoints: Checkpoint[]; proposals: Proposal[]
+  meta: { status?: string; playbook?: string; intent?: string; securities?: Security[]; tasks?: { id: string; agent: string; goal: string }[]
+    evidence?: NonNullable<StreamEvent['evidence']>[]; summary?: SummaryCard | null; debate?: Debate | null; seconds?: number; usage?: Usage; depth?: string
+    reused?: Reused | null; rewrite_of?: number | null; missing_evidence?: string[] } }
+export interface SkillSuggestion { key: string; pattern: string; times: number; stocks: string[]; examples: { question: string; name: string }[]; description: string }
+export interface ChannelInfo { channel: 'telegram' | 'feishu' | 'wecom'; label: string; configured: boolean; paired: boolean; error?: string }
+export interface Reused { message_id: number; age: string; age_minutes: number; saved_tokens: number | null; mode: 'replay' | 'evidence' }
+export interface ActiveRun { run_id: string; question: string; conversation_id: string; depth: Depth; rewrite_of: number | null; started_at: number; done: boolean }
+export interface UsageTotal { runs: number; input_tokens: number; cached_tokens: number; output_tokens: number; tokens: number; cost: number | null }
+export interface UsageSummary { today: UsageTotal; last_7_days: UsageTotal; last_30_days: UsageTotal; by_day: (UsageTotal & { day: string })[]
+  by_kind: (UsageTotal & { kind: string; avg_tokens: number })[]; daily_token_budget: number; priced: boolean }
 export interface DebateSide { points: { text: string; evidence: string[] }[]; weakness: string }
 export interface Debate { bull: DebateSide; bear: DebateSide }
 export interface SkillPreview { content: string; skill: SkillInfo | null; problems: string[] }
@@ -360,10 +382,12 @@ export interface StreamEvent {
   tasks?: { id: string; agent: string; goal: string }[]
   evidence?: { id: string; tool: string; status: string; input: unknown; output: unknown; provenance?: { as_of?: Record<string, string | null>; sources?: { url?: string }[] } }
   gate?: string; passed?: boolean; issues?: string[]; attempt?: number
-  agents?: string[]; ungrounded?: string[]; follow_ups?: string[]; eta_seconds?: number; depth?: string; mode?: string
+  agents?: string[]; ungrounded?: string[]; follow_ups?: string[]; eta_seconds?: number; eta_tokens?: number | null; depth?: string; mode?: string
+  run_id?: string; age?: string; saved_tokens?: number | null; message_id?: number
   bull?: DebateSide; bear?: DebateSide
   meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string; usage?: Usage
-    summary?: SummaryCard | null; message_id?: number | null; seconds?: number; depth?: string; debate?: Debate | null }
+    summary?: SummaryCard | null; message_id?: number | null; seconds?: number; depth?: string; debate?: Debate | null
+    reason?: string; reused?: Reused | null }
 }
 
 export async function* streamChat(
@@ -376,6 +400,16 @@ export async function* streamChat(
     return
   }
   const resp = await fetch(`${API_BASE}/api/chat`, { ...json('POST', { message, history, conversation_id: conversationId || undefined, depth: options.depth ?? 'auto', rewrite_of: options.rewriteOf ?? undefined }), headers: { 'Content-Type': 'application/json', ...authHeaders() }, signal })
+  yield* readEvents(resp)
+}
+
+/** 重新接上一次还在服务端跑着的研究：从头重放它已经产生的事件，然后继续跟到结束。 */
+export async function* attachRun(runId: string, signal: AbortSignal): AsyncGenerator<StreamEvent> {
+  const resp = await fetch(`${API_BASE}/api/chat/runs/${runId}/events?start=0`, { headers: authHeaders(), signal })
+  yield* readEvents(resp)
+}
+
+async function* readEvents(resp: Response): AsyncGenerator<StreamEvent> {
   if (!resp.ok || !resp.body) throw new ApiError(`对话请求失败（${resp.status}）`)
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()

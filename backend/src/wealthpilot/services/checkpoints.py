@@ -280,6 +280,7 @@ async def verify_pending(db: Session, user_id: int, *, force: bool = False, toda
     today = today or date.today()
     pending = db.exec(select(Checkpoint).where(Checkpoint.user_id == user_id, Checkpoint.status == "pending")).all()
     counts = {"checked": 0, "held": 0, "broken": 0, "unverifiable": 0}
+    broken: list[Checkpoint] = []
     verified: list[Checkpoint] = []
     for cp in pending:
         try:
@@ -294,12 +295,18 @@ async def verify_pending(db: Session, user_id: int, *, force: bool = False, toda
         else:
             cp.actual_value, cp.actual_as_of = outcome
             cp.status = _judge(cp.op, cp.actual_value, cp.threshold)
+            if cp.status == "broken":
+                broken.append(cp)
             counts[cp.status] += 1
         cp.checked_at = datetime.now()
         counts["checked"] += 1
         db.add(cp)
         verified.append(cp)
     db.commit()
+    if broken:
+        from wealthpilot.services import lessons  # 放在这里导入：lessons 也要用到本模块
+        for cp in broken:
+            lessons.from_broken(db, cp)   # 判断落空：照实记一条，下次研究这只股票时带上
     for cp in verified:
         memory.record(db, user_id, "checkpoint/verified", f"{cp.name} {METRICS.get(cp.metric, (cp.metric,))[0]}：{cp.status}",
                       {"id": cp.id, "code": cp.code, "status": cp.status, "actual": cp.actual_value, "as_of": cp.actual_as_of})
@@ -384,6 +391,27 @@ def _describe(cp: Checkpoint) -> str:
     if cp.status == "broken":
         return f"{text} → 已核对：被证伪，实际 {cp.actual_value:g}（{cp.actual_as_of}）"
     return f"{text} → 尚未到核对时点（{cp.due_date or '等下一期财报'}）"
+
+
+MIN_SAMPLE = 5
+
+
+def calibration_note(db: Session, user_id: int) -> str:
+    """这个 Agent 自己过去的判断，事后核对下来各类对了多少 —— 带进新一轮研究，让它据此收放把握。
+
+    按判断的类型分开说：某一类经常落空，下次同类判断就该更保守。样本不到 5 条的类型不提，免得被两三次偶然带偏。
+    """
+    lines = []
+    for group in scorecard(db, user_id)["by_group"]:
+        verified, rate = group["held"] + group["broken"], group["hold_rate_pct"]
+        if verified < MIN_SAMPLE or rate is None:
+            continue
+        advice = ("这类判断过去经常落空：这次同类的判断要更保守，结论里写明把握不大" if rate < 50
+                  else "这类判断过去大多成立" if rate >= 75 else "这类判断对错参半：结论里要写明不确定性")
+        lines.append(f"- {group['label']}类：已核对 {verified} 条，成立 {group['held']} 条（{rate:g}%）。{advice}。")
+    if not lines:
+        return ""
+    return "你过去的判断事后核对的结果（据此校准这一次的把握程度，不必在回答里复述）：\n" + "\n".join(lines) + "\n\n"
 
 
 def prior_note(db: Session, user_id: int, codes: list[str]) -> str:

@@ -15,6 +15,7 @@ from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.streaming import stream_sync_in_thread
 from wealthpilot.services.agents.tools import execute_tool
+from wealthpilot.services.ai_client import raise_if_unavailable
 from wealthpilot.services.connectors import call_tool as call_external
 from wealthpilot.services.evidence import ToolSession, record_evidence
 from wealthpilot.settings import get_settings
@@ -192,6 +193,7 @@ class BaseAgent:
                     break
 
         except Exception as e:  # noqa: BLE001
+            raise_if_unavailable(e)   # 余额、Key 这类错误：整轮都跑不了，别各报各的
             status = "failed"
             await emit({"type": "error", "content": f"{self.name} 异常: {e}"})
 

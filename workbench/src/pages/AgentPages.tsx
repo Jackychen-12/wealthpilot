@@ -1,7 +1,7 @@
 /** Agent 的三个"可调教、可追责"的页面：研究方法（技能）、AI 记住的事（记忆）、审计日志。 */
 import type React from 'react'
 import { useState } from 'react'
-import { DEMO, api, useApi, type MemoryItem, type SkillInfo, type SkillPreview } from '../api'
+import { DEMO, api, useApi, type MemoryItem, type SkillInfo, type SkillPreview, type SkillSuggestion } from '../api'
 import { AskAi } from '../components/AskAi'
 import { Button, Callout, ConfirmDialog, Drawer, Input, Tag, type Tone } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
@@ -41,6 +41,11 @@ export const SkillsPage: React.FC = () => {
     catch (e) { setError(e instanceof Error ? e.message : '安装失败') } finally { setWorking('') }
   }
   const available = (gallery.data ?? []).filter((g) => !g.installed)
+  const noticed = useApi(() => (DEMO ? Promise.resolve([] as SkillSuggestion[]) : api.skillSuggestions()))
+  const draftFrom = async (s: SkillSuggestion) => {
+    setWorking(s.key); setError('')
+    try { review(await api.draftSkill(s.description), 'AI 起草') } catch (e) { setError(e instanceof Error ? e.message : '起草失败') } finally { setWorking('') }
+  }
 
   const open = async (name: string) => {
     setError('')
@@ -90,6 +95,24 @@ export const SkillsPage: React.FC = () => {
         ) : null}
         {data ? <p className="mt-3 text-[13px] text-steel">文件放在 <code className="font-mono text-xs">{data.dirs[0]}</code>。格式与 DeepSeek Harness 的 skill 相同（YAML frontmatter + Markdown 正文），编排信息写在 <code className="font-mono text-xs">metadata.wealthpilot</code> 下。</p> : null}
       </Section>
+
+      {noticed.data?.length ? (
+        <Section title="它注意到你老这么问" hint="同一种问法问过好几只股票。存成方法，以后说一声就按同一套来">
+          <div className="flex flex-col gap-3">
+            {noticed.data.map((s) => (
+              <div key={s.key} className="rounded-lg border border-hairline p-4">
+                <p className="text-sm text-ink">你问过 <b>{s.times}</b> 次：<span className="font-medium">「{s.pattern}」</span></p>
+                <p className="mt-1 text-[13px] text-steel">问过的股票：{s.stocks.join('、')}</p>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button size="sm" loading={working === s.key} disabled={working !== ''} onClick={() => void draftFrom(s)} title="按你这几次的原话起草一个方法。会调用一次模型；起草出来先给你看">起草成方法</Button>
+                  <Button size="sm" variant="ghost" disabled={working !== ''} onClick={() => void api.dismissSuggestion(s.key).then(noticed.reload)}>不用了</Button>
+                  <span className="text-xs text-stone">起草会调用一次模型，写出来先给你看，你点保存才生效</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
 
       {DEMO ? null : (
         <Section title="添加方法" hint="不用从空白文件写起">

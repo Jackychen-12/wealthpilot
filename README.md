@@ -55,7 +55,7 @@
 | 💻 | **多入口调用** | Web UI / 终端交互 / CLI 管道 / MCP，任选其一接入分析能力 |
 | 🖥️ | **投研工作台** | 23 个功能页：今日、个股详情（财务 / 估值分位 / 同行 / 公告）、选股器、自选股、研究记录等，页面与 Agent 共用同一批工具 |
 | 🔐 | **多租户隔离** | JWT 认证 + 用户级数据隔离，对话历史持久化 |
-| 🚀 | **一键部署** | `make setup` → 编辑 API Key → `make dev`，3 步启动完整系统 |
+| 🚀 | **一条命令装好** | `curl … install.sh \| bash` → `wealthpilot setup` 贴一个 Key → `wealthpilot`。十家模型服务的接口地址和默认模型名都预填好了 |
 
 ---
 
@@ -95,16 +95,72 @@
 
 ## Quick Start
 
-### 方式一：一条命令（推荐）
+### 一条命令装好（推荐）
 
 ```bash
-git clone https://github.com/Jackychen-12/wealthpilot.git
-cd wealthpilot
-
-make setup      # 装依赖、构建网页版、复制 .env
-make install    # 把 wealthpilot 装成全局命令（可选）
-wealthpilot     # 之后在任意目录敲这一条
+curl -fsSL https://raw.githubusercontent.com/Jackychen-12/wealthpilot/main/scripts/install.sh | bash
 ```
+
+```bash
+wealthpilot setup    # 选一家模型、贴一个 Key、放进你的股票，一分钟
+```
+
+```bash
+wealthpilot          # 开始用
+```
+
+机器上只需要有 git 和 curl。安装脚本做四件事：
+
+1. 没有 uv 就先装一个（Python 的包管理器；装在你的用户目录下，不动系统里的 Python，不要管理员权限）；
+2. 把代码放到 `~/.wealthpilot/app`；
+3. 装依赖。机器上有 Node.js 就顺手把网页版构建出来，没有也不影响终端使用；
+4. 在 `~/.local/bin` 放一个 `wealthpilot` 命令。
+
+你的东西——配置、数据库、研究方法——都在 `~/.wealthpilot`，和代码分开，升级、重装、卸载都不会动它。脚本可以重复运行，第二次就是更新。卸载：`bash ~/.wealthpilot/app/scripts/install.sh --uninstall`（只删代码和命令，数据留着）。
+
+手上已经有 Key，可以装的时候一起配好，装完直接用：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jackychen-12/wealthpilot/main/scripts/install.sh | WEALTHPILOT_KEY=sk-xxxx bash
+```
+
+这样写 Key 会留在终端的历史记录里，介意的话还是用 `wealthpilot setup`，那里粘贴的时候不回显。想换安装位置、换分支、不构建网页版，脚本开头的注释里列了对应的环境变量。
+
+### 配好模型：`wealthpilot setup`
+
+三步，每一步都能回车跳过，之后随时重来：
+
+1. **用哪家的模型**。列出能接的服务，选一个，粘贴 Key（输入不回显；只存在这台电脑上，文件权限 600）。然后问你要不要当场测一次——那会真的调用一次模型，花几十个 token，不想花就答 n。
+2. **放进你的股票**。`贵州茅台 100 1500; 600036 2000 35.2` 这样写，认成了哪只股票、多少股先给你看，点头才写入；或者输入 `s` 用示例数据。
+3. 告诉你下一步敲什么。
+
+不想被提问（写进脚本、在远程机器上）就把参数给全：
+
+```bash
+wealthpilot setup --key sk-xxxx                                          # 只给 Key：按前缀认出是 DeepSeek 还是 Claude
+wealthpilot setup --provider zhipu --key xxxx                            # 指定服务，接口地址和默认模型名自动填好
+wealthpilot setup --provider ollama --model qwen2.5:14b                  # 本机模型，不要 Key
+wealthpilot setup --base-url http://localhost:8080/v1 --model my-model   # 清单之外的兼容服务
+```
+
+能直接叫出名字的服务（`wealthpilot model list` 看得到同一张表，网页「设置」里也是这一份）：
+
+| `--provider` | 服务 | 预填的模型名 |
+|---|---|---|
+| `deepseek` | DeepSeek | `deepseek-chat` |
+| `claude` | Claude（Anthropic） | `claude-sonnet-5-5` |
+| `siliconflow` | 硅基流动 | `deepseek-ai/DeepSeek-V3` |
+| `zhipu` | 智谱 | `glm-4-flash` |
+| `moonshot` | Moonshot（Kimi） | `moonshot-v1-32k` |
+| `dashscope` | 阿里云百炼（通义） | `qwen-plus` |
+| `ark` | 火山方舟（豆包） | 填你在方舟控制台建的接入点 ID |
+| `openrouter` | OpenRouter | `deepseek/deepseek-chat` |
+| `openai` | OpenAI | `gpt-4o-mini` |
+| `ollama` | 本机 Ollama | `qwen2.5:14b` |
+
+如实说明：我们自己长期跑的只有 DeepSeek。其余各家预填的是接口地址和一个通常能用的模型名，没有逐个实测过，各家的模型名也经常换——配好后跑一次 `wealthpilot model test`，不通就照服务商文档里的名字用 `--model` 改。唯一的硬要求是模型得支持工具调用（function calling），不然 Agent 取不了数。
+
+### 装好之后
 
 `wealthpilot` 一条命令同时给你三样东西：
 
@@ -112,34 +168,41 @@ wealthpilot     # 之后在任意目录敲这一条
 - **网页版**：后台带起 http://localhost:8000 （接口和页面同一个端口，不用另开前端）；
 - **每日盯盘**：跟着这个进程跑，错过的那次（合盖、关机）下次启动时会补上。
 
-**第一次用会被带着走一遍**，不用先读文档：
+没跑过 `setup` 直接敲 `wealthpilot` 也行：没配模型或没有股票时，进来会带你走同样的三步。网页首页也有一张「开始使用」卡片，列着配置模型 → 放进你的股票 → 做第一次研究 → 连上手机（可选）各自做没做、下一步点哪里。
 
-- 终端里：没配模型或没有股票时，进来会问三件事——用哪家的模型并粘贴 Key（输入不回显，当场测一次通不通）、录入持仓（`贵州茅台 100 1500; 600036 2000 35.2` 这样写，或输入 `s` 用示例数据）、然后提示可以问的第一个问题。每一步都能回车跳过，之后 `/setup` 随时重来。
-- 网页首页：一张「开始使用」卡片列出四步（配置模型 → 放进你的股票 → 做第一次研究 → 连上手机，最后一步可选），各自做没做、下一步点哪里；底下附了「验证点」「建议单」「PE 历史分位」「盯盘」这几个词的解释。做完或点「不再显示」就消失。
-- 持仓可以**粘贴导入**：一行一只，名称或代码、数量、成本价。先识别成预览——每一行认成了哪只股票、多少股都给你看过，认不出的标出原因——确认后才写入；已经在持仓里的代码不动。
+不进界面也能办的事：
 
-哪里不通，运行 `wealthpilot doctor`（或网页版「设置 → 版本与自检」）：逐项检查模型、四个数据源、数据库、网页版、手机触达、版本，不通的每一项都附修法。
+| 命令 | 做什么 |
+|---|---|
+| `wealthpilot status` | 现在是什么情况：模型配没配、几只持仓、盯盘开没开、手机绑没绑、今天用了多少 token |
+| `wealthpilot model` | 现在用的是哪个模型。`model list` 看能接哪些，`model set <服务> --key <Key>` 换一个，`model test` 实测一次 |
+| `wealthpilot config list` | 看全部配置（Key 只显示末四位）。`config get <名字>`、`config set <名字> <值>` 改一项，`config path` 看配置文件在哪 |
+| `wealthpilot import 持仓.txt` | 从文件录入持仓，每行「名称或代码 数量 成本价」。先给你看认成了什么再问；管道用 `-`，加 `--yes` 不问 |
+| `wealthpilot skills gallery` | 现成的研究方法。`skills install <名字或 https 链接>` 装上，`skills list` 看已有的，`skills remove <名字>` 删掉 |
+| `wealthpilot sessions` | 以前的会话 |
+| `wealthpilot doctor` | 哪里不通：逐项检查模型、数据源、数据库、网页版、手机触达、版本，不通的每一项都附修法 |
+| `wealthpilot update` | 升级（先备份数据库） |
 
-模型 Key 也可以在网页版左侧「设置」里填，或直接编辑 `backend/.env`。示例数据带标记，随时一键清掉。
-
-没装全局命令时用 `make start`，效果一样。只想要终端：`wealthpilot --no-web`；端口被占：`wealthpilot --port 8001`。配置、数据库、技能文件都固定在仓库的 `backend/` 下（或 `WEALTHPILOT_HOME` 指定的目录），和你在哪个目录敲命令无关。
-
-网页版只有一个地址：http://localhost:8000 。开发时用 `make dev`，也是这个地址——后端热重载，前端代码改了会自动重新构建，刷新页面即可。只有需要逐像素调界面时才用 `make workbench`（Vite 热更新，:5180）。
-
-全局命令是一个很小的转发脚本（`~/.local/bin/wealthpilot`），指向这个仓库里装好的环境，所以代码更新后不用重装。仓库挪了位置它会直接告诉你去新位置重新 `make install`；`make uninstall` 移除。
+只想要终端：`wealthpilot --no-web`；端口被占：`wealthpilot --port 8001`。
 
 一点如实说明：电脑合盖休眠时进程会被挂起，盯盘和进行中的研究都会停，软件层面拦不住；能做的是醒来后把错过的那次盯盘补上。要它全天候跑，需要放在一台不休眠的机器上（见 Docker 部署），再用 `wealthpilot --server` 连过去。
 
-### 方式二：CLI 交互式初始化
+### 从源码装（想改代码的人）
 
 ```bash
-cd backend
-uv sync
-uv run python -m wealthpilot init   # 交互式选择 AI 提供商 + 输入 API Key
-uv run python -m wealthpilot chat   # 终端对话模式，直接体验多智能体
+git clone https://github.com/Jackychen-12/wealthpilot.git
+cd wealthpilot
+
+make setup      # 装依赖、构建网页版
+make install    # 把 wealthpilot 装成全局命令（指向这个仓库，代码改了不用重装）
+wealthpilot setup
 ```
 
-### 方式三：Docker Compose
+这种装法下，配置、数据库、技能文件都在仓库的 `backend/` 里（或 `WEALTHPILOT_HOME` 指定的目录），和你在哪个目录敲命令无关。没装全局命令时用 `make start`，效果一样。开发用 `make dev`，地址也是 http://localhost:8000 ——后端热重载，前端代码改了会自动重新构建，刷新页面即可；只有需要逐像素调界面时才用 `make workbench`（Vite 热更新，:5180）。仓库挪了位置，全局命令会直接告诉你去新位置重新 `make install`；`make uninstall` 移除。
+
+以前从源码装过、现在想换成一条命令的装法：装完后把 `backend/` 下的 `.env`、`data/`、`skills/`、`connectors.json` 拷到 `~/.wealthpilot/`，原来的持仓、研究记录和配置就都带过去了。
+
+### Docker Compose
 
 ```bash
 git clone https://github.com/Jackychen-12/wealthpilot.git && cd wealthpilot
@@ -149,15 +212,15 @@ docker compose up --build -d
 # 网页版和接口都在 http://localhost:8000 （接口文档 /docs）
 ```
 
-### 在网页上配置（推荐）
+### 在网页上配置
 
-启动后打开工作台左侧「设置 → 设置」：选模型提供商、填 API Key、开关个人模式 / 模拟盘 / 每日盯盘、填推送地址，保存后立即生效，不用重启。写入的就是 `backend/.env`。这个接口只允许从运行后端的那台机器访问；Key 只写不读，页面上只显示是否已配置和末四位。由进程环境变量指定的项（比如 Docker 里）会标注出来，网页上改不了。
+启动后打开工作台左侧「设置 → 设置」：选模型提供商、填 API Key、开关个人模式 / 模拟盘 / 每日盯盘、填推送地址，保存后立即生效，不用重启。写入的和 `wealthpilot setup`、`wealthpilot config set` 是同一个文件（`wealthpilot config path` 看它在哪）。这个接口只允许从运行后端的那台机器访问；Key 只写不读，页面上只显示是否已配置和末四位。由进程环境变量指定的项（比如 Docker 里）会标注出来，网页上改不了。
 
 ### 配置 AI 提供商
 
-编辑 `backend/.env`，**只需改 2 行**即可启用 AI 能力：
+三种接法：Claude、DeepSeek，或任何兼容 OpenAI 接口的服务（`AI_PROVIDER=openai`，含本机 Ollama）。用 `wealthpilot setup` 或网页「设置」配就行，下面是它们写进配置文件的内容，想手改的时候看：
 
-**选项 A — Claude（默认，推荐）**
+**选项 A — Claude**
 ```env
 AI_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-xxx    # 从 https://console.anthropic.com/ 获取
@@ -180,7 +243,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 | `RUN_TIMEOUT_SECONDS` / `AI_TIMEOUT_SECONDS` | 180 / 60 | 整轮研究 / 单次模型请求的超时 |
 | `LOCAL_USER_ID` | 0 | CLI 与 MCP 读取哪个用户的持仓和画像（0 = 未登录的匿名档） |
 
-配置完成后运行 `make config` 验证。占位值（`sk-ant-xxx`）会被视为未配置。
+配置完成后运行 `wealthpilot status` 看一眼。占位值（`sk-ant-xxx`）会被视为未配置。
 
 ### 不配置 API Key 也能用
 
@@ -481,6 +544,40 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 
 ---
 
+## 像个成熟的 Agent：换模型、管花费、断了能接上
+
+对照 OpenClaw、Hermes 这类通用 Agent，这里补的是几件"用着才发现缺"的事。这一轮的改动全部用假模型离线验证，没有调用真实模型。
+
+**接什么模型都行**。除了 DeepSeek 和 Claude，「设置 → 模型」里多了第三种：任何兼容 OpenAI 接口的服务。填接口地址、模型名、Key 就能用；硅基流动、智谱、Moonshot、阿里云百炼、火山方舟、OpenRouter、OpenAI 和本机 Ollama 的地址可以一键填好。本机模型不需要 Key。两个前提要如实说：模型必须支持工具调用，否则 Agent 取不了数；这些服务没有逐个实测过，小模型的工具调用和中文长文质量通常明显差一截，填好后先点「测试当前配置」。
+
+**钱花在哪、能不能少花**：
+
+- 「设置 → 用量与预算」能看到今天、近 7 天、近 30 天各用了多少 token、花在哪类问题上；填了你那家的单价会折成钱（按输入全价算，是个上限）。开跑前，等待卡片上会写这类研究最近平均花多少。
+- 可以设每日 token 上限，到了就不再调用模型，第二天自动恢复。
+- 同一个会话里的后续问题，以前会把之前的完整回答（每篇五六千字）原样发给每一个 Agent、每一轮工具调用再发一遍；现在只带问题和回答的结论。会话越长省得越多。
+- 几小时内（默认 4 小时，可改）再对同一只股票做深度研究：问题一模一样就把上一次的结果原样给出来，不花 token；问法不同就只用那批证据重写一遍。页面上会明确写"这次没有重新取数"，旁边有「重新取数研究」；选「深入」档则总是重新取。
+- 多空辩论可以在设置里关掉（每次省两次调用）。
+
+**模型用不了时说人话**。余额不足、Key 失效、模型名不对、被限流、连不上——认出来之后整轮研究立刻停，不再让六个 Agent 各报一串英文错误再走完审核和重写；页面上是一句话加一个去设置的入口。
+
+**研究不绑在网页连接上**。以前关掉标签页或刷新，跑到一半的研究就被取消，token 花了、结果没存。现在研究在服务端独立运行：页面断开不影响它跑完并存进研究记录；刷新后会自动接回正在跑的那一次；会话存在浏览器本地，刷新不丢。只有点「停止」才会真的取消。（任务只活在这个进程里，进程退出就没了——不做后台常驻。）
+
+**从自己的对错里学一点**。每类判断（财务、估值、涨跌）事后核对下来的成立率，会带进新一轮研究：某一类经常落空，下次同类判断就要更保守。样本不到 5 条的类型不提。这是按成绩单做的校准，不是模型自己"悟"出来的。
+
+**推送**。群机器人的 webhook 以前发的是一种"都带上"的格式，飞书和 Slack 其实不认；现在按地址认出是飞书、企业微信、钉钉、Slack 还是 Discord，各发它认的格式，并读取对方返回的错误码。定时任务的结论和提醒以前只推 Telegram，现在所有渠道都推。钉钉机器人如果设了关键词或加签，需要在机器人那边放行。这些格式是照各家文档写的，用模拟的接口测过，没有对着真实的群机器人发过。
+
+**会话找得回来**。研究页空着的时候会列出最近的会话，对话中右上角有「历史会话」；点一个就回到当时的对话，每一轮的证据、校验结果、验证点都在，可以接着问或换个写法。定时任务和手机上发起的会话也在列表里，标了来源。终端里是 `/sessions`。
+
+**记经验、提议方法**（都尽量不花钱）：
+
+- 一条验证点被证伪时，程序照实记一条经验——当时认为会怎样、实际是多少、当时的理由——之后再研究这只股票会带上。这一步不调用模型。
+- 已核对的判断攒够 4 条后，「验证与复盘」页可以点「让它归纳规律」：把这些记录交给模型找跨股票的规律，一次调用。每条规律必须有至少两条记录支撑才会收下，收下的可以删。
+- 同一种问法问过三次、涉及两只以上的股票（比如“××的分红能不能持续”），「研究方法」页会提议把它存成方法。发现是代码做的；点「起草成方法」才调用模型，写出来先给你看，你点保存才生效。只是“帮我分析一下××”这种通用问法不会被当成方法。
+
+和 Hermes 那种“自己学会新技能”相比，这里保守得多：它只会记录、归纳和提议，不会在你不知道的情况下改自己的做法。
+
+和成熟的通用 Agent 相比，还没有的：浏览器操作之类的通用工具（不打算做，这是个投研工具）；飞书、企业微信的卡片按钮；企业微信在没有公网地址时的接入。
+
 ## 基础的东西：数据、分工、辩论、图表
 
 行情软件有的基础数据和图，这里也要有，而且 Agent 要用得上。这一轮补的就是这些。
@@ -529,7 +626,23 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 - **快速 / 深入**。输入框下面三档：自动、快速（只派一两个 Agent，十几秒，简短，不留验证点）、深入（完整研究）。终端里是 `/quick <问题>`、`/deep <问题>`、`/depth`。
 - **换个写法不用重新研究**。回答下面的「更短一点 / 只讲风险 / 换成给新手的说法 / 列成要点」，或勾上「只用上一轮的证据回答」再追问，都只用那一轮已经取到的证据重写：实测 3 到 8 秒，同样要过数字溯源校验；证据里没有的东西它会直说"需要重新研究"，不会现编。终端里是 `/rewrite <要求>`，`/history <编号>` 可以调出以前的某一次接着改写或追问。
 
-## 手机触达（Telegram）
+## 手机触达（Telegram、飞书、企业微信）
+
+三个渠道接一个就行，在网页版「设置 → 手机触达」里切换。它们共用同一套逻辑：能收什么、能问什么、怎么处理建议单都一样，区别只在怎么接上。
+
+| 渠道 | 怎么收消息 | 需要公网地址吗 | 接入要做的事 |
+|---|---|---|---|
+| Telegram | 长轮询 | 不需要（但本机要能访问 Telegram，可以填中转地址） | 找 @BotFather 建机器人，填令牌 |
+| 飞书 | 官方 SDK 的长连接 | 不需要 | 开放平台建企业自建应用：加机器人能力，开通收发消息权限，事件订阅选「使用长连接接收事件」并添加「接收消息」，发布；填 App ID 和 App Secret，**重启 WealthPilot** |
+| 企业微信 | 回调（它来调你） | **需要** | 管理后台建自建应用，「接收消息」的 URL 填 `https://你的地址/api/channel/wecom/callback`，填企业 ID、AgentId、Secret、Token、EncodingAESKey；把服务器 IP 加进「企业可信 IP」 |
+
+绑定都是同一个办法：设置页生成配对码，在那个应用里给机器人发 `/pair 123456`，发对了它就认这个聊天做主人，别人发消息不会有回应。飞书和企业微信的文字消息没有按钮，授权建议单时按提示回复命令（`/ap 3` 发起、`/ok 3` 确认、`/no 3` 取消、`/rj 3` 不采纳），同样是两步。
+
+企业微信那条限制是它的机制决定的：自建应用只能靠回调收消息，所以只在自己电脑上跑、没有公网地址时用不了，请用飞书或 Telegram。回调接口不要求登录（企业微信的服务器要能调），靠签名校验和 AES 解密把关，验不过一律拒绝。
+
+如实说明：飞书和企业微信这两个渠道是照官方文档和飞书 SDK 写的，测试用的是模拟接口——飞书的事件对象是拿 SDK 自己的模型造的，企业微信的加解密做了往返测试——**没有用真实的应用跑过**，Telegram 同样如此。接的时候卡在哪一步，`wealthpilot doctor` 会报出飞书长连接的错误。
+
+下面以 Telegram 为例：
 
 电脑不在手边时也能收到它、指挥它。在 Telegram 里找 @BotFather 建一个机器人（发 `/newbot`），把令牌填进网页版「设置 → 手机触达」并保存，再点「生成配对码」，把页面上那条 `/pair 123456` 发给你的机器人——发对了它就认你这个聊天为主人，之后别人给它发消息不会有回应。
 
@@ -730,7 +843,7 @@ wealthpilot --no-web                             # 只要终端
 wealthpilot --server http://192.168.1.10:8000    # 远程：连到一台已在运行的后端
 ```
 
-`wealthpilot` 是 `make install` 装的全局命令；没装时用 `make start`（远程：`make tui SERVER=http://host:8000`），或设置环境变量 `WEALTHPILOT_SERVER`。本机和远程界面、命令完全一样：本机读本机数据库、用 `LOCAL_USER_ID` 对应的账户；远程走 HTTP / SSE，用 `/login <用户名>` 登录（密码单独输入，不进历史记录）。进来第一行会先说现状：盯着几只、有几条建议等你决定、几条判断被证伪；有新版本时也在这里提示。第一次用会先走一遍配置（见 Quick Start）。
+`wealthpilot` 是安装脚本（或 `make install`）放好的全局命令；从源码运行又没装时用 `make start`（远程：`make tui SERVER=http://host:8000`），或设置环境变量 `WEALTHPILOT_SERVER`。本机和远程界面、命令完全一样：本机读本机数据库、用 `LOCAL_USER_ID` 对应的账户；远程走 HTTP / SSE，用 `/login <用户名>` 登录（密码单独输入，不进历史记录）。进来第一行会先说现状：盯着几只、有几条建议等你决定、几条判断被证伪；有新版本时也在这里提示。第一次用会先走一遍配置（见 Quick Start）。
 
 直接输入问题就是一次研究，过程实时显示；以 `/` 开头的是命令，不经过模型、直接出数：
 
@@ -777,11 +890,16 @@ wealthpilot --server http://192.168.1.10:8000    # 远程：连到一台已在�
 ### 其他命令
 
 ```bash
-uv run wealthpilot init     # 交互式初始化：选择 AI 提供商 + 输入 Key + 建库
-uv run wealthpilot config   # 查看当前配置（Key 脱敏显示）
-uv run wealthpilot run      # 启动 API 服务（等同 uvicorn）
-uv run wealthpilot ask "查询" # 非交互式查询（支持管道，stdout 可 pipe）
-uv run wealthpilot mcp      # 启动 MCP Server（stdio, for Claude Code）
+wealthpilot setup           # 配好就能用：选模型服务、填 Key、放进股票（参数给全了不提问）
+wealthpilot status          # 现在是什么情况：模型、持仓、盯盘、手机、今天的用量
+wealthpilot model           # 现在用的模型；model list / set <服务> --key <Key> / test
+wealthpilot config list     # 看和改配置；config get / set <名字> <值> / path
+wealthpilot import 持仓.txt  # 从文件录入持仓（- 表示从管道读，--yes 不问）
+wealthpilot skills gallery  # 研究方法；skills list / install <名字或链接> / remove <名字>
+wealthpilot sessions        # 以前的会话
+wealthpilot run             # 只启动 API 服务（等同 uvicorn）
+wealthpilot ask "查询"       # 非交互式查询（支持管道，stdout 可 pipe；会调用模型）
+wealthpilot mcp             # 启动 MCP Server（stdio, for Claude Code）
 wealthpilot doctor          # 自检：模型、数据源、数据库、网页版、手机触达、版本（--offline 不实测模型）
 wealthpilot update          # 升级到最新版本
 wealthpilot --version
@@ -793,13 +911,15 @@ wealthpilot --version
 wealthpilot update
 ```
 
+一条命令装的和从源码装的都这样升级（前者的代码目录 `~/.wealthpilot/app` 本身就是一份仓库）；重新运行一次安装脚本效果相同。
+
 它做的事：检查远端有没有新提交 → **备份数据库**到 `data/backups/`（留最近 5 份）→ `git pull --ff-only` → 装依赖 → 重新构建网页版 → 打印这次更新了什么（取自 [CHANGELOG.md](CHANGELOG.md)）。数据库里新增的字段在下次启动时自动补上。
 
 它不会做的事：仓库里有你没提交的改动、或者不在 `main` 分支时，它会停下来说明情况，不拉取、不覆盖；任何一步失败都如实报出来并告诉你怎么补（`make setup`）。
 
 有没有新版本不用自己记着查：后端启动后在后台看一眼远端（只读取本仓库的远端，不上传任何东西），有的话在终端问候语、网页首页和「设置 → 版本与自检」里提示。不想要可以在设置里关掉「启动时检查更新」。Docker 部署的升级见 Deployment 一节。
 
-如实说明：检查更新、拒绝覆盖本地改动、已是最新、数据库备份这几条路径都有测试并实际跑过；"真的落后几个提交 → 拉取 → 重建"这条完整路径要等这个版本合并、之后再有新提交时才第一次真正发生，目前只有逐步的代码和测试，没有端到端跑过。
+如实说明：检查更新、拒绝覆盖本地改动、已是最新、数据库备份这几条路径都有测试；“装好 → 远端多出一个提交 → `wealthpilot update` 备份、拉取、装依赖、重建网页 → 再跑一次显示已是最新”这条完整路径，在本机用一份仓库副本当远端实际跑通过（用安装脚本装出来的那种目录），升级后代码目录是干净的。没有验证过的是：从 GitHub 上真实拉取（网络慢或断开时的表现只有超时保护和测试，没有实测）、以及 Windows。
 
 CLI 与 MCP 默认读取匿名档（`user_id=0`）的持仓；要分析某个登录用户的数据，设置 `LOCAL_USER_ID`。
 
@@ -911,7 +1031,7 @@ Claude 会自动调用:
 ## Makefile 速查
 
 ```bash
-make setup     # 首次配置：安装依赖 + 复制 .env
+make setup     # 从源码装：安装依赖 + 构建网页版
 make start     # 终端 + 网页版（http://localhost:8000）+ 每日盯盘
 make update    # 升级到最新版本（先备份数据库）
 make doctor    # 自检：哪一环不通、怎么修
@@ -1240,7 +1360,11 @@ docker compose up --build -d
 - [x] **定时任务与提醒**（跟着进程跑、错过补跑、每日上限、触发一次即停）
 - [x] **版本与升级**（0.2.0、CHANGELOG、`wealthpilot update`、后台检查更新）
 - [x] **补基础**：资金与筹码、预期与消息两个研究维度（11 个新工具，共 51 个）、多空辩论、分时与 MACD、资金 / 筹码 / 预期图表
-- [ ] 手机渠道连真实 Telegram 机器人实测；微信 / 飞书渠道
+- [x] **兼容任意 OpenAI 接口的模型**、每日 token 上限与用量统计、沿用最近的研究、压缩对话历史
+- [x] **研究后台化**：页面断开不取消，刷新可接回；模型用不了时一句话说明
+- [x] 群机器人推送格式（飞书 / 企业微信 / 钉钉 / Slack / Discord）、成绩校准
+- [x] **飞书、企业微信里对话**（飞书长连接、企业微信加密回调）、**会话列表**、**记经验与提议方法**
+- [ ] 手机渠道用真实的 Telegram / 飞书 / 企业微信应用实测
 - [ ] 授权后经券商连接器真实下单（需要按券商逐个适配下单接口，并用模拟盘验证）
 - [ ] 评测集扩到 20 题以上并多次取平均
 - [ ] PostgreSQL + Alembic 正式迁移

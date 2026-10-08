@@ -172,10 +172,25 @@ def test_status_never_touches_the_network(monkeypatch):
     assert status["checked"] is False and status["version"] == __version__ and not any(c[0] == "fetch" for c in calls)
 
 
-def test_check_survives_no_network_and_no_git(monkeypatch):
-    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "aaa0001"), ("fetch",): (1, "TimeoutExpired")})
+def test_check_does_not_crash_when_git_cannot_compare(monkeypatch):
+    """只跟踪一个分支的浅克隆里比不出来时，git 返回的是一段报错文字，不是数字。"""
+    calls: list = []
+    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "abc1234"), ("rev-parse", "--abbrev-ref"): (0, "main"), ("status",): (0, ""),
+                            ("rev-list",): (128, "fatal: ambiguous argument 'HEAD..FETCH_HEAD': unknown revision")}, calls)
     status = upgrade.check(force=True)
-    assert status["checked"] is False and status["behind"] == 0
+    assert status["checked"] is False and status["behind"] == 0 and "安装脚本" in status["how"]
+    assert any(c[:2] == ("rev-list", "--count") and c[-1] == "HEAD..FETCH_HEAD" for c in calls)      # 不依赖 origin/main 这个引用
+
+
+def test_check_survives_no_network_and_no_git(monkeypatch):
+    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "aaa0001"), ("rev-parse", "--abbrev-ref"): (0, "main"), ("fetch",): (1, "TimeoutExpired")})
+    status = upgrade.check(force=True)
+    assert status["checked"] is False and status["behind"] == 0 and "没能连上" in status["how"]
+    # 不在 main 上：和 main 差多少没有意义，不联网、不比较
+    calls: list = []
+    _fake_git(monkeypatch, {("rev-parse", "--short"): (0, "aaa0001"), ("rev-parse", "--abbrev-ref"): (0, "feat/x")}, calls)
+    status = upgrade.check(force=True)
+    assert status["checked"] is False and "feat/x" in status["how"] and not any(c[0] == "fetch" for c in calls)
     monkeypatch.setattr(upgrade, "is_checkout", lambda: False)
     assert "docker compose" in upgrade.check(force=True)["how"]
 
@@ -231,6 +246,20 @@ def test_doctor_says_what_is_wrong_and_how_to_fix(monkeypatch):
     assert by_name["版本"]["status"] == "warn" and "wealthpilot update" in by_name["版本"]["fix"]
     text = doctor.render(items)
     assert "✗ 模型" in text and "→" in text and "项不通" in text
+
+
+def test_doctor_keeps_going_when_one_check_itself_breaks(monkeypatch):
+    async def sources():
+        return [doctor._item("行情（新浪）", "ok", "0.2 秒")]
+
+    def broken(**kw):
+        raise ValueError("invalid literal for int()")
+    monkeypatch.setattr(doctor, "_sources", sources)
+    monkeypatch.setattr(upgrade, "check", broken)
+    items = asyncio.run(doctor.run(online=False, port=59999))
+    by_name = {i["name"]: i for i in items}
+    assert by_name["版本与研究方法"]["status"] == "warn" and "没查成" in by_name["版本与研究方法"]["detail"]
+    assert by_name["行情（新浪）"]["status"] == "ok" and "数据库" in by_name and "手机触达" in by_name      # 其余照常
 
 
 def test_version_and_doctor_routes(monkeypatch):

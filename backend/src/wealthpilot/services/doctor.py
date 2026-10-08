@@ -65,7 +65,11 @@ def _model(online: bool) -> dict:
     try:
         client = create_ai_client(settings)
         client.create(model=settings.active_model, max_tokens=2000, system="只回复两个字：正常", messages=[{"role": "user", "content": "测试"}])
-    except Exception as e:  # noqa: BLE001 — 把供应商返回的原因原样给用户
+    except Exception as e:  # noqa: BLE001 — 认得出的说人话，认不出的把供应商返回的原因原样给用户
+        from wealthpilot.services.ai_client import diagnose
+        known = diagnose(e)
+        if known:
+            return _item("模型", "fail", f"{label} 用不了", known.message)
         return _item("模型", "fail", f"{label} 调用失败：{str(e)[:160]}", "检查 Key 是否有效、账户是否有余额、模型名是否写对（网页版「设置」里可以改并测试）。")
     return _item("模型", "ok", f"{label}，{time.monotonic() - started:.1f} 秒")
 
@@ -110,18 +114,27 @@ def _web(port: int, serving: bool) -> list[dict]:
 
 
 async def _reach() -> dict:
-    from wealthpilot.services import channels
+    from wealthpilot.services import channels, feishu
 
-    settings, status = get_settings(), channels.status()
-    if not settings.telegram_bot_token:
-        return _item("手机触达", "warn", "没有配置", "可选。想在手机上收简报、提问，到网页版「设置 → 手机触达」绑定一个 Telegram 机器人。")
-    try:
-        me = await channels.Telegram(settings.telegram_bot_token, settings.telegram_api_base).call("getMe")
-    except Exception as e:  # noqa: BLE001
-        return _item("手机触达", "fail", f"连不上 Telegram：{str(e)[:120]}", "令牌写错了，或者本机网络到不了 api.telegram.org（可以在设置里填中转地址）。")
-    name = "@" + str((me or {}).get("username", ""))
-    return _item("手机触达", "ok" if status["paired"] else "warn", f"{name}，{'已绑定' if status['paired'] else '还没有绑定聊天'}",
-                 "" if status["paired"] else "到网页版「设置 → 手机触达」生成配对码，在 Telegram 里发给机器人。")
+    settings = get_settings()
+    listed = channels.status_all()
+    ready = [c for c in listed if c["configured"]]
+    if not ready:
+        return _item("手机触达", "warn", "没有配置", "可选。想在手机上收简报、提问，到网页版「设置 → 手机触达」接上 Telegram、飞书或企业微信。")
+    problems = []
+    if settings.telegram_bot_token:
+        try:
+            await channels.Telegram(settings.telegram_bot_token, settings.telegram_api_base).call("getMe")
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"连不上 Telegram：{str(e)[:80]}（令牌写错了，或者本机到不了 api.telegram.org）")
+    if feishu.listener_error():
+        problems.append(feishu.listener_error())
+    summary = "、".join(f"{c['label']}{'已绑定' if c['paired'] else '未绑定'}" for c in ready)
+    if problems:
+        return _item("手机触达", "fail", summary, "；".join(problems))
+    unpaired = [c["label"] for c in ready if not c["paired"]]
+    return _item("手机触达", "warn" if unpaired else "ok", summary,
+                 f"{'、'.join(unpaired)}还没有绑定：到网页版「设置 → 手机触达」生成配对码，在那个应用里发给机器人。" if unpaired else "")
 
 
 def _extras() -> list[dict]:
@@ -151,9 +164,16 @@ async def run(*, online: bool = True, port: int = 8000, serving: bool = False) -
     items = [_item("Python", "ok" if sys.version_info >= (3, 11) else "fail", sys.version.split()[0],
                    "" if sys.version_info >= (3, 11) else "需要 Python 3.11 或更高")]
     items += _storage()
-    model, sources, reach, web, extras = await asyncio.gather(
-        asyncio.to_thread(_model, online), _sources(), _reach(), asyncio.to_thread(_web, port, serving), asyncio.to_thread(_extras))
-    items += [model, *sources, *web, reach, *extras]
+    names = ("模型", "数据源", "网页版", "手机触达", "版本与研究方法")
+    results = await asyncio.gather(
+        asyncio.to_thread(_model, online), _sources(), asyncio.to_thread(_web, port, serving), _reach(), asyncio.to_thread(_extras),
+        return_exceptions=True)
+    for name, result in zip(names, results, strict=True):
+        if isinstance(result, BaseException):   # 某一项检查自己出了错：照实说，别让整个自检跟着崩
+            items.append(_item(name, "warn", f"这一项没查成（{type(result).__name__}：{str(result)[:100]}）",
+                               "是自检自己出的错，不代表这一环不通。其余各项照常看。"))
+        else:
+            items += [result] if isinstance(result, dict) else list(result)
     if os.environ.get("WATCH_ENABLED", "").lower() == "false" or not get_settings().watch_enabled:
         items.append(_item("每日盯盘", "warn", "已关闭", "盯盘、定时任务和提醒都不会自己跑。到网页版「设置」里打开。"))
     return items

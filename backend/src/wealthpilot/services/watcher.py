@@ -12,7 +12,6 @@ import contextlib
 import json
 from datetime import date, datetime, timedelta
 
-import httpx
 from sqlmodel import Session, select
 
 from wealthpilot.models.broker import Digest
@@ -163,23 +162,9 @@ async def run(db: Session, user_id: int, *, today: date | None = None, push: boo
     fresh = [e for e in notable if e["kind"] not in ("task", "alert")]   # 任务与提醒发生时已经单独推过
     if push and fresh:
         from wealthpilot.services import channels  # 放在这里导入：channels 也要用到本模块
+        # notify 会发到所有配置了的渠道：Telegram 和群机器人 webhook
         result["pushed"] = await channels.notify(channels.digest_text({**result, "events": fresh}))
-        if settings.alert_webhook_url:
-            result["pushed"] = await _push(settings.alert_webhook_url, result) or result["pushed"]
     return result
-
-
-async def _push(url: str, digest: dict) -> bool:
-    lines = [f"WealthPilot {digest['day']} · {digest['summary']}"] + [
-        f"- {e['name']} {e['code']}：{e['text']}".replace("  ", " ") for e in digest["events"]]
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            # 同时带 text 与 content 两种常见字段，企业微信 / 飞书 / Slack 兼容的机器人都能收
-            resp = await client.post(url, json={"msgtype": "text", "text": {"content": "\n".join(lines)},
-                                                "content": "\n".join(lines), "digest": digest})
-        return resp.status_code < 300
-    except httpx.HTTPError:
-        return False
 
 
 def serialize(d: Digest) -> dict:

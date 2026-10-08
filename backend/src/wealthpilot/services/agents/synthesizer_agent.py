@@ -19,7 +19,7 @@ from wealthpilot.models.profile import InvestorProfile
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.prompts import build_synthesizer_prompt
 from wealthpilot.services.agents.streaming import stream_sync_in_thread
-from wealthpilot.services.ai_client import json_mode
+from wealthpilot.services.ai_client import json_mode, raise_if_unavailable
 from wealthpilot.services.evidence import brief
 from wealthpilot.settings import get_settings
 
@@ -95,6 +95,7 @@ class SynthesizerAgent:
             if stream_error is not None:
                 raise stream_error
         except Exception as e:  # noqa: BLE001
+            raise_if_unavailable(e)
             await emit({"type": "error", "content": f"synthesizer 异常: {e}"})
             # 退化：直接拼接各 Agent 结果，保证用户至少拿得到内容
             final_text = self._fallback_merge(results)
@@ -104,7 +105,7 @@ class SynthesizerAgent:
         return final_text
 
     @staticmethod
-    def _build_evidence_block(question: str, results: list[AgentResult]) -> str:
+    def _build_evidence_block(question: str, results: list[AgentResult], budget: int = 1600) -> str:
         parts = [f"用户问题：{question}\n", "以下是各专业 Agent 收集到的证据。较长的返回已经压缩（列表只留前几项、长文只留开头），"
                  "被省略的数字不要去猜；各 Agent 的初步结论是它们看过完整数据后写的，里面带证据 ID 的数字可以直接引用。\n"]
         for r in results:
@@ -112,7 +113,7 @@ class SynthesizerAgent:
             if r.evidence:
                 parts.append("工具返回：")
                 for e in r.evidence:
-                    parts.append(f"- {brief(e)}")
+                    parts.append(f"- {brief(e, budget)}")
             if r.text.strip():
                 parts.append(f"该 Agent 的初步结论：{r.text.strip()}")
         return "\n".join(parts)

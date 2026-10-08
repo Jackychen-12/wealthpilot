@@ -31,16 +31,23 @@ class Settings(BaseSettings):
     )
 
     # AI provider
-    ai_provider: str = Field(default="anthropic", description="anthropic or deepseek")
+    ai_provider: str = Field(default="anthropic", description="anthropic / deepseek / openai（任何兼容 OpenAI 接口的服务，含本机模型）")
 
     # Anthropic
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
-    anthropic_model: str = Field(default="claude-sonnet-5")
+    anthropic_model: str = Field(default="claude-sonnet-5-5")
 
     # DeepSeek (OpenAI-compatible)
     deepseek_api_key: str = Field(default="", description="DeepSeek API key")
     deepseek_model: str = Field(default="deepseek-chat")
     deepseek_base_url: str = Field(default="https://api.deepseek.com")
+
+    # 任何兼容 OpenAI 接口的服务：硅基流动、智谱、Moonshot、通义、火山方舟、OpenRouter、本机 Ollama……
+    openai_api_key: str = Field(default="", description="兼容服务的 API Key；本机模型可以留空")
+    openai_model: str = Field(default="", description="模型名，照服务商文档里的写")
+    openai_base_url: str = Field(default="", description="接口地址，如 https://api.siliconflow.cn/v1、http://localhost:11434/v1")
+    openai_json_mode: bool = Field(default=False, description="服务支持 response_format=json_object 时打开，规划和审核的 JSON 更稳")
+    openai_max_tokens: int = Field(default=4096, ge=256, description="单次输出的 token 上限；超过服务商限制会直接报错，拿不准就用 4096")
 
     alpha_vantage_key: str = Field(default="")
 
@@ -76,11 +83,27 @@ class Settings(BaseSettings):
     watch_time: str = Field(default="15:30", pattern=r"^\d{2}:\d{2}$", description="每日盯盘时间（本机时区）")
     watch_move_pct: float = Field(default=5.0, gt=0, description="当日涨跌幅超过多少算异动")
     auto_daily_runs_max: int = Field(default=6, ge=0, description="定时任务每天最多自动跑几次研究（会调用模型）；手动点“现在跑”不受限")
+    # 用量与预算
+    daily_token_budget: int = Field(default=0, ge=0, description="每天最多用多少 token（输入加输出），到了就不再调模型；0 = 不限")
+    token_price_input: float = Field(default=0, ge=0, description="输入单价，元 / 百万 token；填了才会把用量折成钱")
+    token_price_output: float = Field(default=0, ge=0, description="输出单价，元 / 百万 token")
+    research_reuse_hours: float = Field(default=4, ge=0, description="几小时内对同一只股票再做深度研究时，沿用上一次取到的数据而不是重新取数；0 = 每次都重新取")
     update_check: bool = Field(default=True, description="启动时看一眼有没有新版本（只读取本仓库的远端，不上传任何东西）")
 
     # 手机触达：Telegram 机器人。令牌在网页「设置」里填；绑定哪个聊天由配对码决定，存在数据库里
     telegram_bot_token: str = Field(default="", description="Telegram 机器人令牌（@BotFather 给的）")
     telegram_api_base: str = Field(default="https://api.telegram.org", description="Telegram 接口地址；需要走中转时改这里")
+
+    # 飞书：企业自建应用，事件订阅选"长连接"。不需要公网地址
+    feishu_app_id: str = Field(default="", description="飞书应用的 App ID")
+    feishu_app_secret: str = Field(default="", description="飞书应用的 App Secret")
+    feishu_api_base: str = Field(default="https://open.feishu.cn", description="飞书接口地址；海外版 Lark 用 https://open.larksuite.com")
+    # 企业微信：自建应用，接收消息要填回调地址（需要公网能访问）
+    wecom_corp_id: str = Field(default="", description="企业 ID")
+    wecom_agent_id: str = Field(default="", description="应用的 AgentId")
+    wecom_secret: str = Field(default="", description="应用的 Secret")
+    wecom_token: str = Field(default="", description="接收消息设置里的 Token")
+    wecom_aes_key: str = Field(default="", description="接收消息设置里的 EncodingAESKey（43 位）")
 
     local_user_id: int = Field(default=0, description="CLI / MCP 使用哪个用户的持仓与画像，0=匿名档")
 
@@ -98,6 +121,8 @@ class Settings(BaseSettings):
     def active_model(self) -> str:
         if self.ai_provider == "deepseek":
             return self.deepseek_model
+        if self.ai_provider == "openai":
+            return self.openai_model
         return self.anthropic_model
 
     @model_validator(mode="after")

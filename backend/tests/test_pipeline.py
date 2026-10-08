@@ -153,7 +153,7 @@ def test_fallback_plan_uses_raw_question_not_history():
 @pytest.mark.parametrize("key", ["", "sk-ant-xxx", "  "])
 def test_placeholder_key_is_treated_as_unset(key):
     settings = SimpleNamespace(ai_provider="anthropic", anthropic_api_key=key)
-    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+    with pytest.raises(ValueError, match="Claude 的 API Key"):
         create_ai_client(settings)
 
 

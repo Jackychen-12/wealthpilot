@@ -1,9 +1,12 @@
 """技能：用户自己写的研究方法。读取谁都可以；写入只允许本机（它会改 Agent 的行为）。"""
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlmodel import Session
 
 from wealthpilot.routes.config import _local_only
 from wealthpilot.services import skills
+from wealthpilot.services.deps import current_user_id
+from wealthpilot.storage.db import get_session
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -89,6 +92,20 @@ async def draft_skill(body: dict, request: Request):
     except Exception as e:  # noqa: BLE001 — 模型那边的错误原样告诉用户
         raise HTTPException(502, f"模型没有返回可用的结果：{str(e)[:200]}") from e
     return {**_preview(content), "problems": problems}
+
+
+@router.get("/suggestions")
+def skill_suggestions(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """它注意到的"你老这么问"：同一种问法问过几只股票，可以存成方法。只是提议，起草和保存都要用户点。"""
+    from wealthpilot.services import lessons
+    return lessons.suggestions(db, user_id)
+
+
+@router.post("/suggestions/{key}/dismiss")
+def dismiss_suggestion(key: str, user_id: int = Depends(current_user_id)):
+    from wealthpilot.services import lessons
+    lessons.dismiss(user_id, key)
+    return {"ok": True}
 
 
 @router.get("/{name}")

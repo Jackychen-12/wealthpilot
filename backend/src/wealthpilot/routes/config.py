@@ -11,20 +11,23 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 from sqlmodel import Session
 
-from wealthpilot.services import memory
+from wealthpilot.services import memory, providers
 from wealthpilot.settings import HOME, Settings, get_settings, reload_settings
 from wealthpilot.storage.db import get_engine
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key", "telegram_bot_token")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
+    "openai_api_key", "openai_model", "openai_base_url", "openai_json_mode", "openai_max_tokens",
     "advice_mode", "checkpoints_enabled", "broker", "paper_initial_cash",
     "watch_enabled", "watch_time", "watch_move_pct", "alert_webhook_url",
     "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
+    "feishu_app_id", "feishu_app_secret", "feishu_api_base", "wecom_corp_id", "wecom_agent_id", "wecom_secret", "wecom_token", "wecom_aes_key",
+    "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -48,6 +51,7 @@ def _view() -> dict:
         # 进程环境变量（Docker、shell 里 export 的）优先级高于 .env，这些项在网页上改了也不会生效
         "overridden": [k for k in EDITABLE if k.upper() in os.environ],
         "active_model": s.active_model, "env_file": str(ENV_FILE.resolve()),
+        "presets": [p for p in providers.PRESETS if p["provider"] == "openai"],
     }
 
 
@@ -81,6 +85,15 @@ async def version(request: Request, refresh: bool = False):
     return await asyncio.to_thread(upgrade.check, force=True) if refresh else await asyncio.to_thread(upgrade.status)
 
 
+@router.get("/usage")
+def usage(request: Request):
+    """模型用量：今天、近 7 天、近 30 天，按天、按用途。"""
+    from wealthpilot.services import budget
+
+    _local_only(request)
+    return budget.summary(get_settings().local_user_id)
+
+
 @router.get("/doctor")
 async def doctor(request: Request, model: bool = False):
     """自检：数据源、模型、数据库、手机触达、版本，各自通不通、不通怎么修。model=1 时实测一次模型调用。"""
@@ -91,43 +104,36 @@ async def doctor(request: Request, model: bool = False):
     return {"items": await checks.run(online=model, port=port, serving=True)}
 
 
-@router.put("")
-def update_settings(body: dict, request: Request):
-    _local_only(request)
+def apply_changes(body: dict) -> list[str]:
+    """校验并写入配置，返回改了哪些项。网页设置和命令行（wealthpilot setup / config set）都走这里。
+
+    不合法时抛 ValueError（带一句人话），什么都不写。Key 留空表示"不改"，而不是清空。
+    """
     changes = {k: v for k, v in body.items() if k in EDITABLE}
-    # Key 留空表示"不改"，而不是清空
     changes = {k: v for k, v in changes.items() if not (k in _SECRETS and not str(v).strip())}
     if not changes:
-        return _view()
+        return []
     for k, v in changes.items():
         if isinstance(v, str) and re.search(r"[\r\n]", v):
-            raise HTTPException(422, f"{k} 不能包含换行")
-    if changes.get("ai_provider") not in (None, "anthropic", "deepseek") or changes.get("broker") not in (None, "none", "paper"):
-        raise HTTPException(422, "取值不合法")
+            raise ValueError(f"{k} 不能包含换行")
+    if changes.get("ai_provider") not in (None, "anthropic", "deepseek", "openai") or changes.get("broker") not in (None, "none", "paper"):
+        raise ValueError("取值不合法")
     try:   # 先用模型校验一遍，别把写不合法的值落到文件里
         Settings(**{**get_settings().model_dump(), **changes})
     except ValidationError as e:
-        raise HTTPException(422, "；".join(f"{err['loc'][0]}：{err['msg']}" for err in e.errors())) from e
+        raise ValueError("；".join(f"{err['loc'][0]}：{err['msg']}" for err in e.errors())) from e
     _write_env({k.upper(): str(v).lower() if isinstance(v, bool) else str(v).strip() for k, v in changes.items()})
     reload_settings()
     with Session(get_engine()) as db:   # 只记改了哪些项，不记值（里面可能有 Key）
         memory.record(db, get_settings().local_user_id, "settings/changed", "、".join(sorted(changes)), {"keys": sorted(changes)}, actor="user")
-    return _view()
+    return sorted(changes)
 
 
-@router.post("/test")
-async def test_model(request: Request):
-    """用当前配置向模型发一句话，确认 Key 和模型名可用。"""
+@router.put("")
+def update_settings(body: dict, request: Request):
     _local_only(request)
-    import asyncio
-
-    from wealthpilot.services.ai_client import create_ai_client
-
-    settings = get_settings()
     try:
-        client = create_ai_client(settings)
-        result = await asyncio.to_thread(client.create, model=settings.active_model, max_tokens=2000,
-                                         system="只回复两个字：正常", messages=[{"role": "user", "content": "测试"}])
-    except Exception as e:  # noqa: BLE001 — 把供应商返回的原因原样告诉用户
-        return {"ok": False, "provider": settings.ai_provider, "model": settings.active_model, "error": str(e)[:300]}
-    return {"ok": True, "provider": settings.ai_provider, "model": settings.active_model, "reply": (result.text or "").strip()[:40]}
+        apply_changes(body)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    return _view()

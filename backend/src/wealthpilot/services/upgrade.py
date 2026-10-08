@@ -85,14 +85,20 @@ def check(*, force: bool = False) -> dict:
     info = current()
     if not info["git"]:
         return {**info, "checked": False, "behind": 0, "notes": [], "how": _DOCKER_HOW}
+    if info["branch"] != BRANCH:   # 在别的分支上，和 main 差多少个提交没有意义，升级命令也不会在这里动手
+        return {**info, "checked": False, "behind": 0, "notes": [], "how": f"现在在分支 {info['branch']} 上，不是 {BRANCH}，这里不检查更新"}
     hit = None if force else cache.read("upgrade:check", 12 * cache.HOUR)
     if hit and hit.get("commit") == info["commit"]:
         return {**info, **hit, "cached": True}
     code, _ = _git("fetch", "--quiet", "origin", BRANCH, timeout=10)
     if code != 0:
         return {**info, "checked": False, "behind": 0, "notes": [], "how": "没能连上远端仓库，稍后再试"}
-    behind = int(_git("rev-list", "--count", f"HEAD..origin/{BRANCH}")[1] or 0)
-    code, changelog = _git("show", f"origin/{BRANCH}:CHANGELOG.md")
+    # 和刚取回来的 FETCH_HEAD 比，而不是 origin/main：只跟踪一个分支的克隆（安装脚本装出来的就是）里不一定有 origin/main 这个引用
+    code, count = _git("rev-list", "--count", "HEAD..FETCH_HEAD")
+    if code != 0 or not count.strip().isdigit():
+        return {**info, "checked": False, "behind": 0, "notes": [], "how": "没能和远端比出差了多少。重新运行一次安装脚本（或 make setup）可以修好"}
+    behind = int(count)
+    code, changelog = _git("show", "FETCH_HEAD:CHANGELOG.md")
     notes = release_notes(changelog, __version__) if code == 0 else []
     result = {"checked": True, "behind": behind, "notes": notes, "latest_version": notes[0]["version"] if notes else __version__,
               "commit": info["commit"], "checked_at": datetime.now().isoformat(timespec="seconds"),
@@ -157,7 +163,7 @@ def update(say=print) -> bool:
     if code != 0:
         say(f"拉取失败：{out[:300]}")
         return False
-    steps = [("安装依赖", ["uv", "sync", "--inexact"], REPO / "backend"),
+    steps = [("安装依赖", ["uv", "sync", "--inexact", "--extra", "feishu"], REPO / "backend"),
              ("安装网页版依赖", ["npm", "install", "--no-audit", "--no-fund"], REPO / "workbench"),
              ("构建网页版", ["npm", "run", "build", "--", "--outDir", "dist-app", "--emptyOutDir"], REPO / "workbench")]
     for label, command, cwd in steps:
