@@ -434,3 +434,16 @@ async def test_a_dingtalk_message_reaches_the_same_bot_and_is_acknowledged_at_on
     assert len(sink.sent) == count
     assert channels.status("dingtalk") == {"channel": "dingtalk", "label": "钉钉", "configured": False, "paired": True}
     _ding_clean()
+
+
+def test_a_dingtalk_connection_problem_is_surfaced_instead_of_retrying_in_silence():
+    import logging
+
+    from wealthpilot.services import dingtalk
+    sdk_log = dingtalk._sdk_logger()
+    sdk_log.error("open connection failed, error=401 Client Error: Unauthorized")
+    assert "应用凭证不对" in dingtalk.listener_error() and "401" in dingtalk.listener_error()
+    data = TestClient(app).get("/api/channel").json()
+    assert "应用凭证不对" in next(c for c in data["channels"] if c["channel"] == "dingtalk")["error"]      # 设置页看得到
+    sdk_log.info("endpoint is %s", {"endpoint": "wss://x", "ticket": "t"})                                   # 之后连上了：错误消掉
+    assert dingtalk.listener_error() == "" and sdk_log.propagate is False and not any(isinstance(h, logging.StreamHandler) for h in sdk_log.handlers)

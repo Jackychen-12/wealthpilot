@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 import warnings
 
@@ -78,12 +79,17 @@ def parse_event(data: dict) -> tuple[str, str] | None:
     return sender, text
 
 
-def handler_for(bot, sdk):
-    """把"收到消息"的回调接到机器人上。研究要几十秒：放到后台跑，先把这条回调应答掉，不然钉钉会重发。"""
+def handler_for(bot, sdk, loop: asyncio.AbstractEventLoop | None = None):
+    """把"收到消息"的回调接到机器人上。研究要几十秒：交出去就立刻应答这条回调，不然钉钉会重发。
+
+    正式运行时 SDK 在自己的线程里收消息，机器人在主事件循环里干活，所以要跨线程交过去（loop 就是主循环）。
+    """
     class Handler(sdk.ChatbotHandler):
         async def process(self, callback):
             parsed = parse_event(getattr(callback, "data", None) or {})
-            if parsed:
+            if parsed and loop is not None and loop is not asyncio.get_running_loop():
+                asyncio.run_coroutine_threadsafe(bot.message(*parsed), loop)
+            elif parsed:
                 task = asyncio.create_task(bot.message(*parsed))
                 _tasks.add(task)
                 task.add_done_callback(_tasks.discard)
@@ -92,7 +98,7 @@ def handler_for(bot, sdk):
 
 
 _error = ""
-_connected_as = ""
+_thread: threading.Thread | None = None
 _tasks: set[asyncio.Task] = set()
 
 
@@ -100,12 +106,46 @@ def listener_error() -> str:
     return _error
 
 
+class _Watch(logging.Handler):
+    """SDK 连不上时只会往自己的日志里写一行然后一直重试。把那一行接过来，自检和设置页才看得到是哪里不对。"""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        global _error
+        text = record.getMessage()
+        if record.levelno >= logging.ERROR:
+            problem = f"钉钉长连接没连上（应用凭证不对，或者网络不通）：{text[:160]}"
+            if problem != _error:          # 它每十秒重试一次：同一句话只记一遍
+                log.warning("%s", problem)
+            _error = problem
+        elif "endpoint is" in text:        # 拿到了接入地址：连上了
+            _error = ""
+
+
+def _sdk_logger() -> logging.Logger:
+    logger = logging.getLogger("wealthpilot.channel.dingtalk-sdk")
+    if not logger.handlers:
+        logger.addHandler(_Watch())
+        logger.setLevel(logging.INFO)
+        logger.propagate = False           # 不往终端打，也不把它的流水账写进我们的日志
+    return logger
+
+
+def _serve(client) -> None:
+    """SDK 的收消息循环会吞掉取消信号，连接时用的还是阻塞的请求 —— 不能放进主事件循环，给它单独一个线程。"""
+    global _error
+    try:
+        asyncio.run(client.start())
+    except Exception as e:  # noqa: BLE001
+        _error = f"钉钉长连接断开：{e}"
+        log.warning("%s", _error)
+
+
 async def run(sleep: float = 15.0) -> None:
     """跟着进程跑：等用户填好钉钉应用的 Client ID 和 Client Secret，就把长连接接上。凭证改了要重启 WealthPilot 才换。"""
-    global _error, _connected_as
+    global _error, _thread
     while True:
         settings = get_settings()
-        if not _connected_as and settings.dingtalk_client_id and settings.dingtalk_client_secret:
+        if _thread is None and settings.dingtalk_client_id and settings.dingtalk_client_secret:
             try:
                 with warnings.catch_warnings():          # SDK 在新版 Python 上导入时会打一条语法警告，和用户无关
                     warnings.simplefilter("ignore")
@@ -115,15 +155,9 @@ async def run(sleep: float = 15.0) -> None:
                 await asyncio.sleep(max(sleep, 60))
                 continue
             bot = channels.Bot(DingTalk(settings.dingtalk_client_id, settings.dingtalk_client_secret), channel="dingtalk")
-            client = dingtalk_stream.DingTalkStreamClient(dingtalk_stream.Credential(settings.dingtalk_client_id, settings.dingtalk_client_secret))
-            client.register_callback_handler(dingtalk_stream.ChatbotMessage.TOPIC, handler_for(bot, dingtalk_stream))
-            _connected_as, _error = settings.dingtalk_client_id, ""
-            try:
-                await client.start()                     # 一直挂着收消息，断了 SDK 自己会重连
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:  # noqa: BLE001 — 凭证不对、网络不通：记下来给自检和设置页看，过一会儿再试
-                _error = f"钉钉长连接断开：{e}"
-                log.warning("%s", _error)
-            _connected_as = ""
+            client = dingtalk_stream.DingTalkStreamClient(dingtalk_stream.Credential(settings.dingtalk_client_id, settings.dingtalk_client_secret),
+                                                          logger=_sdk_logger())
+            client.register_callback_handler(dingtalk_stream.ChatbotMessage.TOPIC, handler_for(bot, dingtalk_stream, asyncio.get_running_loop()))
+            _thread = threading.Thread(target=_serve, args=(client,), daemon=True, name="wp-dingtalk")
+            _thread.start()
         await asyncio.sleep(sleep)
