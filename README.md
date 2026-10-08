@@ -55,7 +55,7 @@
 | 💻 | **多入口调用** | Web UI / 终端交互 / CLI 管道 / MCP，任选其一接入分析能力 |
 | 🖥️ | **投研工作台** | 23 个功能页：今日、个股详情（财务 / 估值分位 / 同行 / 公告）、选股器、自选股、研究记录等，页面与 Agent 共用同一批工具 |
 | 🔐 | **多租户隔离** | JWT 认证 + 用户级数据隔离，对话历史持久化 |
-| 🚀 | **一键部署** | `make setup` → 编辑 API Key → `make dev`，3 步启动完整系统 |
+| 🚀 | **一条命令装好** | `curl … install.sh \| bash` → `wealthpilot setup` 贴一个 Key → `wealthpilot`。十家模型服务的接口地址和默认模型名都预填好了 |
 
 ---
 
@@ -95,16 +95,72 @@
 
 ## Quick Start
 
-### 方式一：一条命令（推荐）
+### 一条命令装好（推荐）
 
 ```bash
-git clone https://github.com/Jackychen-12/wealthpilot.git
-cd wealthpilot
-
-make setup      # 装依赖、构建网页版、复制 .env
-make install    # 把 wealthpilot 装成全局命令（可选）
-wealthpilot     # 之后在任意目录敲这一条
+curl -fsSL https://raw.githubusercontent.com/Jackychen-12/wealthpilot/main/scripts/install.sh | bash
 ```
+
+```bash
+wealthpilot setup    # 选一家模型、贴一个 Key、放进你的股票，一分钟
+```
+
+```bash
+wealthpilot          # 开始用
+```
+
+机器上只需要有 git 和 curl。安装脚本做四件事：
+
+1. 没有 uv 就先装一个（Python 的包管理器；装在你的用户目录下，不动系统里的 Python，不要管理员权限）；
+2. 把代码放到 `~/.wealthpilot/app`；
+3. 装依赖。机器上有 Node.js 就顺手把网页版构建出来，没有也不影响终端使用；
+4. 在 `~/.local/bin` 放一个 `wealthpilot` 命令。
+
+你的东西——配置、数据库、研究方法——都在 `~/.wealthpilot`，和代码分开，升级、重装、卸载都不会动它。脚本可以重复运行，第二次就是更新。卸载：`bash ~/.wealthpilot/app/scripts/install.sh --uninstall`（只删代码和命令，数据留着）。
+
+手上已经有 Key，可以装的时候一起配好，装完直接用：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jackychen-12/wealthpilot/main/scripts/install.sh | WEALTHPILOT_KEY=sk-xxxx bash
+```
+
+这样写 Key 会留在终端的历史记录里，介意的话还是用 `wealthpilot setup`，那里粘贴的时候不回显。想换安装位置、换分支、不构建网页版，脚本开头的注释里列了对应的环境变量。
+
+### 配好模型：`wealthpilot setup`
+
+三步，每一步都能回车跳过，之后随时重来：
+
+1. **用哪家的模型**。列出能接的服务，选一个，粘贴 Key（输入不回显；只存在这台电脑上，文件权限 600）。然后问你要不要当场测一次——那会真的调用一次模型，花几十个 token，不想花就答 n。
+2. **放进你的股票**。`贵州茅台 100 1500; 600036 2000 35.2` 这样写，认成了哪只股票、多少股先给你看，点头才写入；或者输入 `s` 用示例数据。
+3. 告诉你下一步敲什么。
+
+不想被提问（写进脚本、在远程机器上）就把参数给全：
+
+```bash
+wealthpilot setup --key sk-xxxx                                          # 只给 Key：按前缀认出是 DeepSeek 还是 Claude
+wealthpilot setup --provider zhipu --key xxxx                            # 指定服务，接口地址和默认模型名自动填好
+wealthpilot setup --provider ollama --model qwen2.5:14b                  # 本机模型，不要 Key
+wealthpilot setup --base-url http://localhost:8080/v1 --model my-model   # 清单之外的兼容服务
+```
+
+能直接叫出名字的服务（`wealthpilot model list` 看得到同一张表，网页「设置」里也是这一份）：
+
+| `--provider` | 服务 | 预填的模型名 |
+|---|---|---|
+| `deepseek` | DeepSeek | `deepseek-chat` |
+| `claude` | Claude（Anthropic） | `claude-sonnet-5-5` |
+| `siliconflow` | 硅基流动 | `deepseek-ai/DeepSeek-V3` |
+| `zhipu` | 智谱 | `glm-4-flash` |
+| `moonshot` | Moonshot（Kimi） | `moonshot-v1-32k` |
+| `dashscope` | 阿里云百炼（通义） | `qwen-plus` |
+| `ark` | 火山方舟（豆包） | 填你在方舟控制台建的接入点 ID |
+| `openrouter` | OpenRouter | `deepseek/deepseek-chat` |
+| `openai` | OpenAI | `gpt-4o-mini` |
+| `ollama` | 本机 Ollama | `qwen2.5:14b` |
+
+如实说明：我们自己长期跑的只有 DeepSeek。其余各家预填的是接口地址和一个通常能用的模型名，没有逐个实测过，各家的模型名也经常换——配好后跑一次 `wealthpilot model test`，不通就照服务商文档里的名字用 `--model` 改。唯一的硬要求是模型得支持工具调用（function calling），不然 Agent 取不了数。
+
+### 装好之后
 
 `wealthpilot` 一条命令同时给你三样东西：
 
@@ -112,34 +168,41 @@ wealthpilot     # 之后在任意目录敲这一条
 - **网页版**：后台带起 http://localhost:8000 （接口和页面同一个端口，不用另开前端）；
 - **每日盯盘**：跟着这个进程跑，错过的那次（合盖、关机）下次启动时会补上。
 
-**第一次用会被带着走一遍**，不用先读文档：
+没跑过 `setup` 直接敲 `wealthpilot` 也行：没配模型或没有股票时，进来会带你走同样的三步。网页首页也有一张「开始使用」卡片，列着配置模型 → 放进你的股票 → 做第一次研究 → 连上手机（可选）各自做没做、下一步点哪里。
 
-- 终端里：没配模型或没有股票时，进来会问三件事——用哪家的模型并粘贴 Key（输入不回显，当场测一次通不通）、录入持仓（`贵州茅台 100 1500; 600036 2000 35.2` 这样写，或输入 `s` 用示例数据）、然后提示可以问的第一个问题。每一步都能回车跳过，之后 `/setup` 随时重来。
-- 网页首页：一张「开始使用」卡片列出四步（配置模型 → 放进你的股票 → 做第一次研究 → 连上手机，最后一步可选），各自做没做、下一步点哪里；底下附了「验证点」「建议单」「PE 历史分位」「盯盘」这几个词的解释。做完或点「不再显示」就消失。
-- 持仓可以**粘贴导入**：一行一只，名称或代码、数量、成本价。先识别成预览——每一行认成了哪只股票、多少股都给你看过，认不出的标出原因——确认后才写入；已经在持仓里的代码不动。
+不进界面也能办的事：
 
-哪里不通，运行 `wealthpilot doctor`（或网页版「设置 → 版本与自检」）：逐项检查模型、四个数据源、数据库、网页版、手机触达、版本，不通的每一项都附修法。
+| 命令 | 做什么 |
+|---|---|
+| `wealthpilot status` | 现在是什么情况：模型配没配、几只持仓、盯盘开没开、手机绑没绑、今天用了多少 token |
+| `wealthpilot model` | 现在用的是哪个模型。`model list` 看能接哪些，`model set <服务> --key <Key>` 换一个，`model test` 实测一次 |
+| `wealthpilot config list` | 看全部配置（Key 只显示末四位）。`config get <名字>`、`config set <名字> <值>` 改一项，`config path` 看配置文件在哪 |
+| `wealthpilot import 持仓.txt` | 从文件录入持仓，每行「名称或代码 数量 成本价」。先给你看认成了什么再问；管道用 `-`，加 `--yes` 不问 |
+| `wealthpilot skills gallery` | 现成的研究方法。`skills install <名字或 https 链接>` 装上，`skills list` 看已有的，`skills remove <名字>` 删掉 |
+| `wealthpilot sessions` | 以前的会话 |
+| `wealthpilot doctor` | 哪里不通：逐项检查模型、数据源、数据库、网页版、手机触达、版本，不通的每一项都附修法 |
+| `wealthpilot update` | 升级（先备份数据库） |
 
-模型 Key 也可以在网页版左侧「设置」里填，或直接编辑 `backend/.env`。示例数据带标记，随时一键清掉。
-
-没装全局命令时用 `make start`，效果一样。只想要终端：`wealthpilot --no-web`；端口被占：`wealthpilot --port 8001`。配置、数据库、技能文件都固定在仓库的 `backend/` 下（或 `WEALTHPILOT_HOME` 指定的目录），和你在哪个目录敲命令无关。
-
-网页版只有一个地址：http://localhost:8000 。开发时用 `make dev`，也是这个地址——后端热重载，前端代码改了会自动重新构建，刷新页面即可。只有需要逐像素调界面时才用 `make workbench`（Vite 热更新，:5180）。
-
-全局命令是一个很小的转发脚本（`~/.local/bin/wealthpilot`），指向这个仓库里装好的环境，所以代码更新后不用重装。仓库挪了位置它会直接告诉你去新位置重新 `make install`；`make uninstall` 移除。
+只想要终端：`wealthpilot --no-web`；端口被占：`wealthpilot --port 8001`。
 
 一点如实说明：电脑合盖休眠时进程会被挂起，盯盘和进行中的研究都会停，软件层面拦不住；能做的是醒来后把错过的那次盯盘补上。要它全天候跑，需要放在一台不休眠的机器上（见 Docker 部署），再用 `wealthpilot --server` 连过去。
 
-### 方式二：CLI 交互式初始化
+### 从源码装（想改代码的人）
 
 ```bash
-cd backend
-uv sync
-uv run python -m wealthpilot init   # 交互式选择 AI 提供商 + 输入 API Key
-uv run python -m wealthpilot chat   # 终端对话模式，直接体验多智能体
+git clone https://github.com/Jackychen-12/wealthpilot.git
+cd wealthpilot
+
+make setup      # 装依赖、构建网页版
+make install    # 把 wealthpilot 装成全局命令（指向这个仓库，代码改了不用重装）
+wealthpilot setup
 ```
 
-### 方式三：Docker Compose
+这种装法下，配置、数据库、技能文件都在仓库的 `backend/` 里（或 `WEALTHPILOT_HOME` 指定的目录），和你在哪个目录敲命令无关。没装全局命令时用 `make start`，效果一样。开发用 `make dev`，地址也是 http://localhost:8000 ——后端热重载，前端代码改了会自动重新构建，刷新页面即可；只有需要逐像素调界面时才用 `make workbench`（Vite 热更新，:5180）。仓库挪了位置，全局命令会直接告诉你去新位置重新 `make install`；`make uninstall` 移除。
+
+以前从源码装过、现在想换成一条命令的装法：装完后把 `backend/` 下的 `.env`、`data/`、`skills/`、`connectors.json` 拷到 `~/.wealthpilot/`，原来的持仓、研究记录和配置就都带过去了。
+
+### Docker Compose
 
 ```bash
 git clone https://github.com/Jackychen-12/wealthpilot.git && cd wealthpilot
@@ -149,18 +212,15 @@ docker compose up --build -d
 # 网页版和接口都在 http://localhost:8000 （接口文档 /docs）
 ```
 
-### 在网页上配置（推荐）
+### 在网页上配置
 
-启动后打开工作台左侧「设置 → 设置」：选模型提供商、填 API Key、开关个人模式 / 模拟盘 / 每日盯盘、填推送地址，保存后立即生效，不用重启。写入的就是 `backend/.env`。这个接口只允许从运行后端的那台机器访问；Key 只写不读，页面上只显示是否已配置和末四位。由进程环境变量指定的项（比如 Docker 里）会标注出来，网页上改不了。
+启动后打开工作台左侧「设置 → 设置」：选模型提供商、填 API Key、开关个人模式 / 模拟盘 / 每日盯盘、填推送地址，保存后立即生效，不用重启。写入的和 `wealthpilot setup`、`wealthpilot config set` 是同一个文件（`wealthpilot config path` 看它在哪）。这个接口只允许从运行后端的那台机器访问；Key 只写不读，页面上只显示是否已配置和末四位。由进程环境变量指定的项（比如 Docker 里）会标注出来，网页上改不了。
 
 ### 配置 AI 提供商
 
-三种接法：Claude、DeepSeek，或任何兼容 OpenAI 接口的服务（`AI_PROVIDER=openai`，含本机 Ollama）。推荐直接在网页「设置」里选和填。
+三种接法：Claude、DeepSeek，或任何兼容 OpenAI 接口的服务（`AI_PROVIDER=openai`，含本机 Ollama）。用 `wealthpilot setup` 或网页「设置」配就行，下面是它们写进配置文件的内容，想手改的时候看：
 
-
-编辑 `backend/.env`，**只需改 2 行**即可启用 AI 能力：
-
-**选项 A — Claude（默认，推荐）**
+**选项 A — Claude**
 ```env
 AI_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-xxx    # 从 https://console.anthropic.com/ 获取
@@ -183,7 +243,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 | `RUN_TIMEOUT_SECONDS` / `AI_TIMEOUT_SECONDS` | 180 / 60 | 整轮研究 / 单次模型请求的超时 |
 | `LOCAL_USER_ID` | 0 | CLI 与 MCP 读取哪个用户的持仓和画像（0 = 未登录的匿名档） |
 
-配置完成后运行 `make config` 验证。占位值（`sk-ant-xxx`）会被视为未配置。
+配置完成后运行 `wealthpilot status` 看一眼。占位值（`sk-ant-xxx`）会被视为未配置。
 
 ### 不配置 API Key 也能用
 
@@ -783,7 +843,7 @@ wealthpilot --no-web                             # 只要终端
 wealthpilot --server http://192.168.1.10:8000    # 远程：连到一台已在运行的后端
 ```
 
-`wealthpilot` 是 `make install` 装的全局命令；没装时用 `make start`（远程：`make tui SERVER=http://host:8000`），或设置环境变量 `WEALTHPILOT_SERVER`。本机和远程界面、命令完全一样：本机读本机数据库、用 `LOCAL_USER_ID` 对应的账户；远程走 HTTP / SSE，用 `/login <用户名>` 登录（密码单独输入，不进历史记录）。进来第一行会先说现状：盯着几只、有几条建议等你决定、几条判断被证伪；有新版本时也在这里提示。第一次用会先走一遍配置（见 Quick Start）。
+`wealthpilot` 是安装脚本（或 `make install`）放好的全局命令；从源码运行又没装时用 `make start`（远程：`make tui SERVER=http://host:8000`），或设置环境变量 `WEALTHPILOT_SERVER`。本机和远程界面、命令完全一样：本机读本机数据库、用 `LOCAL_USER_ID` 对应的账户；远程走 HTTP / SSE，用 `/login <用户名>` 登录（密码单独输入，不进历史记录）。进来第一行会先说现状：盯着几只、有几条建议等你决定、几条判断被证伪；有新版本时也在这里提示。第一次用会先走一遍配置（见 Quick Start）。
 
 直接输入问题就是一次研究，过程实时显示；以 `/` 开头的是命令，不经过模型、直接出数：
 
@@ -830,11 +890,16 @@ wealthpilot --server http://192.168.1.10:8000    # 远程：连到一台已在�
 ### 其他命令
 
 ```bash
-uv run wealthpilot init     # 交互式初始化：选择 AI 提供商 + 输入 Key + 建库
-uv run wealthpilot config   # 查看当前配置（Key 脱敏显示）
-uv run wealthpilot run      # 启动 API 服务（等同 uvicorn）
-uv run wealthpilot ask "查询" # 非交互式查询（支持管道，stdout 可 pipe）
-uv run wealthpilot mcp      # 启动 MCP Server（stdio, for Claude Code）
+wealthpilot setup           # 配好就能用：选模型服务、填 Key、放进股票（参数给全了不提问）
+wealthpilot status          # 现在是什么情况：模型、持仓、盯盘、手机、今天的用量
+wealthpilot model           # 现在用的模型；model list / set <服务> --key <Key> / test
+wealthpilot config list     # 看和改配置；config get / set <名字> <值> / path
+wealthpilot import 持仓.txt  # 从文件录入持仓（- 表示从管道读，--yes 不问）
+wealthpilot skills gallery  # 研究方法；skills list / install <名字或链接> / remove <名字>
+wealthpilot sessions        # 以前的会话
+wealthpilot run             # 只启动 API 服务（等同 uvicorn）
+wealthpilot ask "查询"       # 非交互式查询（支持管道，stdout 可 pipe；会调用模型）
+wealthpilot mcp             # 启动 MCP Server（stdio, for Claude Code）
 wealthpilot doctor          # 自检：模型、数据源、数据库、网页版、手机触达、版本（--offline 不实测模型）
 wealthpilot update          # 升级到最新版本
 wealthpilot --version
@@ -964,7 +1029,7 @@ Claude 会自动调用:
 ## Makefile 速查
 
 ```bash
-make setup     # 首次配置：安装依赖 + 复制 .env
+make setup     # 从源码装：安装依赖 + 构建网页版
 make start     # 终端 + 网页版（http://localhost:8000）+ 每日盯盘
 make update    # 升级到最新版本（先备份数据库）
 make doctor    # 自检：哪一环不通、怎么修

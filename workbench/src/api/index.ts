@@ -229,7 +229,8 @@ export interface Backtest {
 export interface FundInfo { code: string; name: string; nav: number; nav_date: string; estimated_change?: number; manager?: string; company?: string; scale?: string; type?: string; benchmark?: string
   return_1w?: string; return_1m?: string; return_3m?: string; return_1y?: string }
 export interface NavPoint { nav_date: string; nav: number; daily_return: number; open?: number; high?: number; low?: number; volume?: number }
-export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; env_file: string }
+export interface ModelPreset { key: string; label: string; provider: string; base_url: string; model: string; needs_key: boolean; note: string; key_page: string }
+export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; env_file: string; presets?: ModelPreset[] }
 export interface StockQuote { code: string; name: string; price: number; prev_close: number; open: number; high: number; low: number
   change: number; change_pct: number; amount_yi: number | null; turnover_pct: number | null; pe_ttm: number | null; pb: number | null
   total_mv_yi: number | null; quote_time: string }

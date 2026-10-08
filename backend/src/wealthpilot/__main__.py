@@ -20,84 +20,6 @@ def cmd_run(args: argparse.Namespace) -> None:
     )
 
 
-def cmd_init(_args: argparse.Namespace) -> None:
-    import secrets
-    from pathlib import Path
-
-    env_path = Path(".env")
-    example = Path(".env.example")
-
-    if env_path.exists():
-        print("⚠️  .env 已存在，跳过创建")
-    elif example.exists():
-        content = example.read_text()
-        content = content.replace(
-            "change-this-to-a-random-string-in-production",
-            secrets.token_urlsafe(32),
-        )
-
-        print("选择 AI 提供商:")
-        print("  1. Anthropic (Claude)")
-        print("  2. DeepSeek")
-        choice = input("请输入 1 或 2（默认 1）: ").strip()
-
-        if choice == "2":
-            content = content.replace("AI_PROVIDER=anthropic", "AI_PROVIDER=deepseek")
-            api_key = input("请输入 DeepSeek API Key（留空跳过）: ").strip()
-            if api_key:
-                content = content.replace("DEEPSEEK_API_KEY=", f"DEEPSEEK_API_KEY={api_key}")
-        else:
-            api_key = input("请输入 Anthropic API Key（留空跳过）: ").strip()
-            if api_key:
-                content = content.replace("sk-ant-xxx", api_key)
-
-        env_path.write_text(content)
-        print(f"✅ 已创建 {env_path}")
-    else:
-        print("❌ 未找到 .env.example 模板")
-        return
-
-    from wealthpilot.storage.db import get_engine
-    get_engine()
-    print("✅ 数据库已初始化")
-
-
-def _mask_key(key: str) -> str:
-    if len(key) > 14:
-        return key[:10] + "..." + key[-4:]
-    if not key:
-        return "(未设置)"
-    return "***"
-
-
-def cmd_config(_args: argparse.Namespace) -> None:
-    from wealthpilot.settings import get_settings
-
-    s = get_settings()
-    provider = s.ai_provider.upper()
-    if s.ai_provider == "openai":
-        key_display = _mask_key(s.openai_api_key) if s.openai_api_key else "(本机模型，无需 Key)"
-        model = f"{s.openai_model} @ {s.openai_base_url}"[:24]
-    elif s.ai_provider == "deepseek":
-        key_display = _mask_key(s.deepseek_api_key)
-        model = s.deepseek_model
-    else:
-        key_display = _mask_key(s.anthropic_api_key)
-        model = s.anthropic_model
-
-    print("┌─ WealthPilot 配置 ─────────────────────┐")
-    print(f"│ AI 提供商:      {provider:<24}│")
-    print(f"│ AI 模型:        {model:<24}│")
-    print(f"│ API Key:        {key_display:<24}│")
-    print(f"│ 工具调用轮次:   {s.agent_max_tool_rounds:<24}│")
-    print(f"│ 最大 Token:     {s.agent_max_tokens:<24}│")
-    print(f"│ 数据库:         {str(s.db_path):<24}│")
-    print(f"│ 服务地址:       {s.host}:{s.port:<18}│")
-    print(f"│ 日志级别:       {s.log_level:<24}│")
-    print(f"│ 前端地址:       {s.frontend_url:<24}│")
-    print("└─────────────────────────────────────────┘")
-
-
 def _load_context():
     """加载持仓、净值与风险画像 —— CLI 与 Web 走同一套上下文。"""
     import asyncio
@@ -304,7 +226,7 @@ def cmd_ask(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="wealthpilot",
-        description="WealthPilot — AI 智能投顾 Agent CLI",
+        description="WealthPilot — 你自己的 A 股投研 Agent。第一次用：wealthpilot setup；之后直接敲 wealthpilot。",
     )
     from wealthpilot import __version__
     parser.add_argument("-V", "--version", action="version", version=f"wealthpilot {__version__}")
@@ -313,8 +235,8 @@ def main() -> None:
     run_p = sub.add_parser("run", help="启动 API 服务")
     run_p.add_argument("--reload", action="store_true", help="热重载（开发模式）")
 
-    sub.add_parser("init", help="初始化 .env 和数据库")
-    sub.add_parser("config", help="查看当前配置")
+    from wealthpilot import cli
+    extra = cli.register(sub)   # setup / model / config / status / skills / import / sessions
     sub.add_parser("chat", help="终端交互式 AI 对话（旧版，建议直接运行 wealthpilot）")
     for p in (parser, sub.add_parser("tui", help="终端入口（默认）：研究、行情、选股、复盘")):
         p.add_argument("--server", default=os.environ.get("WEALTHPILOT_SERVER", ""),
@@ -336,8 +258,6 @@ def main() -> None:
 
     commands = {
         "run": cmd_run,
-        "init": cmd_init,
-        "config": cmd_config,
         "chat": cmd_chat,
         "tui": cmd_tui,
         "watch": cmd_watch,
@@ -347,6 +267,8 @@ def main() -> None:
         "ask": cmd_ask,
     }
 
+    if args.command in extra:
+        sys.exit(extra[args.command](args))
     if args.command in commands:
         commands[args.command](args)
     else:

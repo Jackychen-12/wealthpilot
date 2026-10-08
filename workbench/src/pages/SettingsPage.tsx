@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import { DEMO, api, useApi, type AppSettings, type DoctorItem } from '../api'
+import { DEMO, api, useApi, type AppSettings, type DoctorItem, type ModelPreset } from '../api'
 import { ValueBars } from '../components/charts'
 import { Button, Callout, Input, Segmented, Select, Tag } from '../components/kit'
 import { DataState, Page, Section } from '../components/ui'
@@ -202,17 +202,6 @@ const VersionAndDoctor: React.FC = () => {
   )
 }
 
-// 常见的兼容服务。只预填接口地址；模型名各家经常变，照服务商文档里的写
-const PRESETS: { label: string; url: string }[] = [
-  { label: '硅基流动', url: 'https://api.siliconflow.cn/v1' },
-  { label: '智谱', url: 'https://open.bigmodel.cn/api/paas/v4' },
-  { label: 'Moonshot（Kimi）', url: 'https://api.moonshot.cn/v1' },
-  { label: '阿里云百炼（通义）', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-  { label: '火山方舟（豆包）', url: 'https://ark.cn-beijing.volces.com/api/v3' },
-  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
-  { label: 'OpenAI', url: 'https://api.openai.com/v1' },
-  { label: '本机 Ollama', url: 'http://localhost:11434/v1' },
-]
 const KIND_LABEL: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '复盘',
   quick: '快速回答', rewrite: '改写 / 沿用证据', free: '自由问答', reuse: '原样复用' }
 const wan = (tokens: number) => (tokens / 1e4).toFixed(tokens >= 1e6 ? 0 : 1)
@@ -267,6 +256,14 @@ const SettingsPage: React.FC = () => {
   const provider = String(form.ai_provider ?? 'anthropic')
   const keyField = provider === 'deepseek' ? 'deepseek_api_key' : provider === 'openai' ? 'openai_api_key' : 'anthropic_api_key'
   const modelField = provider === 'deepseek' ? 'deepseek_model' : provider === 'openai' ? 'openai_model' : 'anthropic_model'
+  // 能接哪些服务由后端给（和终端里 wealthpilot setup 用的是同一份），页面不自己再维护一份
+  const presets = data?.presets ?? []
+  const picked = presets.find((p) => p.base_url === form.openai_base_url)
+  const pick = (p: ModelPreset) => setForm((f) => {
+    const model = String(f.openai_model ?? '')
+    const untouched = !model || presets.some((x) => x.model === model)   // 没填过，或还是别家的默认名：跟着换；自己写的不动
+    return { ...f, openai_base_url: p.base_url, openai_model: untouched ? p.model : model }
+  })
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -313,11 +310,17 @@ const SettingsPage: React.FC = () => {
                     <Input id="s-base" label="接口地址" placeholder="https://…/v1" value={String(form.openai_base_url ?? '')} onChange={(e) => set('openai_base_url', e.target.value)}
                       hint="任何兼容 OpenAI 接口的服务都行。点下面的名字可以填好常见服务的地址。" />
                     <div className="flex flex-wrap gap-1.5">
-                      {PRESETS.map((p) => (
-                        <button key={p.url} type="button" onClick={() => set('openai_base_url', p.url)}
-                          className={`rounded-full border px-2.5 py-0.5 text-[13px] transition-colors ${form.openai_base_url === p.url ? 'border-primary text-ink' : 'border-hairline text-slate hover:bg-hover hover:text-ink'}`}>{p.label}</button>
+                      {presets.map((p) => (
+                        <button key={p.key} type="button" onClick={() => pick(p)}
+                          className={`rounded-full border px-2.5 py-0.5 text-[13px] transition-colors ${form.openai_base_url === p.base_url ? 'border-primary text-ink' : 'border-hairline text-slate hover:bg-hover hover:text-ink'}`}>{p.label}</button>
                       ))}
                     </div>
+                    {picked && (picked.note || picked.key_page) ? (
+                      <p className="text-[13px] text-steel">
+                        {picked.note}{picked.note && picked.key_page ? ' · ' : ''}
+                        {picked.key_page ? <>Key 在这里申请：<a href={picked.key_page} target="_blank" rel="noreferrer" className="text-ink underline decoration-hairline underline-offset-2 hover:decoration-ink">{picked.key_page.replace(/^https?:\/\//, '')}</a></> : null}
+                      </p>
+                    ) : null}
                     <Callout tone="neutral">
                       模型要支持<b>工具调用</b>（function calling），不然 Agent 没法取数，研究会一直失败。本机模型不需要 Key，留空就行，但小模型的工具调用和中文长文质量通常明显差一截。
                       这些服务我们没有逐个实测过，填好后先点「测试当前配置」。
@@ -335,7 +338,7 @@ const SettingsPage: React.FC = () => {
                 <div className="sm:col-span-2">
                   <Input id="s-key" label="API Key" type="password" autoComplete="off"
                     placeholder={data.secrets[keyField]?.set ? `已配置（${data.secrets[keyField].hint}），留空表示不改` : '粘贴 Key'}
-                    hint={provider === 'openai' ? '本机模型可以留空。只保存在你这台机器上；保存后页面不会再显示它' : '只保存在你这台机器的 backend/.env 里；保存后页面不会再显示它'}
+                    hint={`${provider === 'openai' ? '本机模型可以留空。' : ''}只保存在你这台机器上（${data.env_file}）；保存后页面不会再显示它`}
                     value={keys[keyField] ?? ''} onChange={(e) => setKeys((k) => ({ ...k, [keyField]: e.target.value }))} />
                 </div>
               </div>

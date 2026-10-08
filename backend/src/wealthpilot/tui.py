@@ -29,6 +29,7 @@ from rich.table import Table
 from rich.text import Text
 
 from wealthpilot import __version__
+from wealthpilot.services import providers
 
 HOME = Path.home() / ".wealthpilot"
 COMMANDS: dict[str, str] = {
@@ -551,19 +552,32 @@ class App:
             return
         if not steps.get("model") or forced:
             c.print("\n[bold]第 1 步 · 配置模型[/] [dim]（不配也能看行情、选股、管持仓，只是不能让 AI 研究）[/]")
-            choice = (await self.ask("用哪家的模型？1 DeepSeek  2 Claude  3 其他兼容 OpenAI 接口的服务（含本机 Ollama）  回车跳过：")).strip()
-            if choice in ("1", "2", "3"):
-                payload: dict = {}
-                if choice == "3":
-                    base = (await self.ask("接口地址（如 https://api.siliconflow.cn/v1，本机 Ollama 是 http://localhost:11434/v1）：")).strip()
-                    name = (await self.ask("模型名（照服务商文档里的写；要支持工具调用）：")).strip()
-                    if base and name:
-                        payload = {"ai_provider": "openai", "openai_base_url": base, "openai_model": name}
-                provider, field = {"1": ("deepseek", "deepseek_api_key"), "2": ("anthropic", "anthropic_api_key"), "3": ("openai", "openai_api_key")}[choice]
-                key = (await self.ask_secret("粘贴 API Key（输入不会显示，只保存在本机" + ("；本机模型直接回车）：" if choice == "3" else "）："))).strip()
-                if key:
-                    payload |= {"ai_provider": provider, field: key}
-                if payload:
+            for i, p in enumerate(providers.PRESETS, 1):
+                c.print(f"  {i:>2}) {p['label']}" + (f"  [dim]— {p['note']}[/]" if p["note"] else ""), highlight=False)
+            c.print(f"  {len(providers.PRESETS) + 1:>2}) 其他兼容 OpenAI 接口的服务（自己填地址）", highlight=False)
+            choice = (await self.ask("用哪家？输入序号，回车跳过：")).strip()
+            preset = None
+            if choice.isdigit() and 1 <= int(choice) <= len(providers.PRESETS):
+                preset = providers.PRESETS[int(choice) - 1]
+            elif choice.isdigit() and int(choice) == len(providers.PRESETS) + 1:
+                base = (await self.ask("接口地址（以 /v1 结尾的那种）：")).strip()
+                preset = providers.custom(base) if base else None
+            elif choice:
+                preset = providers.find(choice)
+            if preset:
+                if preset["key_page"]:
+                    c.print(f"[dim]去这里拿 Key：{preset['key_page']}[/]", highlight=False)
+                key = (await self.ask_secret("粘贴 API Key（输入不会显示，只保存在本机" + ("）：" if preset["needs_key"] else "；本机模型直接回车）："))).strip()
+                model = ""
+                if preset["provider"] == "openai":      # DeepSeek、Claude 的模型名有默认值，不在这里问；其余各家的名字常变，给个机会改
+                    hint = f" [{preset['model']}]" if preset["model"] else ""
+                    model = (await self.ask(f"模型名{hint}（回车用默认的；要支持工具调用）：")).strip()
+                payload = {k: v for k, v in providers.changes_for(preset, key, model).items() if v}
+                if preset["provider"] != "openai":
+                    payload = {k: v for k, v in payload.items() if not k.endswith("_model")}
+                if (preset["needs_key"] and not key) or (preset["provider"] == "openai" and not payload.get("openai_model")):
+                    c.print("[dim]没填全，模型没有配置。/setup 可以重来[/]")
+                else:
                     await self.backend.request("PUT", "/api/settings", json=payload)
                     with c.status("[dim]测试一下…", spinner="dots"):
                         result = await self.backend.request("POST", "/api/settings/test")

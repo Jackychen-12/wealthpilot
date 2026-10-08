@@ -2,6 +2,14 @@
 
 升级：在终端运行 `wealthpilot update`（会先备份数据库；Docker 部署见 README）。
 
+## 0.6.0 — 2026-10-08
+
+- 一条命令安装：`curl … install.sh | bash`。没有 uv 会先装，代码放在 `~/.wealthpilot/app`，数据（配置、数据库、研究方法）单独放在 `~/.wealthpilot`，升级和重装都不动它
+- `wealthpilot setup`：选一家模型、贴一个 Key、放进股票，三步配好；参数给全了不提问（`wealthpilot setup --key sk-xxxx`）
+- 十家模型服务叫得出名字：DeepSeek、Claude、硅基流动、智谱、Kimi、通义、豆包、OpenRouter、OpenAI、本机 Ollama，接口地址和默认模型名都预填好；终端和网页设置用的是同一份清单
+- 不进界面也能办事的命令：`status`（现在什么情况）、`model`（看 / 换 / 测模型）、`config`（看和改配置）、`import`（从文件录入持仓）、`skills`（装研究方法）、`sessions`（以前的会话）
+- 原来的 `wealthpilot init` 并进了 `setup`
+
 ## 0.5.0 — 2026-10-07
 
 - 飞书、企业微信里也能对话了：提问、收简报、处理建议单。飞书走长连接，不需要公网地址；企业微信需要公网可达的回调地址

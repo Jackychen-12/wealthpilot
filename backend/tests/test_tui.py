@@ -233,3 +233,36 @@ async def test_first_run_setup_walks_model_then_holdings():
     app, out = run_api({("GET", "/api/onboarding"): {"steps": [{"key": "model", "done": True}, {"key": "data", "done": True}]}})
     await app.setup()
     assert out.getvalue() == ""
+
+
+async def test_first_run_setup_offers_the_same_services_as_the_setup_command():
+    from wealthpilot.services import providers
+    routes = {("GET", "/api/onboarding"): {"steps": [{"key": "model", "done": False}, {"key": "data", "done": True}]},
+              ("PUT", "/api/settings"): {}, ("POST", "/api/settings/test"): {"ok": False, "error": "模型账户余额不足，这次没法研究。"}}
+
+    async def secret(prompt):
+        return "zp-test-not-a-real-key"
+    zhipu = str([p["key"] for p in providers.PRESETS].index("zhipu") + 1)
+    app, out = run_api(routes, answers=[zhipu, ""])           # 选智谱，模型名回车用默认的
+    app.ask_secret = secret
+    await app.setup()
+    assert app.backend.sent[1] == ("PUT", "/api/settings", {"ai_provider": "openai", "openai_api_key": "zp-test-not-a-real-key",
+                                                            "openai_model": "glm-4-flash", "openai_base_url": "https://open.bigmodel.cn/api/paas/v4"})
+    text = out.getvalue()
+    assert all(p["label"] in text for p in providers.PRESETS) and "调不通：模型账户余额不足" in text and "zp-test" not in text
+    # 自己填地址：自己机器上跑的服务通常不要 Key
+    async def no_key(prompt):
+        return ""
+    app, out = run_api(routes, answers=[str(len(providers.PRESETS) + 1), "http://localhost:8080/v1", "my-model"])
+    app.ask_secret = no_key
+    await app.setup()
+    assert app.backend.sent[1] == ("PUT", "/api/settings", {"ai_provider": "openai", "openai_model": "my-model", "openai_base_url": "http://localhost:8080/v1"})
+    app, out = run_api(routes, answers=[str(len(providers.PRESETS) + 1), "http://localhost:8080/v1", ""])       # 没给模型名：不写
+    app.ask_secret = no_key
+    await app.setup()
+    assert [s[0] for s in app.backend.sent] == ["GET"] and "没填全" in out.getvalue()
+    ollama = str([p["key"] for p in providers.PRESETS].index("ollama") + 1)
+    app, out = run_api(routes, answers=[ollama, "qwen2.5:7b"])
+    app.ask_secret = no_key
+    await app.setup()
+    assert app.backend.sent[1] == ("PUT", "/api/settings", {"ai_provider": "openai", "openai_model": "qwen2.5:7b", "openai_base_url": "http://localhost:11434/v1"})

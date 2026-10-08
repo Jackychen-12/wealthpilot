@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
-    anthropic_model: str = Field(default="claude-sonnet-5")
+    anthropic_model: str = Field(default="claude-sonnet-5-5")
 
     # DeepSeek (OpenAI-compatible)
     deepseek_api_key: str = Field(default="", description="DeepSeek API key")
