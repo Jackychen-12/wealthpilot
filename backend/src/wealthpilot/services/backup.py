@@ -22,7 +22,7 @@ from wealthpilot.settings import HOME, get_settings, reload_settings
 
 BACKUP_DIR = HOME / "backups"
 SECRET_KEYS = ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN", "FEISHU_APP_SECRET",
-               "WECOM_SECRET", "WECOM_TOKEN", "WECOM_AES_KEY", "JWT_SECRET")
+               "WECOM_SECRET", "WECOM_TOKEN", "WECOM_AES_KEY", "JWT_SECRET", "WEB_SEARCH_API_KEY")
 _KEY_RE = re.compile(r"\s*([A-Z0-9_]+)\s*=")
 _ALLOWED = re.compile(r"^(manifest\.json|env|connectors\.json|SOUL\.md|data/wealthpilot\.db|skills/[A-Za-z0-9_\-./]+)$")
 

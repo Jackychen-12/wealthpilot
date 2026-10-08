@@ -399,6 +399,26 @@ const SettingsPage: React.FC = () => {
               <Button variant="secondary" size="sm" className="mt-3" loading={testing} onClick={() => void test()}>测试当前配置</Button>
             </Section>
 
+            <Section title="联网搜索" hint="固定数据源查不到的事（公司事件、政策原文、网上流传的说法），让它自己去搜">
+              <div className="grid max-w-2xl gap-3 sm:grid-cols-2">
+                <Select id="s-websearch" label="用哪家搜" value={String(form.web_search ?? 'auto')} onChange={(v) => set('web_search', v)}
+                  options={[{ value: 'auto', label: '不用 Key（读搜索引擎结果页）' }, { value: 'bocha', label: '博查' }, { value: 'tavily', label: 'Tavily' },
+                    { value: 'brave', label: 'Brave Search' }, { value: 'searxng', label: '自己搭的 SearXNG' }, { value: 'off', label: '关掉' }]} />
+                {['bocha', 'tavily', 'brave'].includes(String(form.web_search)) ? (
+                  <Input id="s-websearch-key" label="搜索服务的 Key" type="password" autoComplete="off"
+                    placeholder={data.secrets.web_search_api_key?.set ? `已配置（${data.secrets.web_search_api_key.hint}），留空表示不改` : '粘贴 Key'}
+                    value={keys.web_search_api_key ?? ''} onChange={(e) => setKeys((k) => ({ ...k, web_search_api_key: e.target.value }))} />
+                ) : null}
+                {form.web_search === 'searxng' ? (
+                  <Input id="s-websearch-url" label="SearXNG 的地址" placeholder="https://…" value={String(form.web_search_url ?? '')} onChange={(e) => set('web_search_url', e.target.value)} />
+                ) : null}
+              </div>
+              <p className="mt-2 max-w-2xl text-[13px] text-steel">
+                不用 Key 的方式不花钱，但对方随时可能改版或拦截，搜不到时它会如实说没搜到。网页是没核实过的东西：回答里引用网页会写明来源和日期，财务数字仍然只从财报数据取。
+                它只读公网上的网页，不会去碰你电脑上和内网里的地址。搜索词会发给搜索服务。
+              </p>
+            </Section>
+
             <PersonaPanel />
 
             <Section title="用量与预算" hint="token 是服务商计费的单位；想看折成多少钱，把你那家的单价填上">

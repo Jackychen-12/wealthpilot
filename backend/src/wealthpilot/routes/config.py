@@ -19,7 +19,7 @@ from wealthpilot.storage.db import get_engine
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key", "web_search_api_key")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
@@ -29,7 +29,7 @@ EDITABLE = (
     "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
     "feishu_app_id", "feishu_app_secret", "feishu_api_base", "wecom_corp_id", "wecom_agent_id", "wecom_secret", "wecom_token", "wecom_aes_key",
     "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
-    "ai_fallback", "ai_max_retries",
+    "ai_fallback", "ai_max_retries", "web_search", "web_search_api_key", "web_search_url",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -122,6 +122,8 @@ def apply_changes(body: dict) -> list[str]:
         raise ValueError("取值不合法")
     if str(changes.get("ai_fallback") or "").strip().lower() not in ("", "anthropic", "deepseek", "openai"):
         raise ValueError("备用模型只能是 deepseek、anthropic、openai 之一，或留空")
+    if "web_search" in changes and str(changes["web_search"]).strip().lower() not in ("auto", "off", "bocha", "tavily", "brave", "searxng"):
+        raise ValueError("联网搜索只能是 auto、bocha、tavily、brave、searxng、off 之一")
     try:   # 先用模型校验一遍，别把写不合法的值落到文件里
         Settings(**{**get_settings().model_dump(), **changes})
     except ValidationError as e:

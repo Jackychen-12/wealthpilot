@@ -33,7 +33,7 @@ def test_margin_summary_reports_change_over_windows():
 
 def test_new_agents_get_their_own_tools():
     assert {t["name"] for t in AGENT_TOOLS["capital"]} == {"resolve_security", *insight_tools.CAPITAL}
-    assert {t["name"] for t in AGENT_TOOLS["expectation"]} == {"resolve_security", *insight_tools.EXPECTATION}
+    assert {t["name"] for t in AGENT_TOOLS["expectation"]} == {"resolve_security", *insight_tools.EXPECTATION, "web_search", "read_webpage"}
     assert "get_business_segments" in {t["name"] for t in AGENT_TOOLS["fundamental"]}
 
 

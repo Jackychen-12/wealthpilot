@@ -71,6 +71,9 @@ class Settings(BaseSettings):
 
     skills_dir: Path = Field(default=Path("./skills"), description="技能目录：用户自己写的研究方法（Markdown）")
     light_model: str = Field(default="", description="提取证券名、审核证据、提出验证点等轻活用的模型；留空则与主模型相同")
+    web_search: str = Field(default="auto", description="联网搜索用哪家：auto（不用 Key，读搜索引擎结果页，不稳定）/ bocha / tavily / brave / searxng / off")
+    web_search_api_key: str = Field(default="", description="搜索服务的 Key（bocha / tavily / brave）")
+    web_search_url: str = Field(default="", description="自己搭的 SearXNG 的地址")
     ai_fallback: str = Field(default="", description="备用模型用哪一家（deepseek / anthropic / openai）：主模型余额不足、Key 失效、限流、连不上时，这一轮自动换过去。留空不启用")
     ai_max_retries: int = Field(default=3, ge=0, le=8, description="限流、超时、服务端出错时自动重试几次（按服务商给的等待时间退避）")
     checkpoints_enabled: bool = Field(default=True, description="研究发布后提出可事后核对的验证点")

@@ -46,9 +46,29 @@ async def _sources() -> list[dict]:
               ("资金流向（新浪）", lambda: capital._sina_json("MoneyFlow.ssi_ssfx_flzjtj", {"daima": "sh600519"}), "资金流向"),
               ("一致预期与筹码（东方财富数据中心）", consensus, "一致预期、融资融券、股东与机构持仓、增减持")]
     results = await asyncio.gather(*[_timed(call) for _, call, _ in probes])
-    return [_item(name, "ok" if ok else "fail", f"{seconds:.1f} 秒" if ok else "取不到数据",
-                  "" if ok else f"影响：{used}。多半是网络或对方限流，过几分钟再试；公司网络可能需要代理。")
-            for (name, _, used), (ok, seconds) in zip(probes, results, strict=True)]
+    items = [_item(name, "ok" if ok else "fail", f"{seconds:.1f} 秒" if ok else "取不到数据",
+                   "" if ok else f"影响：{used}。多半是网络或对方限流，过几分钟再试；公司网络可能需要代理。")
+             for (name, _, used), (ok, seconds) in zip(probes, results, strict=True)]
+    return [*items, await _web_search()]
+
+
+async def _web_search() -> dict:
+    """联网搜索是锦上添花：不通只算提醒，不算不通 —— 固定数据源在，研究照样能做。"""
+    from wealthpilot.services import websearch
+    provider = (get_settings().web_search or "auto").lower()
+    label = websearch.PROVIDERS.get(provider, provider)
+    if provider == "off":
+        return _item("联网搜索", "ok", "已关掉")
+    try:
+        found = await websearch.search("贵州茅台 最新消息", 3)
+    except Exception as e:  # noqa: BLE001
+        found = {"results": [], "error": type(e).__name__}
+    if found["results"]:
+        return _item("联网搜索", "ok", f"{found['engine']}，搜得到")
+    fix = ("不用 Key 的搜索入口本来就不稳定，过一会儿可能自己好。想稳定：wealthpilot config set web_search bocha（或 tavily / brave），"
+           "再 config set web_search_api_key <Key>；不想要：config set web_search off。" if provider == "auto"
+           else "检查 Key 和网络：wealthpilot config get web_search；或者先换回 auto。")
+    return _item("联网搜索", "warn", f"{label}：{found.get('error') or '没有搜到'}", fix)
 
 
 def _model(online: bool) -> dict:
