@@ -129,7 +129,9 @@ class ApiBackend(FakeBackend):
 
     async def request(self, method, path, **kw):
         self.sent.append((method, path, kw.get("json")))
-        return self.routes[(method, path)]
+        self.params = kw.get("params")
+        answer = self.routes[(method, path)]
+        return answer(kw) if callable(answer) else answer
 
 
 def run_api(routes, answers=()):
@@ -266,3 +268,92 @@ async def test_first_run_setup_offers_the_same_services_as_the_setup_command():
     app.ask_secret = no_key
     await app.setup()
     assert app.backend.sent[1] == ("PUT", "/api/settings", {"ai_provider": "openai", "openai_model": "qwen2.5:7b", "openai_base_url": "http://localhost:11434/v1"})
+
+
+# ── 和成熟的 Agent 对齐的那几条：找以前的会话、重查、导出、看用量、换模型 ──────────────
+
+SESSIONS = [{"id": "c-2", "title": "帮我分析一下宁德时代", "turns": 2, "last_at": "2026-10-08T10:00:00", "source": "", "match": "…宁德时代的估值处在…"},
+            {"id": "c-1", "title": "茅台估值贵不贵", "turns": 1, "last_at": "2026-10-07T09:00:00", "source": "飞书"}]
+TURNS = {"id": "c-2", "turns": [{"question": "帮我分析一下宁德时代", "answer": "## 结论\n估值不贵。", "message_id": 9,
+                                  "meta": {"evidence": [{"id": "E-5ea7c0ffee12", "tool": "get_stock_valuation", "output": "PE 分位 22%"}]}}]}
+
+
+async def test_sessions_can_be_searched_and_the_index_refers_to_what_was_listed():
+    app, out = run_api({("GET", "/api/conversations"): lambda kw: SESSIONS[:1] if kw.get("params") else SESSIONS,
+                        ("GET", "/api/conversations/c-2"): TURNS})
+    await app.handle("/sessions 宁德")
+    assert app.backend.params == {"q": "宁德"} and "宁德时代的估值处在" in out.getvalue() and "茅台估值贵不贵" not in out.getvalue()
+    await app.handle("/sessions 1")                              # 1 指的是刚搜出来的那一个，不是完整列表里的第一个
+    assert app.conversation_id == "c-2" and app.last_message_id == 9 and app.last_question == "帮我分析一下宁德时代"
+    assert [s[1] for s in app.backend.sent].count("/api/conversations") == 1          # 没有再去拉一遍完整列表
+
+
+async def test_continue_flag_picks_up_the_latest_session():
+    app, out = run_api({("GET", "/api/conversations"): SESSIONS, ("GET", "/api/conversations/c-2"): TURNS})
+    app.resume = True
+    await app.cmd_sessions("1")
+    assert app.conversation_id == "c-2" and len(app.history) == 2 and "已回到这个会话" in out.getvalue()
+
+
+async def test_export_writes_the_answer_and_its_evidence(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app, out = run_api({("GET", "/api/conversations"): SESSIONS, ("GET", "/api/conversations/c-2"): TURNS})
+    await app.handle("/export")
+    assert "还没有可以导出的回答" in out.getvalue()
+    await app.handle("/sessions 1")
+    await app.handle("/export")
+    files = list(tmp_path.glob("wealthpilot-*.md"))
+    text = files[0].read_text(encoding="utf-8")
+    assert len(files) == 1 and "宁德时代" in files[0].name and text.startswith("# 帮我分析一下宁德时代")
+    assert "估值不贵" in text and "`E-5ea7c0ffee12` get_stock_valuation：PE 分位 22%" in text and "不构成投资建议" in text
+    await app.handle("/export 我的笔记")
+    assert (tmp_path / "我的笔记.md").is_file()
+    await app.handle("/export 我的笔记")                        # 不覆盖已有的文件
+    assert "已经存在" in out.getvalue()
+
+
+async def test_retry_asks_the_last_question_again_with_fresh_data():
+    app, out = run_app([{"type": "done", "content": "## 结论\n稳。", "meta": {"status": "passed", "message_id": 3}}])
+    await app.handle("/retry")
+    assert "还没有问过问题" in out.getvalue()
+    await app.handle("茅台估值贵不贵")
+    assert app.last_question == "茅台估值贵不贵" and app.last_answer.endswith("稳。")
+    await app.handle("/rewrite 更短一点")
+    assert app.last_question == "茅台估值贵不贵"                  # 改写的要求不是"上一个问题"
+    await app.handle("/retry")
+    assert "重新查：茅台估值贵不贵" in out.getvalue() and app.backend.calls[-1] == {"message": "茅台估值贵不贵", "depth": "deep", "rewrite_of": None}
+
+
+async def test_usage_shows_where_the_tokens_went():
+    total = {"tokens": 320000, "runs": 2, "cost": None}
+    app, out = run_api({("GET", "/api/settings/usage"): {"today": total, "last_7_days": total, "last_30_days": {"tokens": 900000, "runs": 6, "cost": 1.85},
+                                                        "by_kind": [{"kind": "stock_deep", "runs": 5, "avg_tokens": 160000}], "daily_token_budget": 500000, "priced": False}})
+    await app.handle("/usage")
+    text = out.getvalue()
+    assert "32.0 万 token，2 次" in text and "每日上限 50 万" in text and "约 1.85 元" in text and "stock_deep" in text and "16.0 万" in text
+
+
+async def test_model_can_be_switched_to_a_service_that_is_already_set_up(monkeypatch):
+    monkeypatch.setattr(tui, "LocalBackend", ApiBackend)
+    state = {"values": {"ai_provider": "deepseek", "openai_base_url": ""}, "active_model": "deepseek-chat", "fallback_active": "",
+             "secrets": {"deepseek_api_key": {"set": True, "hint": "…1234"}, "anthropic_api_key": {"set": False, "hint": ""}, "openai_api_key": {"set": False, "hint": ""}}}
+
+    def put(kw):
+        body = kw["json"]
+        if "ai_fallback" in body:
+            return {**state, "fallback_active": body["ai_fallback"]}
+        return {**state, "values": {**state["values"], "ai_provider": body["ai_provider"]}, "active_model": body.get("openai_model", "x")}
+    app, out = run_api({("GET", "/api/settings"): state, ("PUT", "/api/settings"): put})
+    await app.handle("/model")
+    assert "现在用的：deepseek · deepseek-chat" in out.getvalue() and "没填 Key" in out.getvalue()
+    await app.handle("/model claude")                           # 没填过 Key 的那一家：不切，告诉怎么填
+    assert "还没填过 Key" in out.getvalue() and not any(s[0] == "PUT" for s in app.backend.sent)
+    await app.handle("/model ollama qwen2.5:7b")                # 本机模型不要 Key
+    assert app.backend.sent[-1] == ("PUT", "/api/settings", {"ai_provider": "openai", "openai_model": "qwen2.5:7b", "openai_base_url": "http://localhost:11434/v1"})
+    assert app.backend.label == "本机 · openai / qwen2.5:7b" and "已换成" in out.getvalue()
+    await app.handle("/model fallback ollama")
+    assert app.backend.sent[-1] == ("PUT", "/api/settings", {"ai_fallback": "openai"}) and "备用模型已生效" in out.getvalue()
+    await app.handle("/model fallback off")
+    assert app.backend.sent[-1] == ("PUT", "/api/settings", {"ai_fallback": ""})
+    await app.handle("/model 不存在的")
+    assert "不认识「不存在的」" in out.getvalue()

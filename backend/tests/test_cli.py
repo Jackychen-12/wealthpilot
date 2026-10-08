@@ -265,3 +265,19 @@ def test_channels_can_be_set_up_and_paired_without_the_web_page(monkeypatch):
     monkeypatch.setattr(channels, "_api_for", lambda name: Api())
     assert run("test", "telegram")[0] == 0 and sent[0][0] == 42 and "已绑定" in run()[1]
     assert run("unpair", "telegram")[0] == 0 and channels.owner("telegram") is None
+
+
+def test_tab_completion_knows_the_commands_and_their_actions(tmp_path):
+    import subprocess
+    import sys
+    bash = subprocess.run([sys.executable, "-m", "wealthpilot", "completion", "bash"], capture_output=True, text=True)
+    zsh = subprocess.run([sys.executable, "-m", "wealthpilot", "completion", "zsh"], capture_output=True, text=True)
+    assert bash.returncode == 0 and zsh.returncode == 0 and "compdef _wealthpilot wealthpilot" in zsh.stdout
+    script = tmp_path / "completion.bash"
+    script.write_text(bash.stdout, encoding="utf-8")
+    probe = (f"source '{script}'; COMP_WORDS=(wealthpilot ba); COMP_CWORD=1; _wealthpilot; echo \"${{COMPREPLY[*]}}\"; "
+             "COMP_WORDS=(wealthpilot model f); COMP_CWORD=2; _wealthpilot; echo \"${COMPREPLY[*]}\"")
+    done = subprocess.run(["bash", "-c", probe], capture_output=True, text=True)
+    assert done.stdout.split("\n")[:2] == ["backup", "fallback"], done.stderr
+    for name in ("setup", "logs", "restore", "channels", "sessions"):
+        assert f"'{name}:" in zsh.stdout          # 新加的命令不用改补全脚本，直接就有

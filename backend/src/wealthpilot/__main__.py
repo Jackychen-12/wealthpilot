@@ -149,7 +149,7 @@ def cmd_chat(_args: argparse.Namespace) -> None:
 def cmd_tui(args: argparse.Namespace) -> None:
     from wealthpilot.tui import main as tui_main
     tui_main(getattr(args, "server", ""), getattr(args, "token", ""), web=not getattr(args, "no_web", False),
-             port=getattr(args, "port", 8000))
+             port=getattr(args, "port", 8000), resume=getattr(args, "resume", False))
 
 
 def cmd_watch(_args: argparse.Namespace) -> None:
@@ -244,6 +244,9 @@ def main() -> None:
         p.add_argument("--token", default=os.environ.get("WEALTHPILOT_TOKEN", ""), help="远程后端的登录令牌（也可进入后用 /login）")
         p.add_argument("--no-web", action="store_true", help="只用终端，不在后台启动网页版")
         p.add_argument("--port", type=int, default=8000, help="网页版和接口的端口，默认 8000")
+        p.add_argument("-c", "--continue", dest="resume", action="store_true", help="接着上一个会话聊，而不是开新的")
+    completion = sub.add_parser("completion", help="生成按 Tab 补全命令的脚本（completion zsh / bash）")
+    completion.add_argument("shell", choices=["zsh", "bash"])
     sub.add_parser("watch", help="跑一次每日盯盘并打印简报（可挂 cron）")
     sub.add_parser("update", help="升级到最新版本（先备份数据库；有本地改动会停下来问）")
     doctor_p = sub.add_parser("doctor", help="自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修")
@@ -267,6 +270,9 @@ def main() -> None:
         "ask": cmd_ask,
     }
 
+    if args.command == "completion":
+        print(cli.completion_script(args.shell, sub), end="")
+        return
     from wealthpilot.services import logs
     logs.setup()   # 终端入口、盯盘、单次提问出的事也记进同一个文件
     if args.command in extra:

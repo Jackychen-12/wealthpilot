@@ -58,13 +58,18 @@ COMMANDS: dict[str, str] = {
     "/deep": "/deep <问题> — 完整研究：四个维度取证、逐条校验",
     "/depth": "/depth [auto|quick|deep] — 之后的提问默认查多深",
     "/rewrite": "/rewrite <要求> — 不重新取数，用上一次的证据换个写法（更短一点 / 只讲风险 / 讲给新手听）",
+    "/retry": "把上一个问题重新查一遍（重新取数，不沿用之前的结果）",
+    "/export": "/export [文件名] — 把上一个回答连同证据存成 Markdown 文件",
     "/add": "/add 贵州茅台 100 1500; 600036 2000 35.2 — 录入持仓（名称或代码、数量、成本价；多只用分号隔开）",
     "/tasks": "/tasks [add <时间> | <问题>] [run|on|off|rm <编号>] — 定时任务，如 /tasks add 工作日 08:30 | 诊断一下我的持仓",
     "/alert": "/alert [<名称或代码> price<=1350] [rm <编号>] — 提醒（price 价格 / chg 涨跌幅 / pe、pb 历史分位）",
+    "/model": "/model [服务名 | fallback <服务名|off>] — 现在用哪个模型；换一家已经配好的；设备用模型",
+    "/usage": "今天、近 7 天、近 30 天用了多少 token，都花在哪类问题上",
+    "/logs": "/logs [errors] — 后台出了什么事（研究失败、推送没发出去、盯盘出错）",
     "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
     "/update": "有没有新版本、怎么升级",
     "/setup": "重新走一遍首次配置（模型 Key、示例数据）",
-    "/sessions": "/sessions [序号] — 以前的会话；带序号则回到那个会话接着聊",
+    "/sessions": "/sessions [序号 | 关键词] — 以前的会话；带序号回到那个会话接着聊，带关键词只列提到过它的",
     "/lessons": "/lessons [reflect] — 它自己记下的经验（reflect：让模型归纳一次规律，会调用一次模型）",
     "/new": "开始新会话（清空上下文）",
     "/status": "当前模式、后端与模型",
@@ -74,12 +79,12 @@ COMMANDS: dict[str, str] = {
 FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
 # /help 按用途分组：三十多个命令排成一列没法看
 HELP_GROUPS = [
-    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/evidence", "/history", "/sessions", "/new"]),
+    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/retry", "/export", "/evidence", "/history", "/sessions", "/new"]),
     ("行情", ["/stock", "/search", "/screen", "/market"]),
     ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
     ("调教与追责", ["/skills", "/memory", "/lessons", "/audit"]),
-    ("其他", ["/setup", "/sample", "/doctor", "/update", "/status", "/login", "/help", "/quit"]),
+    ("其他", ["/setup", "/model", "/usage", "/sample", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
 ]
 ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
 STATUS = {"passed": ("green", "已通过校验"), "partial": ("yellow", "部分证据缺失"), "rejected": ("red", "未通过校验 · 未发布"),
@@ -219,6 +224,9 @@ class App:
         self.depth = "auto"
         # 上一次研究存下的消息编号：/rewrite 靠它找到那次的证据
         self.last_message_id: int | None = None
+        self.last_question, self.last_answer = "", ""     # /retry 重查、/export 存成文件
+        self._session_rows: list[dict] | None = None      # 上一次 /sessions 列出来的那张表：序号指的是它
+        self.resume = False                                # wealthpilot -c：进来就接着上一个会话
 
     def table(self, *columns: str, right: tuple[int, ...] = ()) -> Table:
         t = Table(box=None, pad_edge=False, header_style="dim", padding=(0, 2, 0, 0))
@@ -290,6 +298,9 @@ class App:
             c.print("[dim]在网页版「设置」里处理，或在这里运行 /setup 换一个模型；/doctor 可以看是哪一环不通。[/]")
             return
         c.print(Markdown(cite(answer or "没有生成回答。")))
+        if rewrite_of is None:
+            self.last_question = message
+        self.last_answer = answer
         if done.get("fallback"):
             why = FALLBACK_WHY.get(done["fallback"].get("reason", ""), "用不了")
             c.print(f"[yellow]◆ 主模型{why}，这一轮是备用模型 {done['fallback'].get('model', '')} 答的。[/]", highlight=False)
@@ -683,7 +694,8 @@ class App:
             self.history = [{"role": "user", "content": r["question"]}, {"role": "assistant", "content": r["answer"]}]
             self.evidence = (r.get("meta") or {}).get("evidence") or []
             self.last_message_id = r["id"]
-            self.console.print("\n[dim]已调出这一次。可以直接追问，或 /rewrite <要求> 换个写法，/evidence 看证据[/]")
+            self.last_question, self.last_answer = r["question"], r["answer"]
+            self.console.print("\n[dim]已调出这一次。可以直接追问，或 /rewrite <要求> 换个写法，/export 存成文件，/evidence 看证据[/]")
             return
         t = self.table("编号", "时间", "问题", "结论", "证据", right=(0, 4))
         for r in await self.backend.request("GET", "/api/research/history"):
@@ -694,9 +706,11 @@ class App:
             self.console.print("[dim]/history <编号> 调出某一次，接着追问[/]")
 
     async def cmd_sessions(self, args: str) -> None:
-        rows = await self.backend.request("GET", "/api/conversations")
-        if args.strip().isdigit():
-            index = int(args.strip())
+        query = args.strip()
+        if query.isdigit():
+            # 序号指的是刚才列出来的那一张表（可能是搜出来的），没列过就按完整列表算
+            rows = self._session_rows or await self.backend.request("GET", "/api/conversations")
+            index = int(query)
             if not 1 <= index <= len(rows):
                 raise ValueError("没有这个序号。/sessions 看列表")
             data = await self.backend.request("GET", f"/api/conversations/{rows[index - 1]['id']}")
@@ -706,17 +720,20 @@ class App:
             self.history = [m for t in turns[-3:] for m in ({"role": "user", "content": t["question"]}, {"role": "assistant", "content": t["answer"]})]
             self.evidence = (turns[-1].get("meta") or {}).get("evidence") or []
             self.last_message_id = turns[-1]["message_id"]
+            self.last_question, self.last_answer = turns[-1]["question"], turns[-1]["answer"]
             for t in turns:
                 card = (t.get("meta") or {}).get("summary") or {}
                 self.console.print(f"[bold cyan]›[/] {t['question']}\n  [dim]{(card.get('conclusion') or t['answer'][:120]).strip()}[/]", highlight=False)
             self.console.print("\n[dim]已回到这个会话，可以接着问。看某一轮的全文：/history <编号>[/]")
             return
-        t = self.table("序号", "最近", "轮数", "第一个问题", "来源", right=(0, 2))
+        rows = await self.backend.request("GET", "/api/conversations", params={"q": query} if query else None)
+        self._session_rows = rows
+        t = self.table("序号", "最近", "轮数", "第一个问题", "提到的地方" if query else "来源", right=(0, 2))
         for i, c in enumerate(rows, 1):
-            t.add_row(str(i), c["last_at"][5:16].replace("T", " "), str(c["turns"]), c["title"][:44], c.get("source") or "")
-        self.console.print(t if rows else "[dim]还没有会话[/]")
+            t.add_row(str(i), c["last_at"][5:16].replace("T", " "), str(c["turns"]), c["title"][:44], (c.get("match") or "")[:40] if query else c.get("source") or "")
+        self.console.print(t if rows else f"[dim]没有哪个会话提到过「{query}」[/]" if query else "[dim]还没有会话[/]")
         if rows:
-            self.console.print("[dim]/sessions <序号> 回到那个会话接着聊[/]")
+            self.console.print("[dim]/sessions <序号> 回到那个会话接着聊；/sessions <关键词> 找提到过它的[/]")
 
     async def cmd_lessons(self, args: str) -> None:
         if args.strip() == "reflect":
@@ -753,6 +770,94 @@ class App:
         if self.last_message_id is None:
             raise ValueError("这次会话里还没有可以改写的研究。先问一个问题，或 /history <编号> 调出以前的一次")
         await self.research(args or "更短一点", rewrite_of=self.last_message_id)
+
+    async def cmd_retry(self, _: str) -> None:
+        if not self.last_question:
+            raise ValueError("这次会话里还没有问过问题")
+        self.console.print(f"[dim]重新查：{self.last_question}[/]", highlight=False)
+        await self.research(self.last_question, depth="deep")
+
+    async def cmd_export(self, args: str) -> None:
+        if not self.last_answer:
+            raise ValueError("还没有可以导出的回答。先问一个问题，或 /history <编号> 调出以前的一次")
+        stamp = time.strftime("%Y%m%d-%H%M")
+        name = args.strip() or f"wealthpilot-{stamp}-{re.sub(r'[^0-9A-Za-z一-龥]+', '-', self.last_question)[:24].strip('-') or '研究'}.md"
+        path = Path(name if name.endswith(".md") else name + ".md").expanduser()
+        if path.exists():
+            raise ValueError(f"{path} 已经存在，换个文件名：/export <文件名>")
+        lines = [f"# {self.last_question or '研究'}", "", f"> WealthPilot · {time.strftime('%Y-%m-%d %H:%M')} · 不构成投资建议", "", self.last_answer.strip(), ""]
+        if self.evidence:
+            lines += ["## 证据", ""]
+            lines += [f"- `{e['id']}` {e.get('tool', '')}：{re.sub(chr(10), ' ', str(e.get('output', '')))[:200]}" for e in self.evidence]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.console.print(f"[green]已存到[/] {path.resolve()} [dim]（回答 + {len(self.evidence)} 条证据）[/]", highlight=False)
+
+    async def cmd_usage(self, _: str) -> None:
+        u = await self.backend.request("GET", "/api/settings/usage")
+
+        def line(label: str, t: dict) -> str:
+            money = f"，约 {t['cost']:.2f} 元" if t.get("cost") is not None else ""
+            return f"{label}  {t['tokens'] / 1e4:.1f} 万 token，{t['runs']} 次{money}"
+        c = self.console
+        c.print(line("今天    ", u["today"]) + (f" [dim]（每日上限 {u['daily_token_budget'] / 1e4:g} 万）[/]" if u.get("daily_token_budget") else ""), highlight=False)
+        c.print(line("近 7 天 ", u["last_7_days"]), highlight=False)
+        c.print(line("近 30 天", u["last_30_days"]), highlight=False)
+        if u.get("by_kind"):
+            t = self.table("花在哪", "次数", "平均每次", right=(1, 2))
+            for k in u["by_kind"][:8]:
+                t.add_row(k["kind"], str(k["runs"]), f"{k['avg_tokens'] / 1e4:.1f} 万")
+            c.print(t)
+        if not u.get("priced"):
+            c.print("[dim]想看折成多少钱：wealthpilot config set token_price_input <元/百万 token>，输出的是 token_price_output[/]")
+
+    async def cmd_model(self, args: str) -> None:
+        if not isinstance(self.backend, LocalBackend):
+            raise ValueError("换模型要在运行后端的那台机器上做")
+        words = args.split()
+        data = await self.backend.request("GET", "/api/settings")
+        keyed = {"deepseek": "deepseek_api_key", "anthropic": "anthropic_api_key", "openai": "openai_api_key"}
+        if words[:1] == ["fallback"]:
+            target = words[1].lower() if len(words) > 1 else ""
+            if not target:
+                self.console.print(f"备用模型：{data.get('fallback_active') or '没有'}  [dim]/model fallback <deepseek|claude|其他服务名|off>[/]")
+                return
+            preset = None if target in ("off", "关") else providers.find(target)
+            if preset is None and target not in ("off", "关"):
+                raise ValueError(f"不认识「{target}」。可选：{'、'.join(p['key'] for p in providers.PRESETS)}，或 off")
+            data = await self.backend.request("PUT", "/api/settings", json={"ai_fallback": preset["provider"] if preset else ""})
+            self.console.print("[dim]已关掉备用模型[/]" if preset is None else f"[green]备用模型已生效：{data['fallback_active']}[/]" if data.get("fallback_active")
+                               else "[yellow]存了，但还没生效：它和主模型是同一个位置，或者那一家的 Key / 模型名还没填（/setup 里选它填上）[/]")
+            return
+        if not words:
+            v = data["values"]
+            self.console.print(f"现在用的：{v['ai_provider']} · {data['active_model']}" + (f"  [dim]备用：{data['fallback_active']}[/]" if data.get("fallback_active") else ""), highlight=False)
+            for slot, field in keyed.items():
+                state = "已填 Key" if data["secrets"][field]["set"] else "本机模型不要 Key" if slot == "openai" and v.get("openai_base_url") else "没填 Key"
+                self.console.print(f"  [dim]{slot:<10} {state}[/]", highlight=False)
+            self.console.print("[dim]/model <服务名> 换到一家已经配好的；/model fallback <服务名> 设备用；没配过的用 /setup[/]")
+            return
+        preset = providers.find(words[0])
+        if preset is None:
+            raise ValueError(f"不认识「{words[0]}」。可选：{'、'.join(p['key'] for p in providers.PRESETS)}")
+        if preset["needs_key"] and not data["secrets"][keyed[preset["provider"]]]["set"]:
+            raise ValueError(f"{preset['label']}还没填过 Key。用 /setup 选它、把 Key 填上")
+        payload = {k: v for k, v in providers.changes_for(preset, "", words[1] if len(words) > 1 else "").items() if v}
+        if preset["provider"] != "openai" and len(words) < 2:
+            payload = {"ai_provider": preset["provider"]}       # DeepSeek、Claude：沿用之前填的模型名
+        data = await self.backend.request("PUT", "/api/settings", json=payload)
+        self.backend.label = f"本机 · {data['values']['ai_provider']} / {data['active_model']}"
+        self.console.print(f"[green]已换成[/] {data['values']['ai_provider']} · {data['active_model']} [dim]下一个问题起生效。没实测过，不放心就运行 /doctor[/]", highlight=False)
+
+    async def cmd_logs(self, args: str) -> None:
+        if not isinstance(self.backend, LocalBackend):
+            raise ValueError("日志在运行后端的那台机器上：到那边运行 wealthpilot logs")
+        from wealthpilot.services import logs
+        errors = args.strip() in ("errors", "error", "错误")
+        rows = logs.tail(20, errors=errors)
+        for row in rows:
+            self.console.print(row, markup=False, highlight=False)
+        if not rows:
+            self.console.print("[dim]最近没有警告和错误[/]" if errors else "[dim]还没有日志[/]")
 
     # —— 上手：录入持仓 ——
 
@@ -872,6 +977,7 @@ class App:
 
     async def cmd_new(self, _: str) -> None:
         self.history, self.evidence, self.conversation_id = [], [], str(uuid.uuid4())
+        self.last_message_id, self.last_question, self.last_answer = None, "", ""
         self.console.print("[dim]已开始新会话[/]")
 
     async def cmd_status(self, _: str) -> None:
@@ -945,6 +1051,11 @@ class App:
         if isinstance(self.backend, LocalBackend) and sys.stdin.isatty():
             with contextlib.suppress(EOFError, KeyboardInterrupt):
                 await self.setup()
+        if self.resume:
+            try:
+                await self.cmd_sessions("1")
+            except Exception:  # noqa: BLE001 — 没有可以接上的会话就从新的开始
+                c.print("[dim]还没有可以接上的会话，从新的开始。[/]")
         c.print()
         while True:
             try:
@@ -1030,7 +1141,7 @@ def saved_token(server: str) -> str:
     return data.get("token", "") if data.get("server") == server.rstrip("/") else ""
 
 
-def main(server: str = "", token: str = "", web: bool = True, port: int = 8000) -> None:
+def main(server: str = "", token: str = "", web: bool = True, port: int = 8000, resume: bool = False) -> None:
     backend: Backend = RemoteBackend(server, token or saved_token(server)) if server else LocalBackend()
     if not server:
         from wealthpilot.main import WEB_DIR
@@ -1041,5 +1152,7 @@ def main(server: str = "", token: str = "", web: bool = True, port: int = 8000) 
         backend.own_scheduler = state in ("off", "busy")
         if state == "busy":
             backend.web = f"端口 {port} 被别的程序占用，网页版没有启动（可用 --port 换一个）"
+    app = App(backend)
+    app.resume = resume
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(App(backend).run())
+        asyncio.run(app.run())

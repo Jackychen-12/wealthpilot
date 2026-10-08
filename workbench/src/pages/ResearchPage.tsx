@@ -129,6 +129,7 @@ const Sessions: React.FC<{ items: ConversationInfo[]; current: string; onOpen: (
               {c.source ? <Tag className="!py-0">{c.source}</Tag> : null}
               {c.id === current ? <span className="text-primary">当前</span> : null}
             </span>
+            {c.match ? <span className="mt-0.5 block truncate text-xs text-slate">…{c.match}…</span> : null}
           </span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />
         </button>
@@ -201,6 +202,16 @@ const ResearchPage: React.FC = () => {
   const [reuse, setReuse] = useState(false)
   const sessions = useApi(() => (DEMO ? Promise.resolve([] as ConversationInfo[]) : api.conversations()), [turns.length === 0])
   const [sessionsOpen, setSessionsOpen] = useState(false)
+  // 历史会话里的搜索：停手 250 毫秒再查，结果按输入的词对号，免得慢的那次盖掉新的
+  const [sessionQuery, setSessionQuery] = useState('')
+  const [found, setFound] = useState<ConversationInfo[] | null>(null)
+  useEffect(() => {
+    const q = sessionQuery.trim()
+    if (!q) { setFound(null); return }
+    let stale = false
+    const timer = setTimeout(() => { api.conversations(q).then((rows) => { if (!stale) setFound(rows) }).catch(() => { if (!stale) setFound([]) }) }, 250)
+    return () => { stale = true; clearTimeout(timer) }
+  }, [sessionQuery])
   const [sessionError, setSessionError] = useState('')
   const openSession = (id: string) => {
     setSessionError('')
@@ -459,7 +470,10 @@ const ResearchPage: React.FC = () => {
       <Drawer open={sessionsOpen} onClose={() => setSessionsOpen(false)} title="历史会话" width="max-w-lg">
         {sessionError ? <Callout tone="danger" className="mb-3">{sessionError}</Callout> : null}
         <p className="mb-3 text-[13px] text-steel">点一个会话就回到当时的对话，接着问。每一轮当时的证据和校验结果都还在。</p>
-        <Sessions items={sessions.data ?? []} current={research.conversationId} onOpen={openSession} />
+        <input type="search" value={sessionQuery} onChange={(e) => setSessionQuery(e.target.value)} placeholder="找提到过某只股票、某句话的会话"
+          aria-label="搜索历史会话" className="mb-3 h-9 w-full rounded-md border border-hairline bg-canvas px-3 text-sm text-ink placeholder:text-stone focus:border-primary focus:outline-none" />
+        {sessionQuery.trim() && found && found.length === 0 ? <p className="text-[13px] text-steel">没有哪个会话提到过「{sessionQuery.trim()}」。</p> : null}
+        <Sessions items={sessionQuery.trim() ? found ?? [] : sessions.data ?? []} current={research.conversationId} onOpen={openSession} />
       </Drawer>
       {/* 窄屏：过程面板收进抽屉 */}
       <Drawer open={processOpen} onClose={() => setProcessOpen(false)} title="研究过程" width="max-w-[400px]">

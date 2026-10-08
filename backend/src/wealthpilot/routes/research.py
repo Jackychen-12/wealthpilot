@@ -173,12 +173,21 @@ _SOURCE = (("auto-", "定时任务"), ("tg-", "Telegram"), ("fs-", "飞书"), ("
 
 
 @router.get("/conversations")
-def conversations(limit: int = 30, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
-    """会话列表，最近用过的在前。一个会话是连着问的几个问题；标题取第一个问题。"""
+def conversations(limit: int = 30, q: str = "", db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """会话列表，最近用过的在前。一个会话是连着问的几个问题；标题取第一个问题。
+
+    给了 q 就只要提到过它的会话（问题、回答、研究过的证券里出现过），并带上命中的那一小段，方便认出是哪一次。
+    """
+    needle = q.strip().lower() if isinstance(q, str) else ""
     rows = db.exec(select(ChatMessage).where(ChatMessage.user_id == user_id, ChatMessage.conversation_id != "")
-                   .order_by(ChatMessage.id.desc()).limit(800)).all()
+                   .order_by(ChatMessage.id.desc()).limit(6000 if needle else 800)).all()
     found: dict[str, dict] = {}
+    hits: dict[str, str] = {}
     for row in rows:   # 新的在前：先见到的是最后一条，越往后越早
+        if needle and row.conversation_id not in hits:
+            at = row.content.lower().find(needle)
+            if at >= 0:
+                hits[row.conversation_id] = re.sub(r"\s+", " ", row.content[max(0, at - 24):at + len(needle) + 40]).strip()
         item = found.setdefault(row.conversation_id, {
             "id": row.conversation_id, "title": "", "turns": 0, "last_at": row.created_at.isoformat(), "securities": {},
             "source": next((label for prefix, label in _SOURCE if row.conversation_id.startswith(prefix)), ""), "last_status": ""})
@@ -191,6 +200,12 @@ def conversations(limit: int = 30, db: Session = Depends(get_session), user_id: 
             item["last_status"] = item["last_status"] or meta.get("status", "")
             for s in meta.get("securities") or []:
                 item["securities"].setdefault(s.get("code"), s)
+    if needle:
+        for cid, c in found.items():       # 问「宁德」也该找到只写了代码的那次：证券的名字和代码也算
+            named = next((sec for sec in c["securities"].values() if needle in f"{sec.get('name', '')} {sec.get('code', '')}".lower()), None)
+            if named and cid not in hits:
+                hits[cid] = f"研究过 {named.get('name', '')} {named.get('code', '')}"
+        found = {cid: {**c, "match": hits[cid]} for cid, c in found.items() if cid in hits}
     out = [{**c, "securities": list(c["securities"].values())[:4]} for c in found.values() if c["turns"]]
     return sorted(out, key=lambda c: c["last_at"], reverse=True)[:max(1, min(limit, 100))]
 

@@ -158,3 +158,31 @@ def test_masking_handles_codes_full_names_and_aliases():
     assert lessons._mask("茅台的分红", sec) == "××的分红"
     assert lessons._focus(lessons._mask("帮我深度分析一下贵州茅台", sec)) == ""
     assert lessons._focus(lessons._mask("帮我看看贵州茅台的分红能不能持续", sec)) == "分红能不能持续"
+
+
+def test_past_sessions_can_be_found_by_what_was_said_in_them():
+    import argparse
+
+    from wealthpilot import cli
+    _wipe()
+    with Session(get_engine()) as db:
+        _turn(db, "c-moutai", "帮我分析一下贵州茅台", "贵州茅台", "600519", minutes_ago=300, answer="## 结论\n批价回落，渠道库存偏高，短期承压。")
+        _turn(db, "c-catl", "300750 怎么样", "宁德时代", "300750", minutes_ago=5, answer="## 结论\n储能订单在放量。")
+    client = TestClient(app)
+    found = client.get("/api/conversations", params={"q": "渠道库存"}).json()
+    assert [c["id"] for c in found] == ["c-moutai"] and "渠道库存偏高" in found[0]["match"]          # 回答里说过的话也找得到
+    by_name = client.get("/api/conversations", params={"q": "宁德"}).json()
+    assert [c["id"] for c in by_name] == ["c-catl"] and "宁德时代" in by_name[0]["match"]          # 问的时候只写了代码，按名字也能找到
+    assert client.get("/api/conversations", params={"q": "比亚迪"}).json() == []
+    assert len(client.get("/api/conversations").json()) == 2 and "match" not in client.get("/api/conversations").json()[0]
+
+    out: list[str] = []
+    assert cli.cmd_sessions(argparse.Namespace(query="渠道库存"), out=out.append) == 0
+    assert "帮我分析一下贵州茅台" in out[0] and "渠道库存偏高" in out[1] and "300750" not in "\n".join(out)
+    out.clear()
+    cli.cmd_sessions(argparse.Namespace(query="比亚迪"), out=out.append)
+    assert out == ["没有哪个会话提到过「比亚迪」。"]
+    out.clear()
+    cli.cmd_sessions(argparse.Namespace(query=None), out=out.append)
+    assert len(out) == 3 and "wealthpilot -c" in out[-1]
+    _wipe()

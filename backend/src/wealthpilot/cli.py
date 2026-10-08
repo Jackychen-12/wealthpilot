@@ -553,12 +553,46 @@ def cmd_sessions(_args, *, out: Out = print) -> int:
     from wealthpilot.storage.db import get_engine
 
     _settings().ensure_dirs()
+    query = (getattr(_args, "query", None) or "").strip()
     with Session(get_engine()) as db:
-        rows = conversations(30, db, _settings().local_user_id)
+        rows = conversations(limit=30, q=query, db=db, user_id=_settings().local_user_id)
     for i, c in enumerate(rows, 1):
         out(f"  {i:>2}  {c['last_at'][5:16].replace('T', ' ')}  {c['turns']} 轮  {c['title'][:44]}" + (f"  [{c['source']}]" if c["source"] else ""))
-    out("回到某个会话接着聊：进 wealthpilot 后输入 /sessions <序号>" if rows else "还没有会话。运行 wealthpilot 开始提问。")
+        if c.get("match"):
+            out(f"        …{c['match']}…")
+    if query:
+        out(f"回到其中一个接着聊：进 wealthpilot 后输入 /sessions {query}，再 /sessions <序号>" if rows else f"没有哪个会话提到过「{query}」。")
+    else:
+        out("回到某个会话接着聊：进 wealthpilot 后输入 /sessions <序号>；接着上一次聊：wealthpilot -c；找提到过某只股票的：wealthpilot sessions <关键词>"
+            if rows else "还没有会话。运行 wealthpilot 开始提问。")
     return 0
+
+
+def completion_script(shell: str, sub) -> str:
+    """按 Tab 补全命令的脚本。命令表直接取自 argparse，所以加了新命令不用改这里。"""
+    helps = {a.dest: (a.help or "").split("（")[0].replace("'", "").replace(":", "：") for a in sub._choices_actions}
+    table: dict[str, list[str]] = {}
+    for name, parser in sub.choices.items():
+        choices = next((list(a.choices) for a in parser._actions if not a.option_strings and a.choices), [])
+        table[name] = choices + [o for a in parser._actions for o in a.option_strings if o.startswith("--") and o != "--help"]
+    rc = "zshrc" if shell == "zsh" else "bashrc"
+    lines = ["# 用法：把这段存成文件，在 ~/." + rc + " 里 source 它，然后新开一个终端：",
+             "#   wealthpilot completion " + shell + " > ~/.wealthpilot-completion." + shell,
+             "#   echo 'source ~/.wealthpilot-completion." + shell + "' >> ~/." + rc]
+    if shell == "zsh":
+        lines += ["_wealthpilot() {", "  local -a commands",
+                  "  commands=(" + " ".join("'" + name + ":" + helps.get(name, "") + "'" for name in table) + ")",
+                  "  if (( CURRENT == 2 )); then", "    _describe 'command' commands", "  else", "    case $words[2] in"]
+        lines += ["      " + name + ") compadd -- " + " ".join(words) + " ;;" for name, words in table.items() if words]
+        lines += ["      *) _files ;;", "    esac", "  fi", "}",
+                  "(( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }", "compdef _wealthpilot wealthpilot"]
+    else:
+        lines += ["_wealthpilot() {", '  local cur="${COMP_WORDS[COMP_CWORD]}"',
+                  '  if [ "$COMP_CWORD" -eq 1 ]; then COMPREPLY=($(compgen -W "' + " ".join(table) + '" -- "$cur")); return; fi',
+                  '  case "${COMP_WORDS[1]}" in']
+        lines += ["    " + name + ') COMPREPLY=($(compgen -W "' + " ".join(words) + '" -- "$cur")) ;;' for name, words in table.items() if words]
+        lines += ['    *) COMPREPLY=($(compgen -f -- "$cur")) ;;', "  esac", "}", "complete -F _wealthpilot wealthpilot"]
+    return "\n".join(lines) + "\n"
 
 
 def register(sub) -> dict:
@@ -595,7 +629,8 @@ def register(sub) -> dict:
     imp.add_argument("file")
     imp.add_argument("--yes", action="store_true", help="不再确认，直接写入认出来的")
 
-    sub.add_parser("sessions", help="以前的会话")
+    sessions = sub.add_parser("sessions", help="以前的会话；带关键词则只列提到过它的（sessions 宁德时代）")
+    sessions.add_argument("query", nargs="?", help="关键词：问题、回答、研究过的股票名或代码里出现过")
     logs = sub.add_parser("logs", help="后台出了什么事：研究失败、推送没发出去、盯盘出错（logs --errors 只看出问题的）")
     logs.add_argument("-n", "--lines", type=int, default=40, help="看最近多少条，默认 40")
     logs.add_argument("--errors", action="store_true", help="只看警告和错误")

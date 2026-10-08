@@ -180,7 +180,7 @@ export const api = {
   removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
   runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
   parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
-  conversations: () => request<ConversationInfo[]>('/api/conversations'),
+  conversations: (q = '') => request<ConversationInfo[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   conversation: (id: string) => request<{ id: string; turns: ConversationTurn[] }>(`/api/conversations/${encodeURIComponent(id)}`),
   lessons: () => request<MemoryItem[]>('/api/lessons'),
   reflect: () => request<{ added: MemoryItem[] }>('/api/lessons/reflect', { method: 'POST' }),
@@ -322,7 +322,7 @@ export interface StockNews { date: string; title: string; summary: string; media
 export interface Survey { notice_date: string; date: string; way: string; place: string; participants: number; content: string }
 export interface Segment { name: string; revenue_yi: number | null; revenue_ratio_pct: number | null; gross_margin_pct: number | null }
 export interface Segments { report_date: string; report_name: string; by_industry: Segment[]; by_product: Segment[]; by_region: Segment[] }
-export interface ConversationInfo { id: string; title: string; turns: number; last_at: string; securities: Security[]; source: string; last_status: string }
+export interface ConversationInfo { id: string; title: string; turns: number; last_at: string; securities: Security[]; source: string; last_status: string; match?: string }
 export interface ConversationTurn { message_id: number; created_at: string; question: string; answer: string; checkpoints: Checkpoint[]; proposals: Proposal[]
   meta: { status?: string; playbook?: string; intent?: string; securities?: Security[]; tasks?: { id: string; agent: string; goal: string }[]
     evidence?: NonNullable<StreamEvent['evidence']>[]; summary?: SummaryCard | null; debate?: Debate | null; seconds?: number; usage?: Usage; depth?: string
