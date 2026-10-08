@@ -213,6 +213,11 @@ async def wecom_receive(request: Request, msg_signature: str = "", timestamp: st
         task = asyncio.create_task(bot.message(parsed[0], parsed[1]))
         _wecom_tasks.add(task)
         task.add_done_callback(_wecom_tasks.discard)
+    sender = wecom.unsupported_from(inner)
+    if sender and bot is not None and sender == channels.owner("wecom") and wecom.fresh(wecom._field(inner, "MsgId")):
+        task = asyncio.create_task(bot.api.send(sender, "企业微信这边暂时只收文字。图片和语音可以在 Telegram、飞书或钉钉里发，或者把内容打成文字发给我。"))
+        _wecom_tasks.add(task)
+        task.add_done_callback(_wecom_tasks.discard)
     return ""
 
 

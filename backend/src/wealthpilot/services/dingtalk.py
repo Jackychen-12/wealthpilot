@@ -52,6 +52,16 @@ class DingTalk:
         self._tokens[self.client_id] = (data["accessToken"], time.time() + int(data.get("expireIn") or 7200))
         return data["accessToken"]
 
+    async def download(self, download_code: str) -> bytes:
+        """取回用户发来的图片：先用下载码换一个临时地址，再去取。"""
+        token = await self.token()
+        resp = await self._http.post(f"{self._base}/v1.0/robot/messageFiles/download", headers={"x-acs-dingtalk-access-token": token},
+                                     json={"downloadCode": download_code, "robotCode": robot_code(self.client_id)})
+        url = (resp.json() if resp.content else {}).get("downloadUrl")
+        if resp.status_code >= 400 or not url:
+            raise RuntimeError(f"钉钉没有给出这个文件（{resp.status_code}）")
+        return (await self._http.get(url)).content
+
     async def send(self, chat_id: str, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
         """给一个人发文字（chat_id 是他的 staffId）。文字消息没有按钮，按钮写成可回复的命令；太长就分几条。"""
         token = await self.token()
@@ -62,6 +72,19 @@ class DingTalk:
             data = resp.json() if resp.content else {}
             if resp.status_code >= 400 or data.get("code"):
                 raise RuntimeError(f"钉钉没有接受这条消息：{data.get('message') or data.get('code') or resp.status_code}")
+
+
+def parse_media(data: dict) -> tuple[str, str, str, str] | None:
+    """单聊里的图片或语音 →（发消息的人, image / voice, 下载码, 钉钉已经识别出的文字）。其他返回 None。"""
+    if not isinstance(data, dict) or str(data.get("conversationType")) != "1":
+        return None
+    kind = {"picture": "image", "audio": "voice"}.get(str(data.get("msgtype")))
+    sender, content = str(data.get("senderStaffId") or "").strip(), data.get("content") or {}
+    if kind is None or not sender or not isinstance(content, dict):
+        return None
+    if data.get("robotCode"):
+        cache.write("channel:dingtalk:robot", {"code": data["robotCode"]})
+    return sender, kind, str(content.get("downloadCode") or ""), str(content.get("recognition") or "")
 
 
 def parse_event(data: dict) -> tuple[str, str] | None:
@@ -86,11 +109,19 @@ def handler_for(bot, sdk, loop: asyncio.AbstractEventLoop | None = None):
     """
     class Handler(sdk.ChatbotHandler):
         async def process(self, callback):
-            parsed = parse_event(getattr(callback, "data", None) or {})
-            if parsed and loop is not None and loop is not asyncio.get_running_loop():
-                asyncio.run_coroutine_threadsafe(bot.message(*parsed), loop)
+            data = getattr(callback, "data", None) or {}
+            parsed, media = parse_event(data), parse_media(data)
+            if media:
+                sender, kind, code, recognized = media
+                job = bot.media(sender, kind, lambda: bot.api.download(code), recognized=recognized, filename="voice.amr")
             elif parsed:
-                task = asyncio.create_task(bot.message(*parsed))
+                job = bot.message(*parsed)
+            else:
+                return sdk.AckMessage.STATUS_OK, "OK"
+            if loop is not None and loop is not asyncio.get_running_loop():
+                asyncio.run_coroutine_threadsafe(job, loop)
+            else:
+                task = asyncio.create_task(job)
                 _tasks.add(task)
                 task.add_done_callback(_tasks.discard)
             return sdk.AckMessage.STATUS_OK, "OK"

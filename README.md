@@ -47,11 +47,11 @@
 | 🧭 | **不让模型猜代码** | 「宁德时代」「茅台」先由代码解析成 300750、600519，再交给 Agent；解析不到就直说 |
 | 🎯 | **风险画像硬约束** | 风险测评结果注入 Planner/Agent/Synthesizer 三处；未测评时不得给出具体仓位比例 |
 | 🔍 | **证据溯源 + Critic 闸门** | 每次工具调用生成证据 ID `[E-…]`，回答必须逐条引用；数字回查不到、证据不足或越过画像约束的草稿不会发布 |
-| 🔧 | **51 个实时工具** | 个股行情、财务指标与主营构成、估值历史分位、同行对比、资金流向与融资融券、股东与机构持仓、增减持与解禁、卖方一致预期与研报、公告与新闻、全市场选股，加上持仓、风险、穿透、回测，以及把算术从 LLM 手里拿走的 compute/check 工具 |
+| 🔧 | **53 个实时工具** | 个股行情、财务指标与主营构成、估值历史分位、同行对比、资金流向与融资融券、股东与机构持仓、增减持与解禁、卖方一致预期与研报、公告与新闻、全市场选股，加上持仓、风险、穿透、回测，以及把算术从 LLM 手里拿走的 compute/check 工具 |
 | 🌐 | **双模型支持** | Claude & DeepSeek 一行配置切换，Provider 抽象层自动适配 Anthropic SDK / OpenAI SDK |
 | 📊 | **免费实时数据** | AKShare + 东方财富 + 天天基金 + 新浪财经，无需付费数据源 |
 | ⚡ | **过程可见的 SSE** | 规划、工具调用、证据、Critic 结论实时推送；正文在通过校验后才下发，未过审的草稿不会流到用户面前 |
-| 🔌 | **MCP Server** | 51 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
+| 🔌 | **MCP Server** | 53 个工具通过 MCP 协议暴露，Claude Code / Cursor 直接调用，无需自建 Agent |
 | 💻 | **多入口调用** | Web UI / 终端交互 / CLI 管道 / MCP，任选其一接入分析能力 |
 | 🖥️ | **投研工作台** | 23 个功能页：今日、个股详情（财务 / 估值分位 / 同行 / 公告）、选股器、自选股、研究记录等，页面与 Agent 共用同一批工具 |
 | 🔐 | **多租户隔离** | JWT 认证 + 用户级数据隔离，对话历史持久化 |
@@ -183,6 +183,7 @@ wealthpilot setup --base-url http://localhost:8080/v1 --model my-model   # 清�
 | `wealthpilot sessions` | 以前的会话。`sessions 宁德时代` 只列提到过它的；`wealthpilot -c` 进来就接着上一个会话聊 |
 | `wealthpilot channels` | 手机上的渠道卡在哪一步。`channels setup telegram --token …` 配置，`channels pair telegram` 出配对码，`channels test telegram` 发一条试试 |
 | `wealthpilot backup` | 把数据库、配置、研究方法打成一个文件（`--no-keys` 不带 Key）。`wealthpilot restore <文件>` 放回来，恢复前会先自动备份现状 |
+| `wealthpilot persona` | 说话方式：你希望它怎么跟你说话。`persona use friend` 用现成的，`persona set "…"` 自己写，`persona clear` 清掉 |
 | `wealthpilot logs` | 后台出了什么事：研究失败、推送没发出去、盯盘出错。`--errors` 只看出问题的，`-f` 跟着看 |
 | `wealthpilot doctor` | 哪里不通：逐项检查模型、数据源、数据库、网页版、手机触达、版本、日志，不通的每一项都附修法 |
 | `wealthpilot update` | 升级（先备份数据库） |
@@ -260,7 +261,7 @@ DEEPSEEK_API_KEY=sk-xxx         # 从 https://platform.deepseek.com/ 获取
 | 个股详情、选股器、自选股、全局搜索 | ✅ | ✅ |
 | AI 研究 | 提示未配置 Key（在线演示可回放录好的研究过程） | **多 Agent 实时分析** |
 | 截图 OCR 导入 | ❌ | ✅（仅 Anthropic Key，Claude Vision） |
-| MCP Server 的 51 个工具 | ✅（不调用 LLM） | ✅ |
+| MCP Server 的 53 个工具 | ✅（不调用 LLM） | ✅ |
 | AI 周报 | 模板回退 | **LLM 智能生成** |
 
 ---
@@ -561,6 +562,10 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 
 **数据带得走**。`wealthpilot backup` 把数据库、配置、你写的研究方法、数据连接打成一个文件——数据库用的是 SQLite 自己的在线备份，WealthPilot 开着也能打。默认带着 Key（文件只有你能读，换电脑不用重填），`--no-keys` 去掉后可以放网盘。`wealthpilot restore` 放回来之前先把现状自动备份一份，恢复错了能回头；备份里没带 Key 时保留这台机器上的 Key；不是自己打出来的压缩包、里面有想写到数据目录外面的路径，一律拒绝并且什么都不动。
 
+**说话方式你说了算**。在数据目录下放一个 `SOUL.md`（名字沿用 OpenClaw、Hermes 的叫法），写一段话告诉它怎么跟你说话：`wealthpilot persona use friend` 直接用现成的“懂行的朋友”，另外三个是“只要要点”“讲给新手”“多泼冷水”；也可以 `wealthpilot persona set "先说结论，用大白话，别用套话"`，或在网页「设置 → 说话方式」里改。这段话会写进每个 Agent 和最后执笔那一步的系统提示里，并且明说“与规则冲突时以规则为准”——它管的是语气、措辞和详略，证据引用、数字核对、必须有的章节和风险提示不会因为一句“说短点”被省掉。没写的时候系统提示和以前逐字相同。如实说明：这是一个机制，离线测过的是“这段话确实到了模型手里、规则在它前面”；换了说话方式之后真实模型写出来到底像不像人话，没有拿真实模型跑过。
+
+**固定数据源之外的事，它会自己去搜**。行业与市场、预期与消息这两个 Agent 多了 `web_search` 和 `read_webpage`：公司最近的事件、订单、政策原文、网上流传的某个说法，财报和行情接口里查不到的，它自己搜、挑一两条读原文。默认不用 Key（直接读搜索引擎的结果页），不花钱，但对方随时可能改版或拦截，搜不到时它如实说没搜到；想稳定可以接博查、Tavily、Brave 或自己搭的 SearXNG（`wealthpilot config set web_search bocha` 再 `config set web_search_api_key …`），不想要就 `config set web_search off`。几条界线：网页是没核实过的东西，结果里带着提醒，回答里引用网页要写明来源网站和日期；财务数字、估值、行情仍然只从专门的工具取；读网页只走公网的 http / https，本机、内网、链路本地地址一律拒绝，跳转的每一跳都重新检查，免得一个恶意链接让它读到你电脑上的服务。如实说明：不用 Key 的搜索在本机实际搜过、读过网页；带 Key 的四家是照文档写的，用模拟接口测的，没有真的调过。
+
 **钱花在哪、能不能少花**：
 
 - 「设置 → 用量与预算」能看到今天、近 7 天、近 30 天各用了多少 token、花在哪类问题上；填了你那家的单价会折成钱（按输入全价算，是个上限）。开跑前，等待卡片上会写这类研究最近平均花多少。
@@ -637,14 +642,15 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 - **快速 / 深入**。输入框下面三档：自动、快速（只派一两个 Agent，十几秒，简短，不留验证点）、深入（完整研究）。终端里是 `/quick <问题>`、`/deep <问题>`、`/depth`。
 - **换个写法不用重新研究**。回答下面的「更短一点 / 只讲风险 / 换成给新手的说法 / 列成要点」，或勾上「只用上一轮的证据回答」再追问，都只用那一轮已经取到的证据重写：实测 3 到 8 秒，同样要过数字溯源校验；证据里没有的东西它会直说"需要重新研究"，不会现编。终端里是 `/rewrite <要求>`，`/history <编号>` 可以调出以前的某一次接着改写或追问。
 
-## 手机触达（Telegram、飞书、企业微信）
+## 手机触达（Telegram、飞书、钉钉、企业微信）
 
-三个渠道接一个就行，在网页版「设置 → 手机触达」里配，或者不开网页、在终端里用 `wealthpilot channels`（看卡在哪一步、配置、出配对码、发测试消息）。它们共用同一套逻辑：能收什么、能问什么、怎么处理建议单都一样，区别只在怎么接上。
+四个渠道接一个就行，在网页版「设置 → 手机触达」里配，或者不开网页、在终端里用 `wealthpilot channels`（看卡在哪一步、配置、出配对码、发测试消息）。它们共用同一套逻辑：能收什么、能问什么、怎么处理建议单都一样，区别只在怎么接上。
 
 | 渠道 | 怎么收消息 | 需要公网地址吗 | 接入要做的事 |
 |---|---|---|---|
 | Telegram | 长轮询 | 不需要（但本机要能访问 Telegram，可以填中转地址） | 找 @BotFather 建机器人，填令牌 |
 | 飞书 | 官方 SDK 的长连接 | 不需要 | 开放平台建企业自建应用：加机器人能力，开通收发消息权限，事件订阅选「使用长连接接收事件」并添加「接收消息」，发布；填 App ID 和 App Secret，**重启 WealthPilot** |
+| 钉钉 | 官方 SDK 的长连接（Stream 模式） | 不需要 | 开放平台建企业内部应用：加机器人能力，消息接收模式选 Stream，开通「企业内机器人发送消息」，发布；填 Client ID 和 Client Secret，重启 WealthPilot。只认单聊，群里 @ 它没有回应 |
 | 企业微信 | 回调（它来调你） | **需要** | 管理后台建自建应用，「接收消息」的 URL 填 `https://你的地址/api/channel/wecom/callback`，填企业 ID、AgentId、Secret、Token、EncodingAESKey；把服务器 IP 加进「企业可信 IP」 |
 
 绑定都是同一个办法：设置页生成配对码，在那个应用里给机器人发 `/pair 123456`，发对了它就认这个聊天做主人，别人发消息不会有回应。飞书和企业微信的文字消息没有按钮，授权建议单时按提示回复命令（`/ap 3` 发起、`/ok 3` 确认、`/no 3` 取消、`/rj 3` 不采纳），同样是两步。
@@ -660,6 +666,7 @@ Agent 内部始终说 Anthropic 格式，Provider 层在 API 调用边界自动�
 - **收**：每日简报（有事才推）、定时任务的结论、提醒。
 - **问**：直接发问题就是一次研究，回来的是结论卡片；`/quick` 快速回答，`/deep` 强制重新取数，`/rewrite 更短一点` 用上一个回答的证据换个写法。
 - **管**：一次只查一个——手一快连发两条，第二条会被告知上一个还在查，不会同时跑两次、花两份钱；`/stop` 停掉正在查的（已经花掉的 token 照常记账）。`/status` 看模型、今天用量、正在查什么，`/usage` 看用了多少。
+- **发图、发语音**：截一张别人的观点、持仓或图表发过来，它先把图里的内容转成文字给你看一眼认得对不对，再照着查；图上附一句话（“这个说法靠谱吗”）就直接开查，没附就等你下一句。语音也一样，先回“听到的是……”。语音只当提问，听成了命令也不执行——授权建议单必须打字。看图要一个能看图的模型（`wealthpilot config set vision_model glm-4v-flash`，或填了 Claude 的 Key），语音要一个转写服务（`stt_base_url` / `stt_model` / `stt_api_key`）；钉钉的语音它自己识别好了，不用配。没配的时候它会直接告诉你怎么配。企业微信这边暂时只收文字。
 - **看**：`/stock 茅台` 行情与估值分位，`/holdings` 持仓和浮动盈亏，`/watch` 自选，`/tasks` 定时任务和提醒，`/digest`、`/review` 简报和成绩单。
 - **处理建议单**：`/proposals` 列出来，每条带「授权 / 不采纳」按钮。授权要点两次（第二次是确认），执行的仍然是你在电脑上会走的那条路径：开了模拟盘就在模拟盘成交，否则只记账。
 
@@ -899,6 +906,7 @@ wealthpilot --server http://192.168.1.10:8000    # 远程：连到一台已在�
 | `/retry` · `/export [文件名]` | 把上一个问题重新查一遍（重新取数）· 把上一个回答连同证据存成 Markdown 文件 |
 | `/sessions [序号 \| 关键词]` | 以前的会话；带序号回到那个会话，带关键词只列提到过它的 |
 | `/model [服务名 \| fallback <服务名>]` · `/usage` · `/logs [errors]` | 换到一家已经配好的模型、设备用 · 用了多少 token · 后台出了什么事 |
+| `/persona [use <预设> \| set <一段话> \| clear]` | 说话方式：你希望它怎么跟你说话 |
 | `/new` · `/status` · `/login` · `/quit` | 新会话 · 当前模式 · 远程登录 · 退出 |
 
 `/help` 按用途分组列出全部命令。交互终端里有输入历史和命令补全，Ctrl-C 只中断当前这次研究。输入来自管道时退回逐行读取，可以写成脚本：`printf '/stock 茅台\n/quit\n' | uv run wealthpilot`。
@@ -916,6 +924,7 @@ wealthpilot sessions [关键词] # 以前的会话；带关键词只列提到过
 wealthpilot -c              # 进来就接着上一个会话聊
 wealthpilot channels        # 手机渠道：setup / pair / unpair / test <telegram|feishu|wecom>
 wealthpilot backup [路径]    # 备份（--no-keys 不带 Key，--list 看已有的）；wealthpilot restore <文件> 恢复
+wealthpilot persona         # 说话方式：persona use <预设> / set "…" / clear / path
 wealthpilot logs            # 后台出了什么事（--errors 只看出问题的，-f 跟着看）
 wealthpilot completion zsh  # 生成 Tab 补全脚本（或 bash）
 wealthpilot run             # 只启动 API 服务（等同 uvicorn）
@@ -966,7 +975,7 @@ python -m wealthpilot ask "市场分析" 2>/dev/null
 
 ## MCP Server — Claude Code / Cursor 集成
 
-WealthPilot 提供标准 **MCP (Model Context Protocol) Server**，将 51 个投资分析工具直接暴露给 Claude Code、Cursor 等 MCP 客户端。Claude 可以自主调用这些工具获取实时行情和持仓分析——**无需自建 Agent，无需 API Key**（MCP Server 本身不调用 LLM）。
+WealthPilot 提供标准 **MCP (Model Context Protocol) Server**，将 53 个投资分析工具直接暴露给 Claude Code、Cursor 等 MCP 客户端。Claude 可以自主调用这些工具获取实时行情和持仓分析——**无需自建 Agent，无需 API Key**（MCP Server 本身不调用 LLM）。
 
 ### 配置方法
 
@@ -1222,7 +1231,7 @@ make clean     # 清理生成文件
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/tools` | 51 个 Agent 工具及入参说明，按 Agent 分组 |
+| GET | `/api/tools` | 53 个 Agent 工具及入参说明，按 Agent 分组 |
 | POST | `/api/tools/{name}` | 直接执行一个工具，返回 `{ok, data, as_of}`；工作台功能页走这里 |
 
 `/api/chat` 的 SSE 事件类型：`resolved`（解析出的证券）、`plan`（含 `playbook`）、`checkpoints`（验证点与建议单，在 `done` 之前）、`task_start`、`tool_call`、`evidence`、`task_done`、`critic`、`replan`、`synthesizing`、`delta`、`grounding_warning`、`error`、`done`（`done.meta.status` 为 `passed` / `partial` / `insufficient_data` / `rejected` / `failed`）。
@@ -1252,7 +1261,7 @@ wealthpilot/
     └── src/wealthpilot/
         ├── __main__.py          #   CLI 入口 (run/init/config/chat/mcp/ask)
         ├── tui.py               #   ⭐ 终端入口（本机 / 远程）
-        ├── mcp_server.py        #   ⭐ MCP Server（51 工具，for Claude Code）
+        ├── mcp_server.py        #   ⭐ MCP Server（53 工具，for Claude Code）
         ├── main.py              #   FastAPI 应用
         ├── settings.py          #   配置管理（支持双 Provider）
         ├── routes/              #   17 个路由模块，87 个端点（含 research：搜索 / 自选 / 选股 / 研究记录，review：验证点 / 建议单）

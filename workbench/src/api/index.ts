@@ -41,7 +41,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   }
   if (!resp.ok) {
     const body = await resp.json().catch(() => null)
-    throw new ApiError(body?.detail ? String(body.detail) : `请求失败（${resp.status}）`)
+    // detail 通常是一句话；后端校验请求格式失败时它是一个数组 —— 别把它显示成 [object Object]
+    const detail: unknown = body?.detail
+    const text = typeof detail === 'string' ? detail
+      : Array.isArray(detail) ? detail.map((d) => (d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : '')).filter(Boolean).join('；') : ''
+    throw new ApiError(text || `请求失败（${resp.status}）`)
   }
   return resp.json()
 }
@@ -181,7 +185,7 @@ export const api = {
   runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
   parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
   persona: () => request<Persona>('/api/settings/persona'),
-  savePersona: (text: string) => request<Persona>('/api/settings/persona', { method: 'PUT', body: JSON.stringify({ text }) }),
+  savePersona: (text: string) => request<Persona>('/api/settings/persona', json('PUT', { text })),
   conversations: (q = '') => request<ConversationInfo[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   conversation: (id: string) => request<{ id: string; turns: ConversationTurn[] }>(`/api/conversations/${encodeURIComponent(id)}`),
   lessons: () => request<MemoryItem[]>('/api/lessons'),

@@ -19,7 +19,7 @@ from wealthpilot.storage.db import get_engine
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key", "web_search_api_key", "dingtalk_client_secret")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key", "web_search_api_key", "dingtalk_client_secret", "stt_api_key")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
@@ -30,7 +30,7 @@ EDITABLE = (
     "feishu_app_id", "feishu_app_secret", "feishu_api_base", "wecom_corp_id", "wecom_agent_id", "wecom_secret", "wecom_token", "wecom_aes_key",
     "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
     "ai_fallback", "ai_max_retries", "web_search", "web_search_api_key", "web_search_url",
-    "dingtalk_client_id", "dingtalk_client_secret",
+    "dingtalk_client_id", "dingtalk_client_secret", "vision_model", "stt_base_url", "stt_api_key", "stt_model",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
