@@ -17,8 +17,8 @@ const Toggle: React.FC<{ label: string; hint: string; checked: boolean; onChange
   </label>
 )
 
-type ChannelName = 'telegram' | 'feishu' | 'wecom'
-const CHANNEL_TABS = [['telegram', 'Telegram'], ['feishu', '飞书'], ['wecom', '企业微信']] as const
+type ChannelName = 'telegram' | 'feishu' | 'dingtalk' | 'wecom'
+const CHANNEL_TABS = [['telegram', 'Telegram'], ['feishu', '飞书'], ['dingtalk', '钉钉'], ['wecom', '企业微信']] as const
 
 /**
  * 手机触达：在 Telegram、飞书或企业微信里收简报和提醒、直接提问、处理建议单。
@@ -90,6 +90,21 @@ const Reach: React.FC<{
               <summary className="cursor-pointer select-none hover:text-ink">用的是海外版 Lark？</summary>
               <div className="mt-2">{text('s-fsbase', 'feishu_api_base', '接口地址', '飞书是 https://open.feishu.cn，Lark 是 https://open.larksuite.com')}</div>
             </details>
+            {info?.error ? <Callout tone="danger">{info.error}</Callout> : null}
+          </>
+        ) : tab === 'dingtalk' ? (
+          <>
+            <Callout tone="neutral">
+              不需要公网地址：由这台电脑主动连到钉钉（Stream 模式）。在<a className="mx-0.5 underline underline-offset-2" href="https://open-dev.dingtalk.com/" target="_blank" rel="noreferrer">钉钉开放平台</a>建一个「企业内部应用」，然后：
+              <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">
+                <li>添加应用能力里加上「机器人」，消息接收模式选「Stream 模式」；</li>
+                <li>权限管理里开通「企业内机器人发送消息」；</li>
+                <li>发布应用，把「凭证与基础信息」里的 Client ID 和 Client Secret 填到下面保存，然后<b>重启 WealthPilot</b>（长连接在启动时建立）；</li>
+                <li>在钉钉里搜到这个机器人，和它<b>单聊</b>，把配对码发给它。群里 @ 它不会有回应。</li>
+              </ol>
+            </Callout>
+            {text('s-ddid', 'dingtalk_client_id', 'Client ID（原 AppKey）', undefined, 'ding…')}
+            {secret('s-ddsecret', 'dingtalk_client_secret', 'Client Secret（原 AppSecret）')}
             {info?.error ? <Callout tone="danger">{info.error}</Callout> : null}
           </>
         ) : (
@@ -202,6 +217,8 @@ const VersionAndDoctor: React.FC = () => {
   )
 }
 
+// 模型有三个位置，各自存一套 Key 和模型名；主模型和备用模型各占一个
+const SLOTS = [{ value: 'anthropic', label: 'Claude（Anthropic）' }, { value: 'deepseek', label: 'DeepSeek' }, { value: 'openai', label: '其他兼容 OpenAI 接口的服务（含本机模型）' }]
 const KIND_LABEL: Record<string, string> = { stock_deep: '个股深度研究', stock_compare: '个股对比', holding_review: '持仓诊断', screen: '选股', review: '复盘',
   quick: '快速回答', rewrite: '改写 / 沿用证据', free: '自由问答', reuse: '原样复用' }
 const wan = (tokens: number) => (tokens / 1e4).toFixed(tokens >= 1e6 ? 0 : 1)
@@ -237,6 +254,48 @@ const UsagePanel: React.FC = () => {
       ) : <p className="text-[13px] text-steel">还没有用量记录。从这一版开始，每次调用模型都会记一笔。</p>}
       {u.today.tokens > 0 && u.today.cached_tokens > 0 ? <p className="text-[13px] text-steel">今天的输入里有 {Math.round((u.today.cached_tokens / Math.max(1, u.today.input_tokens)) * 100)}% 命中了服务商的缓存，这部分实际更便宜，所以折算的钱是个上限。</p> : null}
     </div>
+  )
+}
+
+/** 说话方式：用户自己写的一段话，告诉它怎么跟自己说话。单独保存，不和上面的配置搅在一起。 */
+const PersonaPanel: React.FC = () => {
+  const persona = useApi(api.persona)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const data = persona.data
+  useEffect(() => { if (data) setText(data.text) }, [data])
+  if (!data) return null
+  const save = async () => {
+    setBusy(true); setNote(null)
+    try {
+      await api.savePersona(text)
+      persona.reload()
+      setNote({ tone: 'success', text: text.trim() ? '已保存，下一个问题起生效' : '已清空，之后按默认的写法回答' })
+    } catch (err) {
+      setNote({ tone: 'danger', text: err instanceof Error ? err.message : '保存失败' })
+    } finally { setBusy(false) }
+  }
+  return (
+    <Section title="说话方式" hint="你希望它怎么跟你说话。只管语气、措辞和详略">
+      <div className="grid max-w-2xl gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[13px] text-steel">现成的：</span>
+          {data.presets.map((p) => (
+            <button key={p.key} type="button" onClick={() => setText(p.text)}
+              className={`rounded-full border px-2.5 py-0.5 text-[13px] transition-colors ${text.trim() === p.text.trim() ? 'border-primary text-ink' : 'border-hairline text-slate hover:bg-hover hover:text-ink'}`}>{p.label}</button>
+          ))}
+        </div>
+        <textarea id="s-persona" aria-label="说话方式" value={text} onChange={(e) => setText(e.target.value)} rows={7} maxLength={data.max_chars}
+          placeholder="例如：像一个懂行的朋友在跟我聊。先用大白话说结论，再说为什么；别用“综上所述”这类套话。"
+          className="w-full rounded-md border border-hairline-strong bg-canvas px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-stone focus:border-primary focus:ring-1 focus:ring-primary" />
+        <p className="text-[13px] text-steel">
+          这段话每次研究都会带给模型（{text.length} / {data.max_chars} 字）。它不会让证据引用、数字核对、必须有的章节和风险提示消失——那些规则优先。留空就是默认的写法。
+        </p>
+        {note ? <Callout tone={note.tone}>{note.text}</Callout> : null}
+        <div><Button variant="secondary" size="sm" loading={busy} onClick={() => void save()}>保存说话方式</Button></div>
+      </div>
+    </Section>
   )
 }
 
@@ -302,7 +361,7 @@ const SettingsPage: React.FC = () => {
 
             <Section title="模型" hint={`当前使用 ${data.active_model}`}>
               <div className="grid max-w-2xl gap-3 sm:grid-cols-2">
-                <Select id="s-provider" label="提供商" value={provider} onChange={(v) => set('ai_provider', v)} options={[{ value: 'anthropic', label: 'Claude（Anthropic）' }, { value: 'deepseek', label: 'DeepSeek' }, { value: 'openai', label: '其他兼容 OpenAI 接口的服务（含本机模型）' }]} />
+                <Select id="s-provider" label="提供商" value={provider} onChange={(v) => set('ai_provider', v)} options={SLOTS} />
                 <Input id="s-model" label="模型" value={String(form[modelField] ?? '')} onChange={(e) => set(modelField, e.target.value)}
                   placeholder={provider === 'openai' ? '照服务商文档里的模型名写' : undefined} />
                 {provider === 'openai' ? (
@@ -342,8 +401,40 @@ const SettingsPage: React.FC = () => {
                     value={keys[keyField] ?? ''} onChange={(e) => setKeys((k) => ({ ...k, [keyField]: e.target.value }))} />
                 </div>
               </div>
+              <div className="mt-4 max-w-2xl">
+                <Select id="s-fallback" label="备用模型" value={String(form.ai_fallback ?? '')} onChange={(v) => set('ai_fallback', v)}
+                  options={[{ value: '', label: '不用' }, ...SLOTS.filter((o) => o.value !== provider)]} />
+                <p className="mt-1 text-[13px] text-steel">
+                  主模型余额不足、Key 失效、被限流或连不上时，这一轮研究自动换到备用模型接着跑，回答上会注明。
+                  {form.ai_fallback && form.ai_fallback === data.values.ai_fallback && !data.fallback_active
+                    ? <span className="text-ink"> 现在还没生效：先把提供商切到那一家，把它的 Key 和模型名填好保存，再切回来。</span>
+                    : ' 备用的那一家要先配好自己的 Key 和模型名。'}
+                </p>
+              </div>
               <Button variant="secondary" size="sm" className="mt-3" loading={testing} onClick={() => void test()}>测试当前配置</Button>
             </Section>
+
+            <Section title="联网搜索" hint="固定数据源查不到的事（公司事件、政策原文、网上流传的说法），让它自己去搜">
+              <div className="grid max-w-2xl gap-3 sm:grid-cols-2">
+                <Select id="s-websearch" label="用哪家搜" value={String(form.web_search ?? 'auto')} onChange={(v) => set('web_search', v)}
+                  options={[{ value: 'auto', label: '不用 Key（读搜索引擎结果页）' }, { value: 'bocha', label: '博查' }, { value: 'tavily', label: 'Tavily' },
+                    { value: 'brave', label: 'Brave Search' }, { value: 'searxng', label: '自己搭的 SearXNG' }, { value: 'off', label: '关掉' }]} />
+                {['bocha', 'tavily', 'brave'].includes(String(form.web_search)) ? (
+                  <Input id="s-websearch-key" label="搜索服务的 Key" type="password" autoComplete="off"
+                    placeholder={data.secrets.web_search_api_key?.set ? `已配置（${data.secrets.web_search_api_key.hint}），留空表示不改` : '粘贴 Key'}
+                    value={keys.web_search_api_key ?? ''} onChange={(e) => setKeys((k) => ({ ...k, web_search_api_key: e.target.value }))} />
+                ) : null}
+                {form.web_search === 'searxng' ? (
+                  <Input id="s-websearch-url" label="SearXNG 的地址" placeholder="https://…" value={String(form.web_search_url ?? '')} onChange={(e) => set('web_search_url', e.target.value)} />
+                ) : null}
+              </div>
+              <p className="mt-2 max-w-2xl text-[13px] text-steel">
+                不用 Key 的方式不花钱，但对方随时可能改版或拦截，搜不到时它会如实说没搜到。网页是没核实过的东西：回答里引用网页会写明来源和日期，财务数字仍然只从财报数据取。
+                它只读公网上的网页，不会去碰你电脑上和内网里的地址。搜索词会发给搜索服务。
+              </p>
+            </Section>
+
+            <PersonaPanel />
 
             <Section title="用量与预算" hint="token 是服务商计费的单位；想看折成多少钱，把你那家的单价填上">
               <UsagePanel />

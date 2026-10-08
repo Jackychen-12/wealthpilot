@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：51 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、资金与筹码、一致预期与消息、选股）、基金查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：53 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、资金与筹码、一致预期与消息、选股、联网搜索）、基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -463,6 +463,20 @@ async def get_business_segments(code: str) -> str:
     """Revenue mix by product, region and industry with gross margins.
     主营构成：按产品、地区、行业拆分的收入占比与毛利率。"""
     return await execute_tool("get_business_segments", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def web_search(query: str, limit: int = 5) -> str:
+    """Search the public web for things the fixed data sources do not cover (company events, policy texts, claims going around). Results are unverified.
+    联网搜索：公司事件、政策原文、网上流传的说法。结果是没核实过的网页摘录。"""
+    return await execute_tool("web_search", {"query": query, "limit": limit}, [], {}, None)
+
+
+@mcp.tool()
+async def read_webpage(url: str) -> str:
+    """Read the main text of a public web page (first few thousand characters). Local and private-network addresses are refused.
+    读一个公网网页的正文；本机和内网地址不读。"""
+    return await execute_tool("read_webpage", {"url": url}, [], {}, None)
 
 
 def main() -> None:

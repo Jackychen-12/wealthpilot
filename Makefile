@@ -2,7 +2,7 @@
 
 setup:           ## 首次配置：复制 .env、安装依赖
 	@test -f backend/.env || cp backend/.env.example backend/.env
-	cd backend && uv sync --extra dev --extra feishu
+	cd backend && uv sync --extra dev --extra feishu --extra dingtalk
 	npm --prefix workbench install
 	npm --prefix workbench run build -- --outDir dist-app --emptyOutDir
 	@echo ""

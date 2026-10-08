@@ -2,6 +2,24 @@
 
 升级：在终端运行 `wealthpilot update`（会先备份数据库；Docker 部署见 README）。
 
+## 0.8.0 — 2026-10-08
+
+- 说话方式：自己写一段话告诉它怎么跟你说话（数据目录下的 SOUL.md，`wealthpilot persona` 或网页设置），带四个现成的；只管语气和详略，证据引用和校验规则不受影响
+- 联网搜索：固定数据源查不到的事（公司事件、政策原文、网上流传的说法）它会自己去搜、去读网页；不用 Key 也能用，想稳定可以接博查 / Tavily / Brave / SearXNG；只读公网网页
+- 钉钉：在钉钉里和机器人单聊，长连接，不需要公网地址
+- 手机上可以发截图和语音：先转成文字给你看一眼，再照着查（看图要配一个能看图的模型，语音要配转写服务；钉钉的语音不用配）
+- 工具从 51 个变成 53 个
+
+## 0.7.0 — 2026-10-08
+
+- 备用模型：主模型余额不足、Key 失效、被限流、连不上时，这一轮研究自动换到备用模型接着跑，回答上会注明（`wealthpilot model fallback <服务>`，或网页设置）
+- 日志：研究失败、推送没发出去、盯盘出错都记进文件，`wealthpilot logs --errors` 看出问题的；写入前抹掉 Key
+- 备份与恢复：`wealthpilot backup` / `restore`，换电脑、重装、回到某一天；恢复前自动备份现状
+- 手机里补齐命令：`/stop` `/deep` `/rewrite` `/status` `/usage` `/holdings` `/watch` `/tasks`；连发两条不再同时跑两次研究
+- `wealthpilot channels`：不开网页也能配 Telegram、飞书、企业微信并生成配对码
+- 找以前的会话：`wealthpilot sessions 宁德时代`、终端 `/sessions 关键词`、网页历史会话里的搜索框；`wealthpilot -c` 接着上一个会话
+- 终端新增 `/model`（换模型、设备用）、`/usage`、`/retry`、`/export`、`/logs`；`wealthpilot completion zsh|bash` 生成 Tab 补全
+
 ## 0.6.0 — 2026-10-08
 
 - 一条命令安装：`curl … install.sh | bash`。没有 uv 会先装，代码放在 `~/.wealthpilot/app`，数据（配置、数据库、研究方法）单独放在 `~/.wealthpilot`，升级和重装都不动它

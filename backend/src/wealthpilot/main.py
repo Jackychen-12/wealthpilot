@@ -1,6 +1,7 @@
 """FastAPI 入口。"""
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from wealthpilot import __version__
 from wealthpilot.routes import api_router
-from wealthpilot.services import background
+from wealthpilot.services import background, logs
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_engine
 
@@ -22,6 +23,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.ensure_dirs()
     get_engine()  # 初始化数据库表
+    logs.setup()
+    logging.getLogger("wealthpilot").info("服务启动 v%s 模型=%s·%s", __version__, settings.ai_provider, settings.active_model)
     if not os.environ.get("WEALTHPILOT_QUIET"):   # 终端入口在后台带起服务时不打这两行，免得搅乱界面
         print(f"🚀 WealthPilot Backend v{__version__}")
         print(f"📂 DB: {settings.db_path.resolve()}")

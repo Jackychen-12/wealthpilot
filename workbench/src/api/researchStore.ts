@@ -24,6 +24,8 @@ export interface Turn {
   etaTokens: number
   /** 研究没成是因为模型用不了：balance / auth / model / rate_limit / network / budget / not_configured */
   reason: string
+  /** 主模型这一轮用不了，中途换到了备用模型：换到哪个、因为什么 */
+  fallback?: { model: string; reason: string; message: string } | null
   /** 这次没有重新取数，沿用了之前那次研究的数据 */
   reused: Reused | null
   /** 后端存下的消息 ID —— 之后“更短一点”这类改写靠它找到这次研究的证据 */
@@ -117,7 +119,7 @@ function apply(turn: Turn, e: StreamEvent): Turn {
       return { ...turn, answer: e.content || turn.answer, status: e.meta?.status || 'passed', running: false,
         missing: e.meta?.missing_evidence || [], followUps: e.follow_ups || [], usage: e.meta?.usage ?? null,
         summary: e.meta?.summary ?? null, messageId: e.meta?.message_id ?? null, playbook: turn.playbook || e.meta?.playbook || '',
-        reason: e.meta?.reason || '', reused: e.meta?.reused ?? turn.reused, debate: turn.debate ?? e.meta?.debate ?? null }
+        reason: e.meta?.reason || '', reused: e.meta?.reused ?? turn.reused, debate: turn.debate ?? e.meta?.debate ?? null, fallback: e.meta?.fallback ?? null }
     default: return turn
   }
 }

@@ -71,6 +71,15 @@ class Settings(BaseSettings):
 
     skills_dir: Path = Field(default=Path("./skills"), description="技能目录：用户自己写的研究方法（Markdown）")
     light_model: str = Field(default="", description="提取证券名、审核证据、提出验证点等轻活用的模型；留空则与主模型相同")
+    vision_model: str = Field(default="", description="能看图的模型名（用在兼容服务那个位置上，如 glm-4v-flash、qwen-vl-plus、llava）；留空时有 Claude 的 Key 就用 Claude 看图")
+    stt_base_url: str = Field(default="", description="语音转文字服务的接口地址（兼容 OpenAI /audio/transcriptions）")
+    stt_api_key: str = Field(default="", description="语音转文字服务的 Key")
+    stt_model: str = Field(default="", description="语音转文字的模型名，如 FunAudioLLM/SenseVoiceSmall、whisper-1")
+    web_search: str = Field(default="auto", description="联网搜索用哪家：auto（不用 Key，读搜索引擎结果页，不稳定）/ bocha / tavily / brave / searxng / off")
+    web_search_api_key: str = Field(default="", description="搜索服务的 Key（bocha / tavily / brave）")
+    web_search_url: str = Field(default="", description="自己搭的 SearXNG 的地址")
+    ai_fallback: str = Field(default="", description="备用模型用哪一家（deepseek / anthropic / openai）：主模型余额不足、Key 失效、限流、连不上时，这一轮自动换过去。留空不启用")
+    ai_max_retries: int = Field(default=3, ge=0, le=8, description="限流、超时、服务端出错时自动重试几次（按服务商给的等待时间退避）")
     checkpoints_enabled: bool = Field(default=True, description="研究发布后提出可事后核对的验证点")
     debate_enabled: bool = Field(default=True, description="个股深度研究时，撰写前先让看多、看空两方就同一批证据各自陈述")
     advice_mode: bool = Field(
@@ -97,6 +106,8 @@ class Settings(BaseSettings):
     # 飞书：企业自建应用，事件订阅选"长连接"。不需要公网地址
     feishu_app_id: str = Field(default="", description="飞书应用的 App ID")
     feishu_app_secret: str = Field(default="", description="飞书应用的 App Secret")
+    dingtalk_client_id: str = Field(default="", description="钉钉应用的 Client ID（原 AppKey）")
+    dingtalk_client_secret: str = Field(default="", description="钉钉应用的 Client Secret（原 AppSecret）")
     feishu_api_base: str = Field(default="https://open.feishu.cn", description="飞书接口地址；海外版 Lark 用 https://open.larksuite.com")
     # 企业微信：自建应用，接收消息要填回调地址（需要公网能访问）
     wecom_corp_id: str = Field(default="", description="企业 ID")

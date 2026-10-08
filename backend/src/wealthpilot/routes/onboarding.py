@@ -134,11 +134,13 @@ async def add_holdings(body: dict, db: Session = Depends(get_session), user_id: 
 @router.get("/channel")
 def channel_status():
     """每个渠道配没配好、绑没绑定。保留顶层的 configured / paired（Telegram 的），老页面还在用。"""
-    from wealthpilot.services import feishu
+    from wealthpilot.services import dingtalk, feishu
     listed = channels.status_all()
     for item in listed:
         if item["channel"] == "feishu":
             item["error"] = feishu.listener_error()
+        if item["channel"] == "dingtalk":
+            item["error"] = dingtalk.listener_error()
     return {**channels.status("telegram"), "channels": listed}
 
 
@@ -209,6 +211,11 @@ async def wecom_receive(request: Request, msg_signature: str = "", timestamp: st
     bot = wecom.bot()
     if parsed and bot is not None and wecom.fresh(parsed[2]):
         task = asyncio.create_task(bot.message(parsed[0], parsed[1]))
+        _wecom_tasks.add(task)
+        task.add_done_callback(_wecom_tasks.discard)
+    sender = wecom.unsupported_from(inner)
+    if sender and bot is not None and sender == channels.owner("wecom") and wecom.fresh(wecom._field(inner, "MsgId")):
+        task = asyncio.create_task(bot.api.send(sender, "企业微信这边暂时只收文字。图片和语音可以在 Telegram、飞书或钉钉里发，或者把内容打成文字发给我。"))
         _wecom_tasks.add(task)
         task.add_done_callback(_wecom_tasks.discard)
     return ""

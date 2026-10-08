@@ -41,7 +41,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   }
   if (!resp.ok) {
     const body = await resp.json().catch(() => null)
-    throw new ApiError(body?.detail ? String(body.detail) : `请求失败（${resp.status}）`)
+    // detail 通常是一句话；后端校验请求格式失败时它是一个数组 —— 别把它显示成 [object Object]
+    const detail: unknown = body?.detail
+    const text = typeof detail === 'string' ? detail
+      : Array.isArray(detail) ? detail.map((d) => (d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : '')).filter(Boolean).join('；') : ''
+    throw new ApiError(text || `请求失败（${resp.status}）`)
   }
   return resp.json()
 }
@@ -180,7 +184,9 @@ export const api = {
   removeAutomation: (id: number) => request<unknown>(`/api/automations/${id}`, { method: 'DELETE' }),
   runAutomation: (id: number) => request<Automation & { current?: number | null; hit?: boolean }>(`/api/automations/${id}/run`, { method: 'POST' }),
   parseSchedule: (text: string) => request<{ text: string }>('/api/automations/schedule/parse', json('POST', { text })),
-  conversations: () => request<ConversationInfo[]>('/api/conversations'),
+  persona: () => request<Persona>('/api/settings/persona'),
+  savePersona: (text: string) => request<Persona>('/api/settings/persona', json('PUT', { text })),
+  conversations: (q = '') => request<ConversationInfo[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   conversation: (id: string) => request<{ id: string; turns: ConversationTurn[] }>(`/api/conversations/${encodeURIComponent(id)}`),
   lessons: () => request<MemoryItem[]>('/api/lessons'),
   reflect: () => request<{ added: MemoryItem[] }>('/api/lessons/reflect', { method: 'POST' }),
@@ -229,8 +235,9 @@ export interface Backtest {
 export interface FundInfo { code: string; name: string; nav: number; nav_date: string; estimated_change?: number; manager?: string; company?: string; scale?: string; type?: string; benchmark?: string
   return_1w?: string; return_1m?: string; return_3m?: string; return_1y?: string }
 export interface NavPoint { nav_date: string; nav: number; daily_return: number; open?: number; high?: number; low?: number; volume?: number }
+export interface Persona { text: string; path: string; max_chars: number; presets: { key: string; label: string; text: string }[] }
 export interface ModelPreset { key: string; label: string; provider: string; base_url: string; model: string; needs_key: boolean; note: string; key_page: string }
-export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; env_file: string; presets?: ModelPreset[] }
+export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; fallback_active?: string; env_file: string; presets?: ModelPreset[] }
 export interface StockQuote { code: string; name: string; price: number; prev_close: number; open: number; high: number; low: number
   change: number; change_pct: number; amount_yi: number | null; turnover_pct: number | null; pe_ttm: number | null; pb: number | null
   total_mv_yi: number | null; quote_time: string }
@@ -322,7 +329,7 @@ export interface StockNews { date: string; title: string; summary: string; media
 export interface Survey { notice_date: string; date: string; way: string; place: string; participants: number; content: string }
 export interface Segment { name: string; revenue_yi: number | null; revenue_ratio_pct: number | null; gross_margin_pct: number | null }
 export interface Segments { report_date: string; report_name: string; by_industry: Segment[]; by_product: Segment[]; by_region: Segment[] }
-export interface ConversationInfo { id: string; title: string; turns: number; last_at: string; securities: Security[]; source: string; last_status: string }
+export interface ConversationInfo { id: string; title: string; turns: number; last_at: string; securities: Security[]; source: string; last_status: string; match?: string }
 export interface ConversationTurn { message_id: number; created_at: string; question: string; answer: string; checkpoints: Checkpoint[]; proposals: Proposal[]
   meta: { status?: string; playbook?: string; intent?: string; securities?: Security[]; tasks?: { id: string; agent: string; goal: string }[]
     evidence?: NonNullable<StreamEvent['evidence']>[]; summary?: SummaryCard | null; debate?: Debate | null; seconds?: number; usage?: Usage; depth?: string
@@ -387,7 +394,7 @@ export interface StreamEvent {
   bull?: DebateSide; bear?: DebateSide
   meta?: { status?: string; grounding_rate?: number; missing_evidence?: string[]; playbook?: string; usage?: Usage
     summary?: SummaryCard | null; message_id?: number | null; seconds?: number; depth?: string; debate?: Debate | null
-    reason?: string; reused?: Reused | null }
+    reason?: string; reused?: Reused | null; fallback?: { model: string; reason: string; message: string } | null }
 }
 
 export async function* streamChat(

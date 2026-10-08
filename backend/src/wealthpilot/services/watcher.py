@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from datetime import date, datetime, timedelta
 
 from sqlmodel import Session, select
@@ -216,6 +217,6 @@ async def scheduler() -> None:
                             if last is None or last.day < str(due):
                                 await run(db, uid)
         except Exception:  # noqa: BLE001 — 调度循环不能因为一次失败就停
-            pass
+            logging.getLogger("wealthpilot.watch").exception("每日盯盘这一次出错了")
         rounds += 1
         await asyncio.sleep(60)

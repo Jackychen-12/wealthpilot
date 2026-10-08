@@ -10,7 +10,7 @@ client = TestClient(app)
 
 def test_lists_all_agent_tools_by_group():
     listed = client.get("/api/tools").json()
-    assert len(listed) == 51
+    assert len(listed) == 53
     assert {t["group"] for t in listed} == {"fundamental", "valuation", "price", "industry", "capital", "expectation",
                                             "screener", "portfolio", "fund", "review"}
 

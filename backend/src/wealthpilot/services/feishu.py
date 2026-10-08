@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import threading
 import time
@@ -58,6 +59,33 @@ class Feishu:
                 raise RuntimeError(f"飞书没有接受这条消息：{data.get('msg') or data.get('code')}")
 
 
+async def _download(self: Feishu, message_id: str, key: str, kind: str) -> bytes:
+    """取回用户发来的图片或语音。"""
+    token = await self.token()
+    resp = await self._http.get(f"{self._base}/open-apis/im/v1/messages/{message_id}/resources/{key}",
+                                params={"type": "image" if kind == "image" else "file"}, headers={"Authorization": f"Bearer {token}"})
+    if resp.status_code >= 400:
+        raise RuntimeError(f"飞书没有给出这个文件（{resp.status_code}）。应用需要「获取与上传图片或文件资源」权限。")
+    return resp.content
+
+
+Feishu.download = _download   # type: ignore[attr-defined]
+
+
+def parse_media(data) -> tuple[str, str, str, str] | None:
+    """图片或语音消息 →（会话 ID, image / voice, 消息 ID, 文件的 key）。其他类型返回 None。"""
+    message = getattr(getattr(data, "event", None), "message", None)
+    kind = {"image": "image", "audio": "voice"}.get(getattr(message, "message_type", ""))
+    if message is None or kind is None:
+        return None
+    try:
+        content = json.loads(message.content or "{}")
+    except ValueError:
+        return None
+    key = str(content.get("image_key") or content.get("file_key") or "")
+    return (str(message.chat_id), kind, str(message.message_id), key) if message.chat_id and key else None
+
+
 def parse_event(data) -> tuple[str, str, str] | None:
     """从 SDK 的"收到消息"事件里取出（会话 ID, 文字, 消息 ID）。不是文字消息返回 None。"""
     message = getattr(getattr(data, "event", None), "message", None)
@@ -80,6 +108,15 @@ class Listener:
         self.error = ""
 
     def on_message(self, data) -> None:
+        media = parse_media(data)
+        if media is not None:
+            chat_id, kind, message_id, key = media
+            if message_id not in self.seen:
+                self.seen = [*self.seen[-200:], message_id]
+                api = self.bot.api
+                asyncio.run_coroutine_threadsafe(
+                    self.bot.media(chat_id, kind, lambda: api.download(message_id, key, kind), filename="voice.opus"), self.loop)
+            return
         parsed = parse_event(data)
         if parsed is None:
             return
@@ -104,6 +141,7 @@ class Listener:
             self.error = "没有安装飞书的 SDK：在仓库的 backend 目录运行 uv sync --extra feishu（或重新 make setup）"
         except Exception as e:  # noqa: BLE001 — 连不上、凭证不对：记下来给自检和设置页看
             self.error = f"飞书长连接断开：{e}"
+            logging.getLogger("wealthpilot.channel").warning("%s", self.error)
 
     def start(self) -> threading.Thread:
         thread = threading.Thread(target=self._run, daemon=True, name="wp-feishu")

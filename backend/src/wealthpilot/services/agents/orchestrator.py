@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import statistics
 import time
@@ -29,7 +30,7 @@ from sqlmodel import Session, select
 from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services import budget, checkpoints, memory, summary
+from wealthpilot.services import budget, checkpoints, logs, memory, summary
 from wealthpilot.services.agents import debate
 from wealthpilot.services.agents.base import AgentResult
 from wealthpilot.services.agents.critic_agent import (
@@ -52,12 +53,19 @@ from wealthpilot.services.agents.synthesizer_agent import (
     check_numeric_grounding,
     strip_ungrounded,
 )
-from wealthpilot.services.ai_client import ModelUnavailableError, Usage, create_ai_client
+from wealthpilot.services.ai_client import (
+    FailoverClient,
+    ModelUnavailableError,
+    Usage,
+    create_ai_client,
+)
 from wealthpilot.services.checkpoints import ACTIVE_USER
 from wealthpilot.services.connectors import agent_tools
 from wealthpilot.services.evidence import ToolSession
 from wealthpilot.services.securities import resolve_names, resolve_text
 from wealthpilot.settings import get_settings
+
+log = logging.getLogger("wealthpilot.run")
 
 
 async def chat_stream(
@@ -208,12 +216,30 @@ async def _run_pipeline(
         await emit({"type": "done", "content": over, "meta": {"status": "failed", "reason": "budget"}})
         return
     run = {"kind": "rewrite" if rewrite_of is not None else "free"}
+
+    def switched() -> dict | None:
+        return client.fallback_info() if isinstance(client, FailoverClient) else None
+
+    async def tell(event: dict) -> None:
+        # 中途换到了备用模型：在收尾事件里如实带上，界面上要看得见这一轮不是主模型答的
+        if event.get("type") == "done" and switched():
+            event = {**event, "meta": {**(event.get("meta") or {}), "fallback": switched()}}
+        if event.get("type") == "done":
+            meta = event.get("meta") or {}
+            used = getattr(client, "usage", None)
+            log.log(logging.INFO if meta.get("status") in ("passed", "partial") else logging.WARNING,
+                    "研究结束 状态=%s%s 用时=%.0f秒 token=%s 类型=%s 问题=%s", meta.get("status"), f" 原因={meta['reason']}" if meta.get("reason") else "",
+                    time.monotonic() - started, used.input + used.output if isinstance(used, Usage) else 0, run["kind"], logs.brief(message))
+        elif event.get("type") == "error":
+            log.warning("研究途中报错：%s", str(event.get("content") or "")[:200])
+        await emit(event)
     try:
         await _research(client, settings, started, run, message, history, holdings, nav_data, nav_history,
-                        conversation_id, db_session, profile, user_id, emit, depth, rewrite_of)
+                        conversation_id, db_session, profile, user_id, tell, depth, rewrite_of)
     finally:
         # 不管成没成、是不是中途被取消，花掉的 token 都记一笔
-        budget.record(user_id or 0, getattr(client, "usage", None) or Usage(), settings.active_model, run["kind"])
+        used = switched()
+        budget.record(user_id or 0, getattr(client, "usage", None) or Usage(), used["model"] if used else settings.active_model, run["kind"])
 
 
 def compact_history(messages: list[dict], keep: int = 6) -> list[dict]:

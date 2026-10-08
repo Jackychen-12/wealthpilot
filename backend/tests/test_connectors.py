@@ -1,6 +1,7 @@
 """外部 MCP 连接器：只读约束、配置加载、凭据不外泄，以及一次真实的 stdio 连通。"""
 
 import json
+import os
 import sys
 
 import pytest
@@ -79,11 +80,13 @@ def test_unreachable_connector_reports_failure(config):
 
 async def test_real_stdio_connection_lists_tools_and_feeds_the_agent(config):
     """把本项目自己的 MCP Server 当外部服务连一次 —— 整条链路的真实验证。"""
-    config([{"name": "self", "label": "自测", "transport": "stdio",
-             "command": sys.executable, "args": ["-m", "wealthpilot", "mcp"]}])
+    # 子进程不继承这边的环境变量（MCP 的 stdio 客户端只给一份最小环境），得显式把数据目录指到测试用的临时目录，
+    # 否则它读的是开发者自己的 backend/.env，日志也会写到真实的数据目录里
+    config([{"name": "self", "label": "自测", "transport": "stdio", "command": "/usr/bin/env",
+             "args": [f"WEALTHPILOT_HOME={os.environ['WEALTHPILOT_HOME']}", f"DB_PATH={os.environ['DB_PATH']}", sys.executable, "-m", "wealthpilot", "mcp"]}])
     connector = svc.load_connectors()[0]
     tools = await svc.list_tools(connector)
-    assert len(tools) == 51 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
+    assert len(tools) == 53 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
 
     definitions, index = await svc.agent_tools()
     assert "ext_self_get_stock_quote" in index

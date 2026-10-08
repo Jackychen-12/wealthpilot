@@ -82,6 +82,11 @@ def parse_message(xml: str) -> tuple[str, str, str] | None:
     return (user, text, _field(xml, "MsgId")) if user and text else None
 
 
+def unsupported_from(xml: str) -> str:
+    """成员发来的是图片或语音时，返回他的账号（好回一句"这里只收文字"）；否则空串。"""
+    return _field(xml, "FromUserName") if _field(xml, "MsgType") in ("image", "voice", "video", "file") else ""
+
+
 class WeCom:
     """只管发：换取 access_token，给一个成员发应用消息。"""
 

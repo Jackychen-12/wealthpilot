@@ -65,7 +65,7 @@ else
 fi
 
 step "3/4 安装依赖"
-(cd "$APP/backend" && uv sync --quiet --extra feishu) || fail "依赖没装上。多半是网络问题，稍后重新运行这个脚本即可（会接着装）。"
+(cd "$APP/backend" && uv sync --quiet --extra feishu --extra dingtalk) || fail "依赖没装上。多半是网络问题，稍后重新运行这个脚本即可（会接着装）。"
 say "✓ 依赖装好了"
 if [ "${WEALTHPILOT_SKIP_WEB:-}" = "1" ]; then
   say "· 按你的要求跳过了网页版"

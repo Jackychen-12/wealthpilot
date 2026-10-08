@@ -231,3 +231,56 @@ def test_the_installer_parses_and_uninstall_keeps_your_data(tmp_path):
                           env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "WEALTHPILOT_HOME": str(data), "WEALTHPILOT_BIN_DIR": str(bin_dir)})
     assert done.returncode == 0 and "数据还在" in done.stdout
     assert not app.exists() and not (bin_dir / "wealthpilot").exists() and (data / ".env").exists()
+
+
+def test_channels_can_be_set_up_and_paired_without_the_web_page(monkeypatch):
+    from wealthpilot.services import channels
+
+    def run(*words, **flags):
+        out: list[str] = []
+        base = dict(action=words[0] if words else None, name=words[1] if len(words) > 1 else None,
+                    token=None, app_id=None, app_secret=None, client_id=None, client_secret=None, corp_id=None, agent_id=None, secret=None, aes_key=None)
+        return cli.cmd_channels(argparse.Namespace(**{**base, **flags}), out=out.append), "\n".join(out)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    channels.set_owner(None, "telegram")
+    channels.set_owner(None, "feishu")
+    channels.set_owner(None, "dingtalk")
+    code, text = run()
+    assert code == 0 and text.count("没有配置") == 4 and "@BotFather" in text and "Stream 模式" in text and "开着的时候" in text
+    assert run("pair", "telegram")[0] == 1 and run("setup", "telegram")[0] == 2 and run("pair")[0] == 2      # 没配好不给码；没说哪个渠道
+    code, text = run("setup", "feishu", app_id="cli_test")
+    assert code == 1 and "--app-secret" in text                                                               # 存了一半：说还缺什么
+    code, text = run("setup", "dingtalk", client_id="dingtest1", client_secret="not-a-real-secret-000")
+    assert code == 0 and channels.configured("dingtalk") and "channels pair dingtalk" in text and "not-a-real-secret" not in text
+    code, text = run("setup", "telegram", token="123456:not-a-real-token-000000000000")
+    assert code == 0 and "channels pair telegram" in text and "not-a-real-token" not in text
+    code, text = run("pair", "telegram")
+    pair = text.split("配对码：")[1][:6]
+    assert code == 0 and channels._pair_matches(pair, "telegram") and "/pair " + pair in text
+    assert "配好了，还没绑定" in run()[1]
+    assert run("test", "telegram")[0] == 1                                                                    # 还没绑定：不发
+    channels.set_owner(42, "telegram")
+    sent = []
+
+    class Api:
+        async def send(self, chat_id, text, buttons=None):
+            sent.append((chat_id, text))
+    monkeypatch.setattr(channels, "_api_for", lambda name: Api())
+    assert run("test", "telegram")[0] == 0 and sent[0][0] == 42 and "已绑定" in run()[1]
+    assert run("unpair", "telegram")[0] == 0 and channels.owner("telegram") is None
+
+
+def test_tab_completion_knows_the_commands_and_their_actions(tmp_path):
+    import subprocess
+    import sys
+    bash = subprocess.run([sys.executable, "-m", "wealthpilot", "completion", "bash"], capture_output=True, text=True)
+    zsh = subprocess.run([sys.executable, "-m", "wealthpilot", "completion", "zsh"], capture_output=True, text=True)
+    assert bash.returncode == 0 and zsh.returncode == 0 and "compdef _wealthpilot wealthpilot" in zsh.stdout
+    script = tmp_path / "completion.bash"
+    script.write_text(bash.stdout, encoding="utf-8")
+    probe = (f"source '{script}'; COMP_WORDS=(wealthpilot ba); COMP_CWORD=1; _wealthpilot; echo \"${{COMPREPLY[*]}}\"; "
+             "COMP_WORDS=(wealthpilot model f); COMP_CWORD=2; _wealthpilot; echo \"${COMPREPLY[*]}\"")
+    done = subprocess.run(["bash", "-c", probe], capture_output=True, text=True)
+    assert done.stdout.split("\n")[:2] == ["backup", "fallback"], done.stderr
+    for name in ("setup", "logs", "restore", "channels", "sessions"):
+        assert f"'{name}:" in zsh.stdout          # 新加的命令不用改补全脚本，直接就有

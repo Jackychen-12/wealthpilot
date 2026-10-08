@@ -12,13 +12,14 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from wealthpilot.services import memory, providers
+from wealthpilot.services.ai_client import fallback_provider
 from wealthpilot.settings import HOME, Settings, get_settings, reload_settings
 from wealthpilot.storage.db import get_engine
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ENV_FILE = HOME / ".env"
-_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key")
+_SECRETS = ("anthropic_api_key", "deepseek_api_key", "openai_api_key", "telegram_bot_token", "feishu_app_secret", "wecom_secret", "wecom_token", "wecom_aes_key", "web_search_api_key", "dingtalk_client_secret", "stt_api_key")
 # 网页上能改的项：字段名 -> 说明。其余配置（JWT 密钥、数据库路径等）仍只能改文件
 EDITABLE = (
     "ai_provider", "anthropic_api_key", "anthropic_model", "deepseek_api_key", "deepseek_model",
@@ -28,6 +29,8 @@ EDITABLE = (
     "telegram_bot_token", "telegram_api_base", "auto_daily_runs_max", "update_check",
     "feishu_app_id", "feishu_app_secret", "feishu_api_base", "wecom_corp_id", "wecom_agent_id", "wecom_secret", "wecom_token", "wecom_aes_key",
     "daily_token_budget", "token_price_input", "token_price_output", "research_reuse_hours", "debate_enabled",
+    "ai_fallback", "ai_max_retries", "web_search", "web_search_api_key", "web_search_url",
+    "dingtalk_client_id", "dingtalk_client_secret", "vision_model", "stt_base_url", "stt_api_key", "stt_model",
 )
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -50,7 +53,7 @@ def _view() -> dict:
         "secrets": {k: {"set": bool(getattr(s, k)) and not getattr(s, k).endswith("xxx"), "hint": _mask(getattr(s, k))} for k in _SECRETS},
         # 进程环境变量（Docker、shell 里 export 的）优先级高于 .env，这些项在网页上改了也不会生效
         "overridden": [k for k in EDITABLE if k.upper() in os.environ],
-        "active_model": s.active_model, "env_file": str(ENV_FILE.resolve()),
+        "active_model": s.active_model, "fallback_active": fallback_provider(s), "env_file": str(ENV_FILE.resolve()),
         "presets": [p for p in providers.PRESETS if p["provider"] == "openai"],
     }
 
@@ -118,6 +121,10 @@ def apply_changes(body: dict) -> list[str]:
             raise ValueError(f"{k} 不能包含换行")
     if changes.get("ai_provider") not in (None, "anthropic", "deepseek", "openai") or changes.get("broker") not in (None, "none", "paper"):
         raise ValueError("取值不合法")
+    if str(changes.get("ai_fallback") or "").strip().lower() not in ("", "anthropic", "deepseek", "openai"):
+        raise ValueError("备用模型只能是 deepseek、anthropic、openai 之一，或留空")
+    if "web_search" in changes and str(changes["web_search"]).strip().lower() not in ("auto", "off", "bocha", "tavily", "brave", "searxng"):
+        raise ValueError("联网搜索只能是 auto、bocha、tavily、brave、searxng、off 之一")
     try:   # 先用模型校验一遍，别把写不合法的值落到文件里
         Settings(**{**get_settings().model_dump(), **changes})
     except ValidationError as e:
@@ -127,6 +134,27 @@ def apply_changes(body: dict) -> list[str]:
     with Session(get_engine()) as db:   # 只记改了哪些项，不记值（里面可能有 Key）
         memory.record(db, get_settings().local_user_id, "settings/changed", "、".join(sorted(changes)), {"keys": sorted(changes)}, actor="user")
     return sorted(changes)
+
+
+@router.get("/persona")
+def get_persona():
+    """说话方式：现在写的是什么、有哪些现成的可以直接用。"""
+    from wealthpilot.services import persona
+    return {"text": persona.read(), "path": str(persona.FILE), "max_chars": persona.MAX_CHARS,
+            "presets": [{"key": k, "label": label, "text": text} for k, (label, text) in persona.PRESETS.items()]}
+
+
+@router.put("/persona")
+def put_persona(body: dict, request: Request):
+    from wealthpilot.services import persona
+    _local_only(request)
+    try:
+        text = persona.write(str(body.get("text") or ""))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    with Session(get_engine()) as db:
+        memory.record(db, get_settings().local_user_id, "settings/changed", "说话方式", {"keys": ["persona"], "chars": len(text)}, actor="user")
+    return {**get_persona(), "text": text}
 
 
 @router.put("")

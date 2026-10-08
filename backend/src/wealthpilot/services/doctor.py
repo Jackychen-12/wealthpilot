@@ -46,9 +46,29 @@ async def _sources() -> list[dict]:
               ("资金流向（新浪）", lambda: capital._sina_json("MoneyFlow.ssi_ssfx_flzjtj", {"daima": "sh600519"}), "资金流向"),
               ("一致预期与筹码（东方财富数据中心）", consensus, "一致预期、融资融券、股东与机构持仓、增减持")]
     results = await asyncio.gather(*[_timed(call) for _, call, _ in probes])
-    return [_item(name, "ok" if ok else "fail", f"{seconds:.1f} 秒" if ok else "取不到数据",
-                  "" if ok else f"影响：{used}。多半是网络或对方限流，过几分钟再试；公司网络可能需要代理。")
-            for (name, _, used), (ok, seconds) in zip(probes, results, strict=True)]
+    items = [_item(name, "ok" if ok else "fail", f"{seconds:.1f} 秒" if ok else "取不到数据",
+                   "" if ok else f"影响：{used}。多半是网络或对方限流，过几分钟再试；公司网络可能需要代理。")
+             for (name, _, used), (ok, seconds) in zip(probes, results, strict=True)]
+    return [*items, await _web_search()]
+
+
+async def _web_search() -> dict:
+    """联网搜索是锦上添花：不通只算提醒，不算不通 —— 固定数据源在，研究照样能做。"""
+    from wealthpilot.services import websearch
+    provider = (get_settings().web_search or "auto").lower()
+    label = websearch.PROVIDERS.get(provider, provider)
+    if provider == "off":
+        return _item("联网搜索", "ok", "已关掉")
+    try:
+        found = await websearch.search("贵州茅台 最新消息", 3)
+    except Exception as e:  # noqa: BLE001
+        found = {"results": [], "error": type(e).__name__}
+    if found["results"]:
+        return _item("联网搜索", "ok", f"{found['engine']}，搜得到")
+    fix = ("不用 Key 的搜索入口本来就不稳定，过一会儿可能自己好。想稳定：wealthpilot config set web_search bocha（或 tavily / brave），"
+           "再 config set web_search_api_key <Key>；不想要：config set web_search off。" if provider == "auto"
+           else "检查 Key 和网络：wealthpilot config get web_search；或者先换回 auto。")
+    return _item("联网搜索", "warn", f"{label}：{found.get('error') or '没有搜到'}", fix)
 
 
 def _model(online: bool) -> dict:
@@ -114,7 +134,7 @@ def _web(port: int, serving: bool) -> list[dict]:
 
 
 async def _reach() -> dict:
-    from wealthpilot.services import channels, feishu
+    from wealthpilot.services import channels, dingtalk, feishu
 
     settings = get_settings()
     listed = channels.status_all()
@@ -129,6 +149,8 @@ async def _reach() -> dict:
             problems.append(f"连不上 Telegram：{str(e)[:80]}（令牌写错了，或者本机到不了 api.telegram.org）")
     if feishu.listener_error():
         problems.append(feishu.listener_error())
+    if dingtalk.listener_error():
+        problems.append(dingtalk.listener_error())
     summary = "、".join(f"{c['label']}{'已绑定' if c['paired'] else '未绑定'}" for c in ready)
     if problems:
         return _item("手机触达", "fail", summary, "；".join(problems))
@@ -140,7 +162,7 @@ async def _reach() -> dict:
 def _extras() -> list[dict]:
     from sqlmodel import Session
 
-    from wealthpilot.services import automations, skills, upgrade
+    from wealthpilot.services import automations, logs, skills, upgrade
     from wealthpilot.storage.db import get_engine
 
     found, problems = skills.discover()
@@ -156,6 +178,9 @@ def _extras() -> list[dict]:
     else:
         tail = "已是最新" if status.get("checked") else status.get("how") or "没能检查更新"
         out.append(_item("版本", "ok", f"v{__version__} · {status.get('commit') or '无 git 信息'}（{tail}）"))
+    bad = logs.recent_problems(24)
+    out.append(_item("日志", "warn" if bad else "ok", f"最近 24 小时有 {bad} 条警告或错误" if bad else "最近 24 小时没有警告和错误",
+                     "运行 wealthpilot logs --errors 看是什么" if bad else ""))
     return out
 
 

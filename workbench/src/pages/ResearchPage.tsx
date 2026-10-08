@@ -55,6 +55,7 @@ const REWRITES = ['更短一点', '只讲风险', '换成给新手的说法', '�
 const STANCE_TONE: Record<string, Tone> = { 看多: 'pink', 中性偏多: 'pink', 看空: 'green', 中性偏空: 'green', 中性: 'gray' }
 const STAGES = ['规划', '取证', '审核证据', '辩论与撰写', '核对'] as const
 // 研究没成是因为模型这边的问题：给一个直接去处理的入口，而不是让用户自己猜
+const FALLBACK_WHY: Record<string, string> = { balance: '余额不足', auth: '的 Key 无效', model: '模型名不对', rate_limit: '被限流', network: '连不上' }
 const REASON_ACTION: Record<string, string> = {
   balance: '去设置换一个模型', auth: '去设置重填 Key', model: '去设置核对模型名', network: '去设置检查接口地址',
   budget: '去设置调整上限', not_configured: '去设置填模型', rate_limit: '',
@@ -128,6 +129,7 @@ const Sessions: React.FC<{ items: ConversationInfo[]; current: string; onOpen: (
               {c.source ? <Tag className="!py-0">{c.source}</Tag> : null}
               {c.id === current ? <span className="text-primary">当前</span> : null}
             </span>
+            {c.match ? <span className="mt-0.5 block truncate text-xs text-slate">…{c.match}…</span> : null}
           </span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />
         </button>
@@ -200,6 +202,16 @@ const ResearchPage: React.FC = () => {
   const [reuse, setReuse] = useState(false)
   const sessions = useApi(() => (DEMO ? Promise.resolve([] as ConversationInfo[]) : api.conversations()), [turns.length === 0])
   const [sessionsOpen, setSessionsOpen] = useState(false)
+  // 历史会话里的搜索：停手 250 毫秒再查，结果按输入的词对号，免得慢的那次盖掉新的
+  const [sessionQuery, setSessionQuery] = useState('')
+  const [found, setFound] = useState<ConversationInfo[] | null>(null)
+  useEffect(() => {
+    const q = sessionQuery.trim()
+    if (!q) { setFound(null); return }
+    let stale = false
+    const timer = setTimeout(() => { api.conversations(q).then((rows) => { if (!stale) setFound(rows) }).catch(() => { if (!stale) setFound([]) }) }, 250)
+    return () => { stale = true; clearTimeout(timer) }
+  }, [sessionQuery])
   const [sessionError, setSessionError] = useState('')
   const openSession = (id: string) => {
     setSessionError('')
@@ -267,7 +279,7 @@ const ResearchPage: React.FC = () => {
                       <div className="mt-8">
                         <div className="mb-2 flex items-center justify-between">
                           <span className="eyebrow">接着之前的聊</span>
-                          {sessions.data.length > 4 ? <button type="button" onClick={() => setSessionsOpen(true)} className="text-[13px] text-steel hover:text-ink">全部 {sessions.data.length} 个会话</button> : null}
+                          <button type="button" onClick={() => setSessionsOpen(true)} className="text-[13px] text-steel hover:text-ink">{sessions.data.length > 4 ? `全部 ${sessions.data.length} 个会话 · 搜索` : '搜索'}</button>
                         </div>
                         <Sessions items={sessions.data} current="" onOpen={openSession} limit={4} />
                         {sessionError ? <p className="mt-2 text-[13px] text-on-rose">{sessionError}</p> : null}
@@ -336,6 +348,11 @@ const ResearchPage: React.FC = () => {
                           ? <>这是 <b>{t.reused.age}</b>那次研究的原文，这次没有重新跑，也没有花 token。</>
                           : <>这次没有重新取数：用的是 <b>{t.reused.age}</b>那次研究取到的数据，只重写了回答。</>}
                         {t.reused.saved_tokens ? ` 重新取数大约要 ${wan(t.reused.saved_tokens)}。` : ''} 行情和消息在这之后可能有变化。
+                      </Callout>
+                    ) : null}
+                    {t.fallback ? (
+                      <Callout tone="warning" action={<Link to="/settings" className="shrink-0 text-[13px] font-medium underline underline-offset-2">去设置</Link>}>
+                        主模型{FALLBACK_WHY[t.fallback.reason] ?? '用不了'}，这一轮是备用模型 <b>{t.fallback.model}</b> 答的。
                       </Callout>
                     ) : null}
                     <div className="mt-4" onClick={(e) => e.stopPropagation()}>
@@ -453,7 +470,10 @@ const ResearchPage: React.FC = () => {
       <Drawer open={sessionsOpen} onClose={() => setSessionsOpen(false)} title="历史会话" width="max-w-lg">
         {sessionError ? <Callout tone="danger" className="mb-3">{sessionError}</Callout> : null}
         <p className="mb-3 text-[13px] text-steel">点一个会话就回到当时的对话，接着问。每一轮当时的证据和校验结果都还在。</p>
-        <Sessions items={sessions.data ?? []} current={research.conversationId} onOpen={openSession} />
+        <input type="search" value={sessionQuery} onChange={(e) => setSessionQuery(e.target.value)} placeholder="找提到过某只股票、某句话的会话"
+          aria-label="搜索历史会话" className="mb-3 h-9 w-full rounded-md border border-hairline bg-canvas px-3 text-sm text-ink placeholder:text-stone focus:border-primary focus:outline-none" />
+        {sessionQuery.trim() && found && found.length === 0 ? <p className="text-[13px] text-steel">没有哪个会话提到过「{sessionQuery.trim()}」。</p> : null}
+        <Sessions items={sessionQuery.trim() ? found ?? [] : sessions.data ?? []} current={research.conversationId} onOpen={openSession} />
       </Drawer>
       {/* 窄屏：过程面板收进抽屉 */}
       <Drawer open={processOpen} onClose={() => setProcessOpen(false)} title="研究过程" width="max-w-[400px]">

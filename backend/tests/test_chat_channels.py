@@ -246,9 +246,204 @@ def test_wecom_callback_verifies_then_answers_at_once(monkeypatch):
 def test_channel_routes_cover_all_three():
     client = TestClient(app)
     data = client.get("/api/channel").json()
-    assert [c["channel"] for c in data["channels"]] == ["telegram", "feishu", "wecom"] and data["channels"][1]["label"] == "飞书"
+    assert [c["channel"] for c in data["channels"]] == ["telegram", "feishu", "dingtalk", "wecom"] and data["channels"][1]["label"] == "飞书"
+    assert data["channels"][2]["label"] == "钉钉" and data["channels"][2]["error"] == ""
     assert "paired" in data                                                    # 老字段还在
     assert client.post("/api/channel/pair?channel=feishu").status_code == 409  # 还没配置：不给配对码
     assert client.post("/api/channel/pair?channel=line").status_code == 404
     assert client.post("/api/channel/test?channel=wecom").json()["ok"] is False
     assert client.get("/api/channel/wecom/callback").status_code == 404        # 没配置时回调地址不存在
+
+
+# ── 手机里的命令和终端对齐：能停、能改写、能看状态，而且一次只查一个 ──────────────
+
+def _paired(ask):
+    sink = Sink()
+    channels.set_owner("me", "feishu")
+    return channels.Bot(sink, ask=ask, channel="feishu"), sink
+
+
+async def test_stop_cancels_the_running_research_and_only_one_runs_at_a_time():
+    started, cleaned = asyncio.Event(), []
+
+    async def slow(question, history, conversation, depth="auto", **kw):
+        try:
+            yield {"type": "plan", "intent": "个股深度研究", "eta_seconds": 40}
+            started.set()
+            await asyncio.sleep(60)
+            yield {"type": "done", "content": "不该走到这里", "meta": {"status": "passed"}}
+        finally:
+            cleaned.append(question)          # 真实的研究在这里把已经花掉的 token 记账
+    bot, sink = _paired(slow)
+    await bot.message("me", "/stop")
+    assert "没有在查" in sink.last()
+    first = asyncio.create_task(bot.message("me", "帮我分析一下宁德时代"))
+    await started.wait()
+    assert "/stop" in sink.last()                                             # 告诉用户不想等可以停
+    await bot.message("me", "再分析一下茅台")                                  # 手一快连发了第二条
+    assert "还在查" in sink.last() and "宁德时代" in sink.last() and cleaned == []      # 没有同时跑第二个
+    await bot.message("me", "/status")
+    assert "正在查：帮我分析一下宁德时代" in sink.last()
+    await bot.message("me", "/stop")
+    await asyncio.wait_for(first, 2)
+    assert sink.last().startswith("已停止") and cleaned == ["帮我分析一下宁德时代"] and bot._running is None
+    assert bot.history == []                                                  # 停掉的那次不算进对话
+    await bot.message("me", "/status")
+    assert "现在没有在查的问题" in sink.last() and "今天用量" in sink.last() and "模型：" in sink.last()
+
+
+async def test_deep_and_rewrite_reach_the_research_with_the_right_arguments():
+    seen = []
+
+    async def ask(question, history, conversation, depth="auto", **kw):
+        seen.append((question, depth, kw))
+        yield {"type": "done", "content": "结论：估值在历史中位附近。", "meta": {"status": "passed", "seconds": 3, "message_id": 77,
+                                                                      "fallback": {"model": "DeepSeek · deepseek-chat", "reason": "balance", "message": ""}}}
+    bot, sink = _paired(ask)
+    await bot.message("me", "/rewrite 更短一点")
+    assert "还没有可以改写的回答" in sink.last() and seen == []
+    await bot.message("me", "/deep 茅台估值贵不贵")
+    assert seen[-1] == ("茅台估值贵不贵", "deep", {}) and bot.last_message_id == 77
+    assert "主模型余额不足，这一轮是备用模型 DeepSeek · deepseek-chat 答的" in sink.last()      # 换过模型要说
+    await bot.message("me", "/rewrite 更短一点")
+    assert seen[-1] == ("更短一点", "auto", {"rewrite_of": 77}) and len(bot.history) == 2     # 改写不算新的一轮
+    await bot.message("me", "/rewrite")
+    assert "想怎么改" in sink.last()
+    await bot.message("me", "/new")
+    assert bot.last_message_id is None and bot.history == []
+    for command in ("/deep", "/rewrite", "/stop", "/status", "/usage", "/holdings", "/watch", "/tasks"):
+        assert command in channels.HELP
+
+
+async def test_read_only_commands_answer_from_local_data(monkeypatch):
+    from datetime import date
+
+    from sqlmodel import select
+
+    from wealthpilot.models.portfolio import PortfolioHolding
+    from wealthpilot.services import assets, automations
+
+    async def quotes(codes):
+        return {"600519": {"price": 1650.0, "change_pct": 1.2}}
+    monkeypatch.setattr(assets, "fetch_sina_quotes", quotes)
+    bot, sink = _paired(None)
+    with Session(get_engine()) as db:
+        for row in db.exec(select(PortfolioHolding).where(PortfolioHolding.user_id == 0)).all():
+            db.delete(row)
+        db.add(PortfolioHolding(user_id=0, fund_code="600519", fund_name="贵州茅台", shares=100, cost_price=1500, asset_type="stock", buy_date=date(2026, 1, 5)))
+        db.commit()
+        task_id = automations.save(db, 0, {"kind": "task", "schedule": "工作日 08:30", "prompt": "诊断一下我的持仓"}).id
+    try:
+        await bot.message("me", "/holdings")
+        assert "贵州茅台 600519  100 股  现价 1650  +10.0%" in sink.last() and "浮动盈亏 +1.50 万（+10.0%）" in sink.last()
+        await bot.message("me", "/tasks")
+        assert "工作日 08:30：诊断一下我的持仓" in sink.last() and "下次" in sink.last()
+        await bot.message("me", "/usage")
+        assert sink.last().startswith("今天：") and "近 30 天" in sink.last()
+        await bot.message("me", "/watch")
+        assert sink.last()                                                    # 有没有自选都要有句话
+    finally:
+        with Session(get_engine()) as db:
+            automations.delete(db, 0, task_id)
+            for row in db.exec(select(PortfolioHolding).where(PortfolioHolding.fund_code == "600519", PortfolioHolding.user_id == 0)).all():
+                db.delete(row)
+            db.commit()
+
+
+# ── 钉钉：长连接收、接口发，只认单聊 ─────────────────────────────────────────
+
+DING_EVENT = {"conversationId": "cidAbc==", "chatbotCorpId": "dingcorp", "chatbotUserId": "$:LWCP_v1:$bot", "msgId": "msgAbc==", "senderNick": "张三",
+              "isAdmin": True, "senderStaffId": "manager8031", "sessionWebhookExpiredTime": 1791449999000, "createAt": 1791446000000,
+              "senderCorpId": "dingcorp", "conversationType": "1", "senderId": "$:LWCP_v1:$abc",
+              "sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=x", "text": {"content": " 帮我分析一下宁德时代 "},
+              "robotCode": "dingrobot123", "msgtype": "text"}
+
+
+def _ding_clean():
+    with Session(get_engine()) as db:
+        row = db.get(DataCache, "channel:dingtalk:robot")
+        if row:
+            db.delete(row)
+            db.commit()
+
+
+def test_dingtalk_events_are_read_the_way_the_official_sdk_reads_them():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import dingtalk_stream
+    from wealthpilot.services import dingtalk
+    _ding_clean()
+    official = dingtalk_stream.ChatbotMessage.from_dict(DING_EVENT)                 # 用 SDK 自己的解析对一遍字段名
+    assert dingtalk.parse_event(DING_EVENT) == (official.sender_staff_id, official.text.content.strip()) == ("manager8031", "帮我分析一下宁德时代")
+    assert dingtalk.robot_code() == official.robot_code == "dingrobot123"           # 发消息要用的机器人编码，从收到的消息里记下来
+    assert dingtalk.parse_event({**DING_EVENT, "conversationType": "2"}) is None    # 群聊：不理
+    assert dingtalk.parse_event({**DING_EVENT, "msgtype": "picture", "content": {"downloadCode": "x"}}) is None
+    assert dingtalk.parse_event({**DING_EVENT, "senderStaffId": ""}) is None and dingtalk.parse_event({**DING_EVENT, "text": {"content": "  "}}) is None
+    assert dingtalk_stream.ChatbotMessage.TOPIC == "/v1.0/im/bot/messages/get"
+    _ding_clean()
+
+
+async def test_dingtalk_sends_through_the_robot_api_and_reports_refusals():
+    from wealthpilot.services import dingtalk
+    _ding_clean()
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.headers.get("x-acs-dingtalk-access-token"), json.loads(request.content)))
+        if request.url.path.endswith("/oauth2/accessToken"):
+            return httpx.Response(200, json={"accessToken": "tok-1", "expireIn": 7200})
+        return httpx.Response(200, json={"processQueryKey": "k"})
+    dingtalk.DingTalk._tokens.clear()
+    api = dingtalk.DingTalk("dingapp1", "secret", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await api.send("manager8031", "建议单 #3", [[("授权", "ap:3"), ("不采纳", "rj:3")]])
+    await api.send("manager8031", "第二条")
+    assert [s[0] for s in seen] == ["/v1.0/oauth2/accessToken", "/v1.0/robot/oToMessages/batchSend", "/v1.0/robot/oToMessages/batchSend"]     # 令牌只换一次
+    assert seen[0][2] == {"appKey": "dingapp1", "appSecret": "secret"} and seen[1][1] == "tok-1"
+    body = seen[1][2]
+    assert body["robotCode"] == "dingapp1" and body["userIds"] == ["manager8031"] and body["msgKey"] == "sampleText"       # 没收到过消息时，编码用应用的 Client ID
+    assert "回复 /ap 3 授权" in json.loads(body["msgParam"])["content"]                                                      # 文字消息没有按钮：写成可回复的命令
+    dingtalk.DingTalk._tokens.clear()
+    refused = dingtalk.DingTalk("dingapp1", "wrong", http=httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(400, json={"code": "invalidClientIdOrSecret", "message": "无效的clientId或clientSecret"}))))
+    with pytest.raises(RuntimeError, match="钉钉拒绝了应用凭证：无效的clientId"):
+        await refused.send("manager8031", "x")
+    dingtalk.DingTalk._tokens.clear()
+
+
+async def test_a_dingtalk_message_reaches_the_same_bot_and_is_acknowledged_at_once():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import dingtalk_stream
+    from wealthpilot.services import dingtalk
+    _ding_clean()
+    sink = Sink()
+    bot = channels.Bot(sink, channel="dingtalk")
+    handler = dingtalk.handler_for(bot, dingtalk_stream)
+    code = channels.new_pair_code("dingtalk")
+    callback = dingtalk_stream.CallbackMessage()
+    callback.data = {**DING_EVENT, "text": {"content": f"/pair {code}"}}
+    assert await handler.process(callback) == (dingtalk_stream.AckMessage.STATUS_OK, "OK")        # 立刻应答，不等研究跑完
+    await asyncio.gather(*dingtalk._tasks)
+    assert channels.owner("dingtalk") == "manager8031" and "已绑定" in sink.last() and bot.conversation.startswith("dd-")
+    callback.data = {**DING_EVENT, "conversationType": "2", "text": {"content": "/status"}}       # 有人在群里 @ 它
+    count = len(sink.sent)
+    await handler.process(callback)
+    await asyncio.gather(*dingtalk._tasks)
+    assert len(sink.sent) == count
+    assert channels.status("dingtalk") == {"channel": "dingtalk", "label": "钉钉", "configured": False, "paired": True}
+    _ding_clean()
+
+
+def test_a_dingtalk_connection_problem_is_surfaced_instead_of_retrying_in_silence():
+    import logging
+
+    from wealthpilot.services import dingtalk
+    sdk_log = dingtalk._sdk_logger()
+    sdk_log.error("open connection failed, error=401 Client Error: Unauthorized")
+    assert "应用凭证不对" in dingtalk.listener_error() and "401" in dingtalk.listener_error()
+    data = TestClient(app).get("/api/channel").json()
+    assert "应用凭证不对" in next(c for c in data["channels"] if c["channel"] == "dingtalk")["error"]      # 设置页看得到
+    sdk_log.info("endpoint is %s", {"endpoint": "wss://x", "ticket": "t"})                                   # 之后连上了：错误消掉
+    assert dingtalk.listener_error() == "" and sdk_log.propagate is False and not any(isinstance(h, logging.StreamHandler) for h in sdk_log.handlers)
