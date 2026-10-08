@@ -134,7 +134,7 @@ def _web(port: int, serving: bool) -> list[dict]:
 
 
 async def _reach() -> dict:
-    from wealthpilot.services import channels, feishu
+    from wealthpilot.services import channels, dingtalk, feishu
 
     settings = get_settings()
     listed = channels.status_all()
@@ -149,6 +149,8 @@ async def _reach() -> dict:
             problems.append(f"连不上 Telegram：{str(e)[:80]}（令牌写错了，或者本机到不了 api.telegram.org）")
     if feishu.listener_error():
         problems.append(feishu.listener_error())
+    if dingtalk.listener_error():
+        problems.append(dingtalk.listener_error())
     summary = "、".join(f"{c['label']}{'已绑定' if c['paired'] else '未绑定'}" for c in ready)
     if problems:
         return _item("手机触达", "fail", summary, "；".join(problems))

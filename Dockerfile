@@ -14,11 +14,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # 目录结构和仓库保持一致：后端按源码位置去找 ../workbench/dist-app
 WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock* ./
-RUN uv sync --no-dev --extra feishu --frozen --no-install-project 2>/dev/null || uv sync --no-dev --extra feishu --no-install-project
+RUN uv sync --no-dev --extra feishu --extra dingtalk --frozen --no-install-project 2>/dev/null || uv sync --no-dev --extra feishu --extra dingtalk --no-install-project
 COPY backend/src/ src/
 COPY backend/skills/ skills/
 COPY backend/skills-gallery/ skills-gallery/
-RUN uv sync --no-dev --extra feishu --frozen 2>/dev/null || uv sync --no-dev --extra feishu
+RUN uv sync --no-dev --extra feishu --extra dingtalk --frozen 2>/dev/null || uv sync --no-dev --extra feishu --extra dingtalk
 COPY --from=web /web/dist-app /app/workbench/dist-app
 
 # 数据（数据库、技能、缓存）都放在 /data，挂一个卷就能持久化

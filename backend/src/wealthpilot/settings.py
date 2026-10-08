@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     # 飞书：企业自建应用，事件订阅选"长连接"。不需要公网地址
     feishu_app_id: str = Field(default="", description="飞书应用的 App ID")
     feishu_app_secret: str = Field(default="", description="飞书应用的 App Secret")
+    dingtalk_client_id: str = Field(default="", description="钉钉应用的 Client ID（原 AppKey）")
+    dingtalk_client_secret: str = Field(default="", description="钉钉应用的 Client Secret（原 AppSecret）")
     feishu_api_base: str = Field(default="https://open.feishu.cn", description="飞书接口地址；海外版 Lark 用 https://open.larksuite.com")
     # 企业微信：自建应用，接收消息要填回调地址（需要公网能访问）
     wecom_corp_id: str = Field(default="", description="企业 ID")

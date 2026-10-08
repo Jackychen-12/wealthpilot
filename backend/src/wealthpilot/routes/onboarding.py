@@ -134,11 +134,13 @@ async def add_holdings(body: dict, db: Session = Depends(get_session), user_id: 
 @router.get("/channel")
 def channel_status():
     """每个渠道配没配好、绑没绑定。保留顶层的 configured / paired（Telegram 的），老页面还在用。"""
-    from wealthpilot.services import feishu
+    from wealthpilot.services import dingtalk, feishu
     listed = channels.status_all()
     for item in listed:
         if item["channel"] == "feishu":
             item["error"] = feishu.listener_error()
+        if item["channel"] == "dingtalk":
+            item["error"] = dingtalk.listener_error()
     return {**channels.status("telegram"), "channels": listed}
 
 

@@ -17,8 +17,8 @@ const Toggle: React.FC<{ label: string; hint: string; checked: boolean; onChange
   </label>
 )
 
-type ChannelName = 'telegram' | 'feishu' | 'wecom'
-const CHANNEL_TABS = [['telegram', 'Telegram'], ['feishu', '飞书'], ['wecom', '企业微信']] as const
+type ChannelName = 'telegram' | 'feishu' | 'dingtalk' | 'wecom'
+const CHANNEL_TABS = [['telegram', 'Telegram'], ['feishu', '飞书'], ['dingtalk', '钉钉'], ['wecom', '企业微信']] as const
 
 /**
  * 手机触达：在 Telegram、飞书或企业微信里收简报和提醒、直接提问、处理建议单。
@@ -90,6 +90,21 @@ const Reach: React.FC<{
               <summary className="cursor-pointer select-none hover:text-ink">用的是海外版 Lark？</summary>
               <div className="mt-2">{text('s-fsbase', 'feishu_api_base', '接口地址', '飞书是 https://open.feishu.cn，Lark 是 https://open.larksuite.com')}</div>
             </details>
+            {info?.error ? <Callout tone="danger">{info.error}</Callout> : null}
+          </>
+        ) : tab === 'dingtalk' ? (
+          <>
+            <Callout tone="neutral">
+              不需要公网地址：由这台电脑主动连到钉钉（Stream 模式）。在<a className="mx-0.5 underline underline-offset-2" href="https://open-dev.dingtalk.com/" target="_blank" rel="noreferrer">钉钉开放平台</a>建一个「企业内部应用」，然后：
+              <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">
+                <li>添加应用能力里加上「机器人」，消息接收模式选「Stream 模式」；</li>
+                <li>权限管理里开通「企业内机器人发送消息」；</li>
+                <li>发布应用，把「凭证与基础信息」里的 Client ID 和 Client Secret 填到下面保存，然后<b>重启 WealthPilot</b>（长连接在启动时建立）；</li>
+                <li>在钉钉里搜到这个机器人，和它<b>单聊</b>，把配对码发给它。群里 @ 它不会有回应。</li>
+              </ol>
+            </Callout>
+            {text('s-ddid', 'dingtalk_client_id', 'Client ID（原 AppKey）', undefined, 'ding…')}
+            {secret('s-ddsecret', 'dingtalk_client_secret', 'Client Secret（原 AppSecret）')}
             {info?.error ? <Callout tone="danger">{info.error}</Callout> : null}
           </>
         ) : (

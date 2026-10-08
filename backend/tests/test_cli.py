@@ -239,16 +239,19 @@ def test_channels_can_be_set_up_and_paired_without_the_web_page(monkeypatch):
     def run(*words, **flags):
         out: list[str] = []
         base = dict(action=words[0] if words else None, name=words[1] if len(words) > 1 else None,
-                    token=None, app_id=None, app_secret=None, corp_id=None, agent_id=None, secret=None, aes_key=None)
+                    token=None, app_id=None, app_secret=None, client_id=None, client_secret=None, corp_id=None, agent_id=None, secret=None, aes_key=None)
         return cli.cmd_channels(argparse.Namespace(**{**base, **flags}), out=out.append), "\n".join(out)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     channels.set_owner(None, "telegram")
     channels.set_owner(None, "feishu")
+    channels.set_owner(None, "dingtalk")
     code, text = run()
-    assert code == 0 and text.count("没有配置") == 3 and "@BotFather" in text and "开着的时候" in text
+    assert code == 0 and text.count("没有配置") == 4 and "@BotFather" in text and "Stream 模式" in text and "开着的时候" in text
     assert run("pair", "telegram")[0] == 1 and run("setup", "telegram")[0] == 2 and run("pair")[0] == 2      # 没配好不给码；没说哪个渠道
     code, text = run("setup", "feishu", app_id="cli_test")
     assert code == 1 and "--app-secret" in text                                                               # 存了一半：说还缺什么
+    code, text = run("setup", "dingtalk", client_id="dingtest1", client_secret="not-a-real-secret-000")
+    assert code == 0 and channels.configured("dingtalk") and "channels pair dingtalk" in text and "not-a-real-secret" not in text
     code, text = run("setup", "telegram", token="123456:not-a-real-token-000000000000")
     assert code == 0 and "channels pair telegram" in text and "not-a-real-token" not in text
     code, text = run("pair", "telegram")

@@ -25,7 +25,7 @@ from sqlmodel import Session
 from wealthpilot.services import cache
 from wealthpilot.settings import get_settings
 
-CHANNELS = {"telegram": "Telegram", "feishu": "飞书", "wecom": "企业微信"}
+CHANNELS = {"telegram": "Telegram", "feishu": "飞书", "dingtalk": "钉钉", "wecom": "企业微信"}
 _FOREVER = 3650 * cache.DAY
 PAIR_TTL = 600
 CHUNK = 3800   # Telegram 单条上限 4096
@@ -69,6 +69,8 @@ def configured(channel: str) -> bool:
     s = get_settings()
     if channel == "feishu":
         return bool(s.feishu_app_id and s.feishu_app_secret)
+    if channel == "dingtalk":
+        return bool(s.dingtalk_client_id and s.dingtalk_client_secret)
     if channel == "wecom":
         return bool(s.wecom_corp_id and s.wecom_agent_id and s.wecom_secret and s.wecom_token and s.wecom_aes_key)
     return bool(s.telegram_bot_token)
@@ -141,7 +143,7 @@ def plain(markdown: str) -> str:
 
 # ── 机器人 ──────────────────────────────────────────────
 
-_PREFIX = {"telegram": "tg", "feishu": "fs", "wecom": "wx"}
+_PREFIX = {"telegram": "tg", "feishu": "fs", "dingtalk": "dd", "wecom": "wx"}
 
 
 class Bot:
@@ -563,6 +565,9 @@ def _api_for(channel: str):
     if channel == "feishu":
         from wealthpilot.services.feishu import Feishu
         return Feishu(settings.feishu_app_id, settings.feishu_app_secret, settings.feishu_api_base)
+    if channel == "dingtalk":
+        from wealthpilot.services.dingtalk import DingTalk
+        return DingTalk(settings.dingtalk_client_id, settings.dingtalk_client_secret)
     if channel == "wecom":
         from wealthpilot.services.wecom import WeCom
         return WeCom(settings.wecom_corp_id, settings.wecom_agent_id, settings.wecom_secret)

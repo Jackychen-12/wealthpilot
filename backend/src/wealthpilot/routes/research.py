@@ -169,7 +169,7 @@ def _meta(row: ChatMessage) -> dict:
         return {}
 
 
-_SOURCE = (("auto-", "定时任务"), ("tg-", "Telegram"), ("fs-", "飞书"), ("wx-", "企业微信"))
+_SOURCE = (("auto-", "定时任务"), ("tg-", "Telegram"), ("fs-", "飞书"), ("dd-", "钉钉"), ("wx-", "企业微信"))
 
 
 @router.get("/conversations")

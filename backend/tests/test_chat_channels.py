@@ -246,7 +246,8 @@ def test_wecom_callback_verifies_then_answers_at_once(monkeypatch):
 def test_channel_routes_cover_all_three():
     client = TestClient(app)
     data = client.get("/api/channel").json()
-    assert [c["channel"] for c in data["channels"]] == ["telegram", "feishu", "wecom"] and data["channels"][1]["label"] == "飞书"
+    assert [c["channel"] for c in data["channels"]] == ["telegram", "feishu", "dingtalk", "wecom"] and data["channels"][1]["label"] == "飞书"
+    assert data["channels"][2]["label"] == "钉钉" and data["channels"][2]["error"] == ""
     assert "paired" in data                                                    # 老字段还在
     assert client.post("/api/channel/pair?channel=feishu").status_code == 409  # 还没配置：不给配对码
     assert client.post("/api/channel/pair?channel=line").status_code == 404
@@ -347,3 +348,89 @@ async def test_read_only_commands_answer_from_local_data(monkeypatch):
             for row in db.exec(select(PortfolioHolding).where(PortfolioHolding.fund_code == "600519", PortfolioHolding.user_id == 0)).all():
                 db.delete(row)
             db.commit()
+
+
+# ── 钉钉：长连接收、接口发，只认单聊 ─────────────────────────────────────────
+
+DING_EVENT = {"conversationId": "cidAbc==", "chatbotCorpId": "dingcorp", "chatbotUserId": "$:LWCP_v1:$bot", "msgId": "msgAbc==", "senderNick": "张三",
+              "isAdmin": True, "senderStaffId": "manager8031", "sessionWebhookExpiredTime": 1791449999000, "createAt": 1791446000000,
+              "senderCorpId": "dingcorp", "conversationType": "1", "senderId": "$:LWCP_v1:$abc",
+              "sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=x", "text": {"content": " 帮我分析一下宁德时代 "},
+              "robotCode": "dingrobot123", "msgtype": "text"}
+
+
+def _ding_clean():
+    with Session(get_engine()) as db:
+        row = db.get(DataCache, "channel:dingtalk:robot")
+        if row:
+            db.delete(row)
+            db.commit()
+
+
+def test_dingtalk_events_are_read_the_way_the_official_sdk_reads_them():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import dingtalk_stream
+    from wealthpilot.services import dingtalk
+    _ding_clean()
+    official = dingtalk_stream.ChatbotMessage.from_dict(DING_EVENT)                 # 用 SDK 自己的解析对一遍字段名
+    assert dingtalk.parse_event(DING_EVENT) == (official.sender_staff_id, official.text.content.strip()) == ("manager8031", "帮我分析一下宁德时代")
+    assert dingtalk.robot_code() == official.robot_code == "dingrobot123"           # 发消息要用的机器人编码，从收到的消息里记下来
+    assert dingtalk.parse_event({**DING_EVENT, "conversationType": "2"}) is None    # 群聊：不理
+    assert dingtalk.parse_event({**DING_EVENT, "msgtype": "picture", "content": {"downloadCode": "x"}}) is None
+    assert dingtalk.parse_event({**DING_EVENT, "senderStaffId": ""}) is None and dingtalk.parse_event({**DING_EVENT, "text": {"content": "  "}}) is None
+    assert dingtalk_stream.ChatbotMessage.TOPIC == "/v1.0/im/bot/messages/get"
+    _ding_clean()
+
+
+async def test_dingtalk_sends_through_the_robot_api_and_reports_refusals():
+    from wealthpilot.services import dingtalk
+    _ding_clean()
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.headers.get("x-acs-dingtalk-access-token"), json.loads(request.content)))
+        if request.url.path.endswith("/oauth2/accessToken"):
+            return httpx.Response(200, json={"accessToken": "tok-1", "expireIn": 7200})
+        return httpx.Response(200, json={"processQueryKey": "k"})
+    dingtalk.DingTalk._tokens.clear()
+    api = dingtalk.DingTalk("dingapp1", "secret", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await api.send("manager8031", "建议单 #3", [[("授权", "ap:3"), ("不采纳", "rj:3")]])
+    await api.send("manager8031", "第二条")
+    assert [s[0] for s in seen] == ["/v1.0/oauth2/accessToken", "/v1.0/robot/oToMessages/batchSend", "/v1.0/robot/oToMessages/batchSend"]     # 令牌只换一次
+    assert seen[0][2] == {"appKey": "dingapp1", "appSecret": "secret"} and seen[1][1] == "tok-1"
+    body = seen[1][2]
+    assert body["robotCode"] == "dingapp1" and body["userIds"] == ["manager8031"] and body["msgKey"] == "sampleText"       # 没收到过消息时，编码用应用的 Client ID
+    assert "回复 /ap 3 授权" in json.loads(body["msgParam"])["content"]                                                      # 文字消息没有按钮：写成可回复的命令
+    dingtalk.DingTalk._tokens.clear()
+    refused = dingtalk.DingTalk("dingapp1", "wrong", http=httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(400, json={"code": "invalidClientIdOrSecret", "message": "无效的clientId或clientSecret"}))))
+    with pytest.raises(RuntimeError, match="钉钉拒绝了应用凭证：无效的clientId"):
+        await refused.send("manager8031", "x")
+    dingtalk.DingTalk._tokens.clear()
+
+
+async def test_a_dingtalk_message_reaches_the_same_bot_and_is_acknowledged_at_once():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import dingtalk_stream
+    from wealthpilot.services import dingtalk
+    _ding_clean()
+    sink = Sink()
+    bot = channels.Bot(sink, channel="dingtalk")
+    handler = dingtalk.handler_for(bot, dingtalk_stream)
+    code = channels.new_pair_code("dingtalk")
+    callback = dingtalk_stream.CallbackMessage()
+    callback.data = {**DING_EVENT, "text": {"content": f"/pair {code}"}}
+    assert await handler.process(callback) == (dingtalk_stream.AckMessage.STATUS_OK, "OK")        # 立刻应答，不等研究跑完
+    await asyncio.gather(*dingtalk._tasks)
+    assert channels.owner("dingtalk") == "manager8031" and "已绑定" in sink.last() and bot.conversation.startswith("dd-")
+    callback.data = {**DING_EVENT, "conversationType": "2", "text": {"content": "/status"}}       # 有人在群里 @ 它
+    count = len(sink.sent)
+    await handler.process(callback)
+    await asyncio.gather(*dingtalk._tasks)
+    assert len(sink.sent) == count
+    assert channels.status("dingtalk") == {"channel": "dingtalk", "label": "钉钉", "configured": False, "paired": True}
+    _ding_clean()

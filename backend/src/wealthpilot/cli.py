@@ -410,11 +410,13 @@ def cmd_import(args, *, out: Out = print) -> int:
 _CHANNEL_FIELDS = {
     "telegram": (("token", "telegram_bot_token"),),
     "feishu": (("app_id", "feishu_app_id"), ("app_secret", "feishu_app_secret")),
+    "dingtalk": (("client_id", "dingtalk_client_id"), ("client_secret", "dingtalk_client_secret")),
     "wecom": (("corp_id", "wecom_corp_id"), ("agent_id", "wecom_agent_id"), ("secret", "wecom_secret"), ("token", "wecom_token"), ("aes_key", "wecom_aes_key")),
 }
 _CHANNEL_HOW = {
     "telegram": "找 @BotFather 建一个机器人，把它给的令牌填进来：wealthpilot channels setup telegram --token <令牌>",
     "feishu": "在飞书开放平台建一个企业自建应用，开通机器人和「接收消息」事件（长连接方式）：wealthpilot channels setup feishu --app-id <ID> --app-secret <密钥>",
+    "dingtalk": "在钉钉开放平台建一个企业内部应用，加上机器人能力、消息接收方式选 Stream 模式并发布：wealthpilot channels setup dingtalk --client-id <ID> --client-secret <密钥>",
     "wecom": "在企业微信后台建一个自建应用并配好接收消息：wealthpilot channels setup wecom --corp-id … --agent-id … --secret … --token … --aes-key …（要有公网能访问到的回调地址）",
 }
 
@@ -678,8 +680,8 @@ def register(sub) -> dict:
     persona.add_argument("text", nargs="?", help="use 时是预设的名字，set 时是你写的那段话")
     ch = sub.add_parser("channels", help="手机上的渠道：Telegram / 飞书 / 企业微信（channels / setup / pair / unpair / test）")
     ch.add_argument("action", nargs="?", choices=["list", "setup", "pair", "unpair", "test"])
-    ch.add_argument("name", nargs="?", help="telegram / feishu / wecom")
-    for flag in ("token", "app-id", "app-secret", "corp-id", "agent-id", "secret", "aes-key"):
+    ch.add_argument("name", nargs="?", help="telegram / feishu / dingtalk / wecom")
+    for flag in ("token", "app-id", "app-secret", "client-id", "client-secret", "corp-id", "agent-id", "secret", "aes-key"):
         ch.add_argument(f"--{flag}", dest=flag.replace("-", "_"))
     backup = sub.add_parser("backup", help="把你的东西打成一个文件：数据库、配置、研究方法（换电脑、重装时用）")
     backup.add_argument("dest", nargs="?", help="存到哪（文件或目录）；不给就放在数据目录的 backups/ 下")
