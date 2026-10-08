@@ -407,6 +407,49 @@ def cmd_import(args, *, out: Out = print) -> int:
     return 0
 
 
+def cmd_backup(args, *, out: Out = print) -> int:
+    """把你的东西打成一个文件：数据库、配置、研究方法、数据连接。"""
+    from wealthpilot.services import backup
+
+    if args.list:
+        found = backup.existing()
+        for b in found:
+            out(f"  {b['created_at'].replace('T', ' ')}  v{b['version']}  {b['size_kb']} KB  {'、'.join(b['contents'])}\n    {b['path']}")
+        out("恢复其中一份：wealthpilot restore <路径>" if found else f"还没有备份（{backup.BACKUP_DIR}）。打一份：wealthpilot backup")
+        return 0
+    _settings().ensure_dirs()
+    target = backup.create(args.dest, keys=not args.no_keys)
+    info = backup.inspect(target)
+    out(f"✓ 已备份到 {target}")
+    out(f"  里面有：{'、'.join(info['contents']) or '（空的：还没有任何数据）'}")
+    out("  没有带 Key，可以放心交给别人或放网盘。" if args.no_keys else
+        "  里面带着模型 Key 和机器人令牌（文件只有你能读）。要交给别人或放网盘，用 --no-keys 重打一份。")
+    out(f"  恢复：wealthpilot restore {target}")
+    return 0
+
+
+def cmd_restore(args, *, ask: Ask = input, out: Out = print) -> int:
+    from wealthpilot.services import backup
+
+    try:
+        info = backup.inspect(args.file)
+    except ValueError as e:
+        out(f"✗ {e}")
+        return 1
+    out(f"这份备份打于 {info['created_at'].replace('T', ' ')}（v{info['version']}），里面有：{'、'.join(info['contents'])}")
+    out("恢复会用它覆盖现在的数据库、配置和同名的研究方法。现在的状态会先自动备份一份，恢复错了能回去。")
+    out("WealthPilot 正开着的话先退出，再恢复。")
+    if not args.yes and ask("确定恢复？[y/N] ").strip().lower() not in ("y", "yes", "是"):
+        out("已取消，什么都没动。")
+        return 1
+    done = backup.restore(args.file)
+    out(f"✓ 已恢复：{'、'.join(done['restored'])}")
+    out(f"  恢复之前的状态存在 {done['saved_current_to']}")
+    if not info.get("with_keys"):
+        out("  这份备份没有带 Key：这台机器上原有的 Key 保留着；没有的话运行 wealthpilot setup 填一个。")
+    return 0
+
+
 def cmd_logs(args, *, out: Out = print) -> int:
     """后台出的事：研究失败、推送没发出去、盯盘出错、模型换路。"""
     from wealthpilot.services import logs
@@ -483,5 +526,12 @@ def register(sub) -> dict:
     logs.add_argument("--errors", action="store_true", help="只看警告和错误")
     logs.add_argument("-f", "--follow", action="store_true", help="一直跟着看新写进来的（Ctrl-C 停）")
     logs.add_argument("--path", action="store_true", help="只打印日志文件在哪")
+    backup = sub.add_parser("backup", help="把你的东西打成一个文件：数据库、配置、研究方法（换电脑、重装时用）")
+    backup.add_argument("dest", nargs="?", help="存到哪（文件或目录）；不给就放在数据目录的 backups/ 下")
+    backup.add_argument("--no-keys", action="store_true", help="不带模型 Key 和机器人令牌（要交给别人或放网盘时用）")
+    backup.add_argument("--list", action="store_true", help="看已有的备份")
+    restore = sub.add_parser("restore", help="从备份恢复（会先把现在的状态自动备份一份）")
+    restore.add_argument("file", help="备份文件")
+    restore.add_argument("--yes", action="store_true", help="不再确认")
     return {"setup": cmd_setup, "model": cmd_model, "config": cmd_config, "status": cmd_status, "skills": cmd_skills,
-            "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs}
+            "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs, "backup": cmd_backup, "restore": cmd_restore}

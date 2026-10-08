@@ -53,7 +53,12 @@ from wealthpilot.services.agents.synthesizer_agent import (
     check_numeric_grounding,
     strip_ungrounded,
 )
-from wealthpilot.services.ai_client import FailoverClient, ModelUnavailableError, Usage, create_ai_client
+from wealthpilot.services.ai_client import (
+    FailoverClient,
+    ModelUnavailableError,
+    Usage,
+    create_ai_client,
+)
 from wealthpilot.services.checkpoints import ACTIVE_USER
 from wealthpilot.services.connectors import agent_tools
 from wealthpilot.services.evidence import ToolSession
