@@ -1,4 +1,4 @@
-"""说话方式：用户自己写的一段话，告诉 Agent 怎么跟自己说话。
+"""回答风格：用户自己写的一段话，告诉 Agent 怎么跟自己说话。
 
 放在数据目录下的 SOUL.md（名字沿用 OpenClaw / Hermes 的叫法，方便用过它们的人找到）。
 它只管语气、措辞和详略：写进每个 Agent 和最后执笔的那一步的系统提示里，并且明说与规则冲突时以规则为准 ——
@@ -38,7 +38,7 @@ PRESETS: dict[str, tuple[str, str]] = {
 
 
 def read() -> str:
-    """现在的说话方式。去掉 HTML 注释（模板里的说明）和首尾空白；太长就截断。"""
+    """现在的回答风格。去掉 HTML 注释（模板里的说明）和首尾空白；太长就截断。"""
     try:
         text = FILE.read_text(encoding="utf-8")
     except OSError:

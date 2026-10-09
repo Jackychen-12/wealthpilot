@@ -47,7 +47,7 @@ const RebalancePage: React.FC = () => {
   const describe = payload.map((c) => `${nameOf(c.fund_code)}${'target_pct' in c ? `调到 ${c.target_pct}%` : `${Number(c.amount) >= 0 ? '加' : '减'} ${Math.abs(Number(c.amount))} 元`}`).join('、')
 
   return (
-    <Page title="调仓推演" description="动手之前先算一遍：调完之后占比、集中度、回撤估计怎么变，会不会越过你的风险画像"
+    <Page title="调仓推演" description="动手之前先算一遍：调完之后占比、集中度、回撤估计怎么变，会不会越过你的风险画像" terms={['调仓推演', '集中度', '最大回撤', '风险画像']}
       actions={payload.length ? <AskAi question={`如果我把${describe}，对组合风险有什么影响？合适吗？`} label="让 AI 评估这个方案" /> : undefined}>
       {!holdings.loading && rows.length === 0 ? (
         <DataState empty="还没有持仓，无法推演。" emptyAction={<Button size="sm" onClick={() => navigate('/holdings')}>去录入持仓</Button>}>{null}</DataState>

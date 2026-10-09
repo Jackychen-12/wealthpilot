@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import re
 import sys
 import unicodedata
 from collections.abc import Callable
@@ -172,7 +173,7 @@ def cmd_setup(args, *, ask: Ask = input, secret: Ask = getpass.getpass, out: Out
         out("\n3/3 好了。接下来：\n"
             "  wealthpilot            开始用：终端里直接提问，网页版同时在 http://localhost:8000\n"
             "  wealthpilot doctor     哪里不通，它会告诉你卡在哪一环\n"
-            "  想在手机上用：网页版「设置 → 手机触达」里接 Telegram、飞书或企业微信")
+            "  想在手机上用：网页版「设置 → 手机渠道」里接 Telegram、飞书或企业微信")
     return 0
 
 
@@ -330,7 +331,7 @@ def cmd_status(_args, *, out: Out = print) -> int:
         out(f"  备用模型   {PROVIDER_LABEL[backup]} · {_model_of(s, backup)}")
     out(f"  持仓与自选 {holdings} 只持仓，{watching} 只自选" + ("" if holdings or watching else "  ← 还是空的：wealthpilot setup 或 wealthpilot import"))
     out(f"  每日盯盘   {'开着，' + s.watch_time if s.watch_enabled else '关着'}；自动任务 {len(autos)} 条开着")
-    out(f"  手机       {'、'.join(paired) + ' 已绑定' if paired else '没有绑定（网页版「设置 → 手机触达」）'}")
+    out(f"  手机       {'、'.join(paired) + ' 已绑定' if paired else '没有绑定（网页版「设置 → 手机渠道」）'}")
     limit = f"，上限 {s.daily_token_budget / 1e4:.0f} 万" if s.daily_token_budget else ""
     out(f"  今天用量   {today['tokens'] / 1e4:.1f} 万 token{limit}")
     out("开始用：wealthpilot    自检：wealthpilot doctor")
@@ -352,12 +353,13 @@ def cmd_skills(args, *, out: Out = print) -> int:
         target = args.name or ""
         try:
             if target.startswith("https://"):
-                content = asyncio.run(skills.fetch_remote(target))
-                parsed, problems = skills.parse(content)
+                content, parsed, problems, adapted = skills.prepare(asyncio.run(skills.fetch_remote(target)), target)
                 if parsed is None:
                     out("✗ 这个文件不是一个合格的方法：" + "；".join(problems))
                     return 1
                 out(content)
+                if adapted:
+                    out("\n这是一个通用技能包，上面是改写之后的样子：脚本和命令去掉了，只留下“怎么判断”的部分；派哪几个 Agent、报告分哪几节用的是默认值，装上之后可以自己改。")
                 if not args.yes and (input(f"\n这是写给 AI 的指示，会决定它以后怎么研究。保存为「{parsed.label or parsed.name}」？[y/N] ").strip().lower() not in ("y", "yes", "是")):
                     out("没有保存")
                     return 1
@@ -484,8 +486,169 @@ def cmd_channels(args, *, out: Out = print) -> int:
     return 2
 
 
+def cmd_connectors(args, *, out: Out = print) -> int:
+    """外部数据服务（MCP）：看现成的、接一个、试一下、拿掉。接进来的一律只读。"""
+    from wealthpilot.services import connectors
+    from wealthpilot.services.connector_presets import BY_KEY, PRESETS, STATUS_LABEL
+
+    action, name = args.action or "list", (args.name or "").strip()
+    if action == "gallery":
+        for p in PRESETS:
+            out(f"{p['key']:<11} {p['label']}  [{'官方' if p['official'] else '社区'} · {STATUS_LABEL[p['status']]}]")
+            out(f"            有什么：{p['provides']}")
+            out(f"            要什么：{p['needs']}")
+            out(f"            注意：{p['caveat']}")
+            for link in p["links"]:
+                out(f"            {link}")
+        out("接一个：wealthpilot connectors add <第一列> [--url 服务地址] [--token 令牌]。这张表是查公开资料整理的，没有一家实际连过。")
+        return 0
+    if action == "list":
+        found = connectors.load_connectors()
+        for c in found:
+            info = c.public()
+            out(f"  {c.name:<12} {_pad(c.label, 16)} {'开着' if c.enabled else '关着'}  令牌：{info['auth']}  {c.url or c.command}")
+        out("试一下能不能连上：wealthpilot connectors test <名字>" if found else "还没有接外部数据服务。wealthpilot connectors gallery 看现成的有哪些。")
+        return 0
+    if action == "add":
+        preset = BY_KEY.get(name.lower())
+        if preset is None:
+            out(f"没有「{name}」这个现成的服务。可选：{'、'.join(BY_KEY)}（wealthpilot connectors gallery 看说明）")
+            return 2
+        if preset["connector"] is None:
+            out(f"{preset['label']}：{preset['caveat']}")
+            return 1
+        item = {**preset["connector"], "enabled": True}
+        item["url"] = (args.url or item.get("url") or "").strip()
+        item["name"] = (args.rename or item["name"]).strip()
+        if not item["url"]:
+            out(f"{preset['label']} 要你提供服务地址：wealthpilot connectors add {preset['key']} --url <地址> [--token <令牌>]\n要什么：{preset['needs']}")
+            return 2
+        try:
+            saved = connectors.save_connector(item)
+        except ValueError as e:
+            out(f"✗ 没有保存：{e}")
+            return 1
+        if args.token:
+            from wealthpilot.routes.config import _write_env
+            _settings().ensure_dirs()
+            _write_env({saved.auth_env: args.token.strip()})
+        elif not preset.get("token_optional") and not connectors.token_for(saved):
+            out(f"还差令牌：再运行一次并带上 --token <令牌>（会存进配置文件的 {saved.auth_env}，不回显）")
+        out(f"✓ 已接上「{saved.label}」（{saved.url}）。只读：下单、转账、增删自选这类工具会被屏蔽。")
+        out(f"  试一下：wealthpilot connectors test {saved.name}    注意：{preset['caveat']}")
+        return 0
+    if not name:
+        out("要说是哪一个：wealthpilot connectors 看已经接了哪些")
+        return 2
+    if action == "remove":
+        out("✓ 已拿掉" if connectors.remove_connector(name) else f"没有接过「{name}」")
+        return 0
+    if action == "test":
+        target = next((c for c in connectors.load_connectors() if c.name == name), None)
+        if target is None:
+            out(f"没有接过「{name}」。wealthpilot connectors 看已经接了哪些")
+            return 1
+        try:
+            tools = asyncio.run(connectors.list_tools(target, refresh=True))
+        except BaseException as e:  # noqa: BLE001 — 连不上的原因五花八门（包括 MCP 库抛出的异常组），都要说成人话
+            while getattr(e, "exceptions", None):       # 异常组里包着真正的原因：一层层剥到最里面那一个
+                e = e.exceptions[0]
+            why = {"ConnectError": "服务没有开着，或者地址不对", "ConnectTimeout": "连接超时", "ReadTimeout": "对方迟迟不回",
+                   "HTTPStatusError": "对方拒绝了请求（多半是令牌不对）"}.get(type(e).__name__, f"{type(e).__name__}: {str(e)[:120]}")
+            out(f"✗ 连不上「{target.label}」：{why}\n  wealthpilot connectors 看地址和令牌填得对不对。")
+            return 1
+        allowed = [t for t in tools if t["allowed"]]
+        blocked = [t for t in tools if not t["allowed"]]
+        out(f"✓ 连上了「{target.label}」：{len(allowed)} 个工具可以给 AI 用" + (f"，{len(blocked)} 个被屏蔽" if blocked else ""))
+        for t in allowed[:12]:
+            out(f"  · {t['name']}")
+        for t in blocked[:8]:
+            out(f"  ✗ {t['name']}（{t['reason']}）")
+        return 0
+    return 2
+
+
+def cmd_recap(_args, *, out: Out = print) -> int:
+    """今天市场发生了什么。不调用模型。"""
+    from wealthpilot.services import recap
+    report = asyncio.run(recap.build())
+    out(recap.text(report))
+    return 0 if report else 1
+
+
+def cmd_macro(_args, *, out: Out = print) -> int:
+    from wealthpilot.services import macro
+    out(macro.text(asyncio.run(macro.snapshot())))
+    return 0
+
+
+def cmd_trades(args, *, out: Out = print) -> int:
+    """交易行为诊断：从你自己的成交记录里找反复出现的行为偏差。记录不保存。"""
+    from wealthpilot.services import trades
+    try:
+        raw = sys.stdin.buffer.read() if args.file == "-" else Path(args.file).expanduser().read_bytes()
+    except OSError as e:
+        out(f"读不了这个文件：{e}")
+        return 1
+    for encoding in ("utf-8-sig", "gb18030"):        # 券商导出的表多半是 GBK
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        out("这个文件的编码认不出来。另存为 CSV（UTF-8）再试。")
+        return 1
+    report = asyncio.run(trades.check(text))
+    out(trades.text(report))
+    return 0 if report.get("ok") else 1
+
+
+async def daily_brief(stocks: list[str], *, quotes=None, find=None) -> str:
+    """不靠任何本地状态的一份日报：大盘复盘 + 你点名的那几只今天怎么样。给 GitHub Actions 这类"跑完就没了"的环境用。"""
+    from wealthpilot.services import recap, securities
+    from wealthpilot.services.assets import fetch_sina_quotes
+    find, quotes = find or securities.search, quotes or fetch_sina_quotes
+    report = await recap.build()
+    if not report:
+        return ""
+    lines = [recap.text(report)]
+    resolved = []
+    for word in stocks[:40]:
+        hits = await find(word, 1)
+        if hits:
+            resolved.append(hits[0])
+    if resolved:
+        prices = await quotes([s["code"] for s in resolved])
+        limit_up = {s["code"]: s for s in report.get("limit_up_stocks") or []}
+        lines.append("\n你关注的：")
+        for s in resolved:
+            q = prices.get(s["code"]) or {}
+            tail = f"，涨停（{limit_up[s['code']]['reason'] or limit_up[s['code']]['industry']}）" if s["code"] in limit_up else ""
+            lines.append(f"· {s['name']} {s['code']}  {q.get('price', '—')}  {q.get('change_pct') or 0:+.2f}%{tail}" if q.get("price") else f"· {s['name']} {s['code']}  没取到行情")
+    return "\n".join(lines)
+
+
+def cmd_daily(args, *, out: Out = print) -> int:
+    """跑一份日报并推出去。没有常驻进程、没有数据库也能用：关注的股票从参数或环境变量 STOCK_LIST 里来。"""
+    import os
+
+    from wealthpilot.services import channels
+    words = [w.strip() for w in re.split(r"[,，;；\s]+", args.stocks or os.environ.get("STOCK_LIST", "")) if w.strip()]
+    text = asyncio.run(daily_brief(words))
+    if not text:
+        out("今天休市，或者还没有收盘数据，不推送。")
+        return 0
+    out(text)
+    if not args.push:
+        return 0
+    sent = asyncio.run(channels.push_stateless(text))
+    out(f"已推送到：{'、'.join(sent)}" if sent else "没有可用的推送地址：设置 ALERT_WEBHOOK_URL（群机器人），或 TELEGRAM_BOT_TOKEN 加 TELEGRAM_CHAT_ID。")
+    return 0 if sent else 1
+
+
 def cmd_persona(args, *, out: Out = print) -> int:
-    """说话方式：你希望它怎么跟你说话。只管语气和详略，不改变事实和校验规则。"""
+    """回答风格：你希望它怎么跟你说话。只管语气和详略，不改变事实和校验规则。"""
     from wealthpilot.services import persona
 
     action = args.action or "show"
@@ -675,7 +838,20 @@ def register(sub) -> dict:
     logs.add_argument("--errors", action="store_true", help="只看警告和错误")
     logs.add_argument("-f", "--follow", action="store_true", help="一直跟着看新写进来的（Ctrl-C 停）")
     logs.add_argument("--path", action="store_true", help="只打印日志文件在哪")
-    persona = sub.add_parser("persona", help="说话方式：你希望它怎么跟你说话（persona / use <预设> / set \"…\" / clear / path）")
+    conn = sub.add_parser("connectors", help="外部数据服务（MCP）：妙想、iFinD 等（connectors / gallery / add / test / remove）")
+    conn.add_argument("action", nargs="?", choices=["list", "gallery", "add", "test", "remove"])
+    conn.add_argument("name", nargs="?", help="add 时是现成服务的名字（见 gallery）；test / remove 时是已接服务的名字")
+    conn.add_argument("--url", help="服务地址")
+    conn.add_argument("--token", help="令牌（存进配置文件，不回显）")
+    conn.add_argument("--as", dest="rename", help="接进来之后叫什么名字（同一种服务接两个时用）")
+    sub.add_parser("recap", help="大盘复盘：涨停与连板、涨停题材、龙虎榜、市场情绪（不调用模型）")
+    sub.add_parser("macro", help="宏观数据：PMI、物价、货币信贷、利率")
+    trades = sub.add_parser("trades", help="交易行为诊断：从成交记录里找追涨、交易过频、亏损加仓、处置效应（trades 交割单.csv）")
+    trades.add_argument("file", help="券商导出的成交记录（CSV），或每行“日期 代码 买/卖 价格 数量”的文本；- 表示从管道读")
+    daily = sub.add_parser("daily", help="跑一份日报：大盘复盘 + 你关注的股票（给 GitHub Actions 这类定时环境用）")
+    daily.add_argument("--stocks", help="关注的股票，名称或代码，逗号分隔；不给就读环境变量 STOCK_LIST")
+    daily.add_argument("--push", action="store_true", help="推到 ALERT_WEBHOOK_URL 或 Telegram（TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID）")
+    persona = sub.add_parser("persona", help="回答风格：你希望它怎么跟你说话（persona / use <预设> / set \"…\" / clear / path）")
     persona.add_argument("action", nargs="?", choices=["show", "use", "set", "clear", "path"])
     persona.add_argument("text", nargs="?", help="use 时是预设的名字，set 时是你写的那段话")
     ch = sub.add_parser("channels", help="手机上的渠道：Telegram / 飞书 / 企业微信（channels / setup / pair / unpair / test）")
@@ -692,4 +868,5 @@ def register(sub) -> dict:
     restore.add_argument("--yes", action="store_true", help="不再确认")
     return {"setup": cmd_setup, "model": cmd_model, "config": cmd_config, "status": cmd_status, "skills": cmd_skills,
             "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs, "backup": cmd_backup, "restore": cmd_restore,
-            "channels": cmd_channels, "persona": cmd_persona}
+            "channels": cmd_channels, "persona": cmd_persona, "recap": cmd_recap, "macro": cmd_macro, "trades": cmd_trades, "daily": cmd_daily,
+            "connectors": cmd_connectors}

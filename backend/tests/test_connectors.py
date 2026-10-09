@@ -4,6 +4,7 @@ import json
 import os
 import sys
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -63,7 +64,7 @@ def test_public_view_never_exposes_token_or_command(config, monkeypatch):
 def test_missing_token_is_reported_not_hidden(config, monkeypatch):
     monkeypatch.delenv("BROKER_TOKEN", raising=False)
     config([{"name": "broker", "label": "券商", "url": "https://b.example/mcp", "auth_env": "BROKER_TOKEN"}])
-    assert "缺少环境变量 BROKER_TOKEN" in TestClient(app).get("/api/connectors").json()["connectors"][0]["auth"]
+    assert "还没填令牌（BROKER_TOKEN）" in TestClient(app).get("/api/connectors").json()["connectors"][0]["auth"]
 
 
 def test_no_api_to_create_or_edit_connectors():
@@ -86,7 +87,7 @@ async def test_real_stdio_connection_lists_tools_and_feeds_the_agent(config):
              "args": [f"WEALTHPILOT_HOME={os.environ['WEALTHPILOT_HOME']}", f"DB_PATH={os.environ['DB_PATH']}", sys.executable, "-m", "wealthpilot", "mcp"]}])
     connector = svc.load_connectors()[0]
     tools = await svc.list_tools(connector)
-    assert len(tools) == 53 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
+    assert len(tools) == 58 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
 
     definitions, index = await svc.agent_tools()
     assert "ext_self_get_stock_quote" in index
@@ -108,3 +109,81 @@ async def test_agent_routes_external_tool_calls_to_the_connector(monkeypatch):
     agent.external = {"ext_broker_get_positions": (svc.Connector(name="broker", label="券商"), "get_positions")}
     assert await agent._run_tool("ext_broker_get_positions", {"account": "1"}) == '{"positions": []}'
     assert seen == {"connector": "broker", "tool": "get_positions", "arguments": {"account": "1"}}
+
+
+# ── 现成的服务、命令行接入、令牌从哪读 ─────────────────────────────
+
+def test_tools_that_add_remove_or_manage_things_are_blocked_too():
+    for name in ("mx_self_select_manage", "add_watchlist", "remove_alert", "update_position_note", "set_price_alert", "删除自选股"):
+        assert svc.classify_tool(name)[0] is False, name
+    assert svc.classify_tool("portfolio_helper", "添加一只股票到自选")[0] is False            # 名字看不出来，说明里写了
+    for name in ("mx_data_query", "finance_news_search", "get_address_book", "diagnose_stock", "hotspot_discovery"):
+        assert svc.classify_tool(name)[0] is True, name                                       # address 里的 add 不算
+
+
+def test_a_token_written_to_the_env_file_is_actually_found(monkeypatch):
+    from wealthpilot.routes.config import ENV_FILE
+    monkeypatch.delenv("DEMO_MCP_TOKEN", raising=False)
+    c = svc.Connector(name="demo", label="演示", url="https://x.example.com/mcp", auth_env="DEMO_MCP_TOKEN")
+    assert svc.token_for(c) == "" and "还没填令牌" in c.public()["auth"]
+    before = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else None
+    try:
+        ENV_FILE.write_text('OTHER=1\nDEMO_MCP_TOKEN="tok-from-file"\n', encoding="utf-8")
+        assert svc.token_for(c) == "tok-from-file" and c.public()["auth"] == "已配置"          # 以前只看进程环境变量，写进 .env 读不到
+        monkeypatch.setenv("DEMO_MCP_TOKEN", "tok-from-env")
+        assert svc.token_for(c) == "tok-from-env"
+        assert "tok-from" not in json.dumps(c.public(), ensure_ascii=False)                    # 令牌本身不往外给
+    finally:
+        ENV_FILE.unlink(missing_ok=True) if before is None else ENV_FILE.write_text(before, encoding="utf-8")
+
+
+def test_ready_made_services_can_be_added_tested_and_removed_from_the_command_line(monkeypatch):
+    import argparse
+
+    from wealthpilot import cli
+    from wealthpilot.routes.config import ENV_FILE
+    from wealthpilot.services.connector_presets import PRESETS
+
+    def run(*words, **flags):
+        out: list[str] = []
+        args = argparse.Namespace(action=words[0] if words else None, name=words[1] if len(words) > 1 else None,
+                                  url=flags.get("url"), token=flags.get("token"), rename=flags.get("rename"))
+        return cli.cmd_connectors(args, out=out.append), "\n".join(out)
+    path = svc.config_path()
+    saved = path.read_text(encoding="utf-8") if path.exists() else None
+    env = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else None
+    monkeypatch.delenv("MX_MCP_TOKEN", raising=False)
+    try:
+        path.unlink(missing_ok=True)
+        assert "还没有接" in run()[1]
+        code, text = run("gallery")
+        assert code == 0 and all(p["label"] in text for p in PRESETS) and "没有一家实际连过" in text and "社区" in text and "官方" in text
+        code, text = run("add", "longbridge")
+        assert code == 1 and "现在接不了" in text and "已经内置" in text                         # 接不了的如实说，并告诉用户不接也行
+        code, text = run("add", "ifind")
+        assert code == 2 and "--url" in text
+        assert run("add", "ifind", url="ftp://x")[0] == 1 and run("add", "nope")[0] == 2
+        code, text = run("add", "mx", token="auth-token-0000")
+        assert code == 0 and "只读" in text and "auth-token" not in text and "connectors test mx" in text
+        mx = svc.load_connectors()[0]
+        assert (mx.name, mx.url, mx.enabled) == ("mx", "http://localhost:9000/mcp", True) and svc.token_for(mx) == "auth-token-0000"
+        run("add", "custom", url="https://data.example.com/mcp", rename="broker_ro")
+        assert [c.name for c in svc.load_connectors()] == ["mx", "broker_ro"] and "broker_ro" in run()[1]
+
+        async def tools(connector, refresh=False):
+            return [{"name": "mx_data_query", "allowed": True, "reason": "只读查询"}, {"name": "mx_self_select_manage", "allowed": False, "reason": "交易 / 资金类工具，已屏蔽"}]
+        monkeypatch.setattr(svc, "list_tools", tools)
+        code, text = run("test", "mx")
+        assert code == 0 and "1 个工具可以给 AI 用，1 个被屏蔽" in text and "✗ mx_self_select_manage" in text
+
+        async def down(connector, refresh=False):
+            raise ExceptionGroup("unhandled errors in a TaskGroup", [httpx.ConnectError("All connection attempts failed")])
+        monkeypatch.setattr(svc, "list_tools", down)
+        code, text = run("test", "mx")
+        assert code == 1 and "服务没有开着，或者地址不对" in text and "TaskGroup" not in text      # 不把库的内部报错甩给用户
+        assert run("remove", "mx")[0] == 0 and [c.name for c in svc.load_connectors()] == ["broker_ro"] and "没有接过" in run("remove", "mx")[1]
+        listed = TestClient(app).get("/api/connectors/presets").json()
+        assert [p["key"] for p in listed] == [p["key"] for p in PRESETS] and listed[0]["status_label"] == "可以接" and "connector" not in listed[0]
+    finally:
+        path.unlink(missing_ok=True) if saved is None else path.write_text(saved, encoding="utf-8")
+        ENV_FILE.unlink(missing_ok=True) if env is None else ENV_FILE.write_text(env, encoding="utf-8")

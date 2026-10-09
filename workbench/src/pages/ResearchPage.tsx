@@ -6,6 +6,7 @@ import { DEMO, api, runTool, useApi, type ConversationInfo, type Debate, type De
 import { askNotifyPermission, research, useResearch, type Evidence, type Turn } from '../api/researchStore'
 import demoFixtures from '../demo/questions'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
+import { ExportButtons } from '../components/ExportButtons'
 import { Sparkline } from '../components/charts'
 import { CheckpointTable, ProposalList } from '../components/Checkpoints'
 import { securityPath } from '../components/SecuritySearch'
@@ -397,6 +398,9 @@ const ResearchPage: React.FC = () => {
                             className="rounded-full border border-hairline px-2.5 py-0.5 text-[13px] text-slate transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">{r}</button>
                         ))}
                       </div>
+                    ) : null}
+                    {!t.running && t.answer && (t.status === 'passed' || t.status === 'partial') ? (
+                      <p className="mt-3"><ExportButtons item={{ question: t.question, answer: t.answer, evidence: t.evidence }} /></p>
                     ) : null}
                     {t.checkpoints.length > 0 ? (
                       <details className="mt-6" onClick={(e) => e.stopPropagation()}>

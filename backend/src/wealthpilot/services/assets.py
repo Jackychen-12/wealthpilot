@@ -90,7 +90,13 @@ def parse_sina_quote(line: str) -> dict | None:
 
 
 async def fetch_sina_quotes(codes: list[str]) -> dict[str, dict]:
-    """批量取 A 股 / ETF 报价。一次请求拿多个代码，避免逐个往返。"""
+    """批量取 A 股 / ETF 报价。一次请求拿多个代码，避免逐个往返。港股、美股代码转给腾讯的接口，结果并在一起。"""
+    from wealthpilot.services import global_stocks
+    overseas = [c for c in codes if global_stocks.is_global(c)]
+    if overseas:
+        rest = await fetch_sina_quotes([c for c in codes if c not in overseas])
+        found = await global_stocks.fetch_quotes(overseas)
+        return {**rest, **{c: found[global_stocks.canonical(c)] for c in overseas if global_stocks.canonical(c) in found}}
     if not codes:
         return {}
     symbols = [sina_symbol(c) for c in codes]

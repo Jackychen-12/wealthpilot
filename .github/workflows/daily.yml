@@ -1,0 +1,45 @@
+name: Daily brief
+
+# 不开电脑也能每天收到日报：交易日 18:00（北京时间）跑一次，把大盘复盘和你关注的股票推到手机。
+# 不调用模型，不花钱。用法：fork 这个仓库 → Settings → Secrets and variables → Actions 里加下面的 Secret → Actions 页面启用工作流。
+#   STOCK_LIST          你关注的股票，名称或代码，逗号分隔，如：贵州茅台,300750,招商银行
+#   ALERT_WEBHOOK_URL   群机器人的地址（飞书 / 企业微信 / 钉钉 / Slack 任选一个）
+#   TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID   或者推到 Telegram
+# 一个都没配的话，这个任务会直接跳过。这里没有数据库：它不知道你的持仓成本、验证点和建议单，那些要在自己电脑上运行才有。
+
+on:
+  schedule:
+    - cron: "0 10 * * 1-5"   # UTC 10:00 = 北京时间 18:00，周一到周五；节假日当天取不到数据会自己跳过
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    env:
+      STOCK_LIST: ${{ secrets.STOCK_LIST }}
+      ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - name: 有没有配推送地址
+        id: ready
+        run: |
+          if [ -n "$ALERT_WEBHOOK_URL" ] || { [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; }; then echo "go=yes" >> "$GITHUB_OUTPUT"; else echo "没有配置推送地址，跳过。"; fi
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.go == 'yes'
+      - uses: astral-sh/setup-uv@v5
+        if: steps.ready.outputs.go == 'yes'
+        with:
+          version: latest
+      - name: 跑日报并推送
+        if: steps.ready.outputs.go == 'yes'
+        working-directory: backend
+        # 数据目录放在运行器的临时目录里（这一级才拿得到它的路径；写在上面 job 的 env 里，整个文件会被判为无效）
+        run: |
+          export WEALTHPILOT_HOME="$RUNNER_TEMP/wealthpilot"
+          mkdir -p "$WEALTHPILOT_HOME"
+          uv sync --quiet
+          uv run wealthpilot daily --push

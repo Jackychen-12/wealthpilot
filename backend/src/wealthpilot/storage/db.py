@@ -9,6 +9,7 @@ from wealthpilot.models.alert import Alert  # noqa: F401 — register table
 from wealthpilot.models.automation import Automation  # noqa: F401
 from wealthpilot.models.broker import Digest, Order, PaperAccount, PaperPosition  # noqa: F401
 from wealthpilot.models.chat import ChatMessage  # noqa: F401 — register table
+from wealthpilot.models.decision import Decision  # noqa: F401
 from wealthpilot.models.market import FundNavCache, IndexSnapshot  # noqa: F401
 
 # 显式注册其余表，避免依赖 import 顺序

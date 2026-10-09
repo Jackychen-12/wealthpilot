@@ -82,7 +82,7 @@ const AutomationsPage: React.FC = () => {
     return <Page title="自动任务" description="到点自己研究、越过条件就提醒"><Callout tone="info">在线演示没有后端，这一页在本地运行后可用。</Callout></Page>
   }
   return (
-    <Page title="自动任务" description="让它到点自己干活：定时做一次研究，或者在某只股票越过你设的条件时提醒你">
+    <Page title="自动任务" description="让它到点自己干活：定时做一次研究，或者在某只股票越过你设的条件时提醒你" terms={['自动任务', '历史分位']}>
       {data && !data.running ? (
         <Callout tone="warning" action={<Link to="/settings" className="text-[13px] font-medium underline underline-offset-2">去设置</Link>}>
           自动盯盘现在是关着的，任务和提醒都不会自己跑。

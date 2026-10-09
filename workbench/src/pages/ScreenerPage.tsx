@@ -81,7 +81,7 @@ const ScreenerPage: React.FC = () => {
   }
 
   return (
-    <Page title="选股器" description="按估值、盈利和增长条件筛选全部 A 股；结果是代码算出来的，不是模型挑的">
+    <Page title="选股器" description="按估值、盈利和增长条件筛选全部 A 股；结果是代码算出来的，不是模型挑的" terms={['PE', 'PB', 'ROE', '市值']}>
       <form onSubmit={(e) => { e.preventDefault(); void run() }} className="flex flex-col gap-4">
         {DEMO ? null : (
           <div className="flex flex-wrap items-center gap-2 text-[13px] text-steel">

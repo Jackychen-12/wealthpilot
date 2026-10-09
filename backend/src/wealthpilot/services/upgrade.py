@@ -29,7 +29,7 @@ _DOCKER_HOW = "这是打包好的镜像，没有源码仓库。升级：docker c
 def _git(*args: str, timeout: float = 20) -> tuple[int, str]:
     try:
         # 不让 git 停下来等人输入账号密码：没有终端的后台进程里那会一直挂到超时
-        out = subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, timeout=timeout,
+        out = subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                              env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, stdin=subprocess.DEVNULL)
         # 只去掉结尾的换行：git status --porcelain 每行开头的空格是有意义的
         return out.returncode, out.stdout.rstrip() if out.stdout.strip() else out.stderr.strip()
@@ -167,14 +167,16 @@ def update(say=print) -> bool:
              ("安装网页版依赖", ["npm", "install", "--no-audit", "--no-fund"], REPO / "workbench"),
              ("构建网页版", ["npm", "run", "build", "--", "--outDir", "dist-app", "--emptyOutDir"], REPO / "workbench")]
     for label, command, cwd in steps:
-        if shutil.which(command[0]) is None:
-            say(f"跳过「{label}」：找不到 {command[0]}。之后在仓库目录运行 make setup 补上。")
+        program = shutil.which(command[0])
+        if program is None:
+            say(f"跳过「{label}」：找不到 {command[0]}。之后重新运行一次安装脚本（或在仓库目录 make setup）补上。")
             continue
         say(f"{label}…")
-        done = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+        # 用找到的完整路径启动：Windows 上 npm 其实是 npm.cmd，只写名字会找不到；输出按 UTF-8 读，读不出的字不当成错
+        done = subprocess.run([program, *command[1:]], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if done.returncode != 0:
             say(f"「{label}」失败：{(done.stderr or done.stdout).strip()[-400:]}")
-            say("代码已经更新。在仓库目录运行 make setup 把剩下的步骤补上。")
+            say("代码已经更新。重新运行一次安装脚本（或在仓库目录 make setup）把剩下的步骤补上。")
             return False
     for note in status["notes"]:
         say(f"\nv{note['version']} {note['date']}")

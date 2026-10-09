@@ -16,12 +16,16 @@ import { DEMO_DEFAULTS } from '../demo/defaults'
 import { Button, Callout, Drawer, Segmented, Tag } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
+import { ReverseDcfSection } from './DepthSections'
 import { CapitalTab, ExpectationTab, QuarterBars, SegmentsSection } from './stock/InsightTabs'
 
 const RANGES = [['63', '近 3 月'], ['125', '近半年'], ['250', '近 1 年'], ['500', '近 2 年']] as const
 const PERIODS = [['minute', '分时'], ['five', '五日'], ['day', '日 K'], ['week', '周 K'], ['month', '月 K']] as const
 type Period = (typeof PERIODS)[number][0]
 const TABS = [['overview', '走势'], ['financials', '财务'], ['valuation', '估值'], ['capital', '资金与筹码'], ['expectation', '预期与消息'], ['peers', '同行'], ['news', '公告']] as const
+// 港股（00700.HK）、美股（AAPL.US）：只有行情、走势、财务和估值；资金、同行、公告这些数据只有 A 股有
+const isOverseas = (code: string) => /\.(HK|US)$/i.test(code)
+const OVERSEAS_TABS = TABS.filter(([key]) => ['overview', 'financials', 'valuation'].includes(key))
 const num = (v: number | null | undefined, digits = 2) => (v == null ? '—' : v.toFixed(digits))
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${v}%`)
 const TOOLTIP = { background: 'var(--canvas)', border: '1px solid var(--hairline)', borderRadius: 8, fontSize: 13, boxShadow: 'rgba(15,15,15,0.08) 0 4px 12px' }
@@ -32,9 +36,9 @@ const StockPage: React.FC = () => {
   const code = useParams().code ?? ''
   const navigate = useNavigate()
   return (
-    <Page title="个股" description="A 股个股与 ETF：行情走势、财务、估值分位、同行与公告">
+    <Page title="个股" description="A 股、港股、美股与 ETF：行情走势、财务、估值。A 股另有估值分位、资金与筹码、同行与公告" terms={['PE', 'PB', '历史分位', 'ROE', '毛利率', '换手率', '主力资金', '融资余额', '股东户数', '北向资金', '一致预期', '限售解禁']}>
       <div className="flex flex-wrap items-center gap-3">
-        <SecuritySearch className="w-full max-w-sm" placeholder="输入名称或代码，如 宁德时代、600519" onPick={(s) => navigate(securityPath(s))} />
+        <SecuritySearch className="w-full max-w-sm" placeholder="名称或代码，如 宁德时代、腾讯、AAPL" onPick={(s) => navigate(securityPath(s))} />
         {DEMO && !code ? <Button size="sm" variant="secondary" onClick={() => navigate(`/stock/${DEMO_DEFAULTS.stock}`)}>查看示例：贵州茅台</Button> : null}
       </div>
       {code ? <StockDetail key={code} code={code} /> : <DataState empty="搜索一只股票或 ETF 开始。也可以随时按 / 唤起左上角的搜索。">{null}</DataState>}
@@ -83,11 +87,11 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
             {watchMsg ? <p className="mt-2 text-[13px] text-on-rose">{watchMsg}</p> : null}
             <div className="mt-3">
               <Metrics>
-                <Metric label="现价（元）" value={num(q.price)} tone={signClass(q.change_pct)} hint={`${signed(q.change)} · ${signed(q.change_pct, 2, '%')}`} />
+                <Metric label={`现价（${q.currency ?? '元'}）`} value={num(q.price)} tone={signClass(q.change_pct)} hint={`${signed(q.change)} · ${signed(q.change_pct, 2, '%')}`} />
                 <Metric label="PE（TTM）" value={num(q.pe_ttm)} hint="滚动市盈率" />
                 <Metric label="PB" value={num(q.pb)} hint="市净率" />
-                <Metric label="总市值（亿元）" value={num(q.total_mv_yi, 0)} />
-                <Metric label="成交额（亿元）" value={num(q.amount_yi)} hint={q.turnover_pct == null ? undefined : `换手 ${q.turnover_pct}%`} />
+                <Metric label={`总市值（亿${q.currency ?? '元'}）`} value={num(q.total_mv_yi, 0)} />
+                <Metric label={`成交额（亿${q.currency ?? '元'}）`} value={num(q.amount_yi)} hint={q.turnover_pct == null ? undefined : `换手 ${q.turnover_pct}%`} />
               </Metrics>
             </div>
             <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] tabular-nums text-steel">
@@ -102,7 +106,13 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
 
           <ThesisCard code={code} name={q.name} />
           <StockCheckpoints code={code} />
-          <div className="border-b border-hairline"><Segmented value={tab} onChange={setTab} options={TABS} /></div>
+          {isOverseas(code) ? (
+            <Callout tone="neutral">
+              这是{/\.HK$/i.test(code) ? '港股' : '美股'}，金额单位是{/\.HK$/i.test(code) ? '港元' : '美元'}（财报的币种由公司决定，见财务页）。
+              目前有行情、走势、财务指标、反向 DCF；估值历史分位、同行对比、资金与筹码、一致预期和公告只有 A 股有。让 AI 研究时，这些它会用新闻和联网搜索补。
+            </Callout>
+          ) : null}
+          <div className="border-b border-hairline"><Segmented value={tab} onChange={setTab} options={isOverseas(code) ? OVERSEAS_TABS : TABS} /></div>
           {tab === 'overview' ? <OverviewTab code={code} /> : null}
           {tab === 'financials' ? <FinancialsTab code={code} /> : null}
           {tab === 'valuation' ? <ValuationTab code={code} /> : null}
@@ -132,7 +142,7 @@ const ThesisCard: React.FC<{ code: string; name: string }> = ({ code, name }) =>
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-hairline-strong px-4 py-4">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-ink">还没有研究过{name}</p>
-          <p className="mt-0.5 text-[13px] text-steel">约一分钟：基本面、估值、走势、行业四个方向并行取证，每个数字可追溯，并留下可事后核对的验证点。</p>
+          <p className="mt-0.5 text-[13px] text-steel">约一分钟：{isOverseas(code) ? '基本面、估值、走势、消息' : '基本面、估值、走势、行业'}几个方向并行取证，每个数字可追溯，并留下可事后核对的验证点。</p>
         </div>
         <AskAi label="开始研究" question={`帮我深度分析一下${name}（${code}）`} />
       </div>
@@ -203,7 +213,7 @@ const OverviewTab: React.FC<{ code: string }> = ({ code }) => {
           : points.length ? `${(kline.data?.price_basis ?? '前复权收盘价').replace('收盘价', '')} · ${points[0].nav_date} 至 ${points[points.length - 1].nav_date} · 区间 ${signed(periodReturn, 2, '%')}` : undefined}
         actions={intraday ? undefined : <Segmented value={days} onChange={setDays} options={RANGES} />}>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <Segmented value={period} onChange={(v) => setPeriod(v as Period)} options={PERIODS} />
+          <Segmented value={period} onChange={(v) => setPeriod(v as Period)} options={isOverseas(code) ? PERIODS.filter(([k]) => k !== 'minute' && k !== 'five') : PERIODS} />
           {intraday ? null : (
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-steel">
               <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} className="accent-[var(--primary)]" />MACD
@@ -412,6 +422,7 @@ const ValuationTab: React.FC<{ code: string }> = ({ code }) => {
           ) : null}
         </DataState>
       </Section>
+      <ReverseDcfSection code={code} />
     </>
   )
 }

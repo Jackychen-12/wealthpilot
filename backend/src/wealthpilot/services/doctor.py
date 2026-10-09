@@ -140,7 +140,7 @@ async def _reach() -> dict:
     listed = channels.status_all()
     ready = [c for c in listed if c["configured"]]
     if not ready:
-        return _item("手机触达", "warn", "没有配置", "可选。想在手机上收简报、提问，到网页版「设置 → 手机触达」接上 Telegram、飞书或企业微信。")
+        return _item("手机渠道", "warn", "没有配置", "可选。想在手机上收简报、提问，到网页版「设置 → 手机渠道」接上 Telegram、飞书或企业微信。")
     problems = []
     if settings.telegram_bot_token:
         try:
@@ -153,10 +153,10 @@ async def _reach() -> dict:
         problems.append(dingtalk.listener_error())
     summary = "、".join(f"{c['label']}{'已绑定' if c['paired'] else '未绑定'}" for c in ready)
     if problems:
-        return _item("手机触达", "fail", summary, "；".join(problems))
+        return _item("手机渠道", "fail", summary, "；".join(problems))
     unpaired = [c["label"] for c in ready if not c["paired"]]
-    return _item("手机触达", "warn" if unpaired else "ok", summary,
-                 f"{'、'.join(unpaired)}还没有绑定：到网页版「设置 → 手机触达」生成配对码，在那个应用里发给机器人。" if unpaired else "")
+    return _item("手机渠道", "warn" if unpaired else "ok", summary,
+                 f"{'、'.join(unpaired)}还没有绑定：到网页版「设置 → 手机渠道」生成配对码，在那个应用里发给机器人。" if unpaired else "")
 
 
 def _extras() -> list[dict]:
@@ -189,7 +189,7 @@ async def run(*, online: bool = True, port: int = 8000, serving: bool = False) -
     items = [_item("Python", "ok" if sys.version_info >= (3, 11) else "fail", sys.version.split()[0],
                    "" if sys.version_info >= (3, 11) else "需要 Python 3.11 或更高")]
     items += _storage()
-    names = ("模型", "数据源", "网页版", "手机触达", "版本与研究方法")
+    names = ("模型", "数据源", "网页版", "手机渠道", "版本与研究方法")
     results = await asyncio.gather(
         asyncio.to_thread(_model, online), _sources(), asyncio.to_thread(_web, port, serving), _reach(), asyncio.to_thread(_extras),
         return_exceptions=True)

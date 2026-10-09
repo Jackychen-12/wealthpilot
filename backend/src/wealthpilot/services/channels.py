@@ -1,4 +1,4 @@
-"""手机触达：在 Telegram、飞书、企业微信里收简报、提问、处理建议单。
+"""手机渠道：在 Telegram、飞书、企业微信里收简报、提问、处理建议单。
 
 三个渠道共用同一个机器人逻辑（Bot），区别只在消息怎么收、怎么发：
 - Telegram：长轮询，不需要公网地址；
@@ -29,13 +29,15 @@ CHANNELS = {"telegram": "Telegram", "feishu": "飞书", "dingtalk": "钉钉", "w
 _FOREVER = 3650 * cache.DAY
 PAIR_TTL = 600
 CHUNK = 3800   # Telegram 单条上限 4096
-HELP = ("直接发问题就是一次研究，例如：帮我分析一下宁德时代\n"
-        "/quick 问题 — 快速回答（十来秒）\n/deep 问题 — 重新取数，完整研究\n"
-        "/rewrite 要求 — 不重新取数，把上一个回答换个写法（更短一点 / 只讲风险）\n/stop — 停掉正在查的这一个\n"
-        "/stock 名称 — 行情与估值分位\n/holdings — 我的持仓\n/watch — 自选\n"
-        "/digest — 今天的简报\n/review — 当初的判断现在怎么样\n/proposals — 等我决定的建议\n/tasks — 定时任务与提醒\n"
-        "/status — 模型、今天用量、正在查什么\n/usage — 用了多少\n/new — 开始新会话\n/help — 这份说明\n"
-        "也可以发截图（别人的观点、持仓、图表）或语音，我先转成文字给你看一眼，再照着查。")
+HELP = ("直接发问题就是一次研究，例如：帮我分析一下宁德时代。也可以发截图或语音。\n\n"
+        "不用模型、马上就有的（直接发这几个词）：\n"
+        "复盘 — 今天的大盘：涨停、连板、题材、龙虎榜\n宏观 — PMI、物价、利率\n持仓 / 自选 — 现价和盈亏\n"
+        "简报 — 你的股票今天有什么事\n回溯 — 之前的判断对不对\n建议单 — 等你决定的操作建议\n"
+        "记一笔 宁德时代 储能订单超预期 来自 雪球某某 — 记下为什么买；只发“对账”看按来源的结果\n"
+        "状态 / 用量 — 模型、今天花了多少\n停 — 停掉正在查的这一个\n解释 封板率 — 看不懂的词\n\n"
+        "要它研究的：\n/quick 问题 — 快速回答（十来秒）\n/deep 问题 — 重新取数，完整研究\n"
+        "/rewrite 要求 — 把上一个回答换个写法\n/stock 名称 — 行情与估值分位\n/new — 开始新会话\n\n"
+        "斜杠命令照旧可用：/recap /macro /holdings /watch /digest /review /why /proposals /tasks /status /usage /stop /help")
 FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
 STATUS = {"passed": "已通过校验", "partial": "部分证据缺失", "rejected": "未通过校验，未发布", "insufficient_data": "证据不足，未发布", "failed": "执行失败"}
 
@@ -179,7 +181,7 @@ class Bot:
                 set_owner(chat_id, self.channel)
                 await self.api.send(chat_id, "已绑定。之后简报和提醒会发到这里，你也可以直接在这里提问。\n\n" + HELP)
             else:
-                await self.api.send(chat_id, "这个机器人还没有绑定主人。在 WealthPilot 的「设置 → 手机触达」里生成配对码，然后发送：/pair 配对码")
+                await self.api.send(chat_id, "这个机器人还没有绑定主人。在 WealthPilot 的「设置 → 手机渠道」里生成配对码，然后发送：/pair 配对码")
             return
         if chat_id != master:
             return   # 不是主人：不回应，也不透露任何信息
@@ -227,8 +229,17 @@ class Bot:
     # —— 文字消息 ——
 
     async def _text(self, chat_id: int, text: str) -> None:
+        from wealthpilot.services import glossary
+        word = text.strip().lstrip("/")
+        if word in glossary.COMMAND_WORDS:          # 手机上打斜杠和英文不方便：整句话正好是"复盘""持仓"就当命令
+            text = glossary.COMMAND_WORDS[word]
+        elif text.startswith("记一笔 "):            # “记一笔 宁德时代 理由…”：记买入理由，不是提问
+            text = "/why " + text.split(None, 1)[1]
         command, _, rest = text.partition(" ")
         rest = rest.strip()
+        if command in ("解释", "/解释", "/glossary", "什么是") and rest:
+            await self.api.send(chat_id, glossary.explain(rest))
+            return
         if command in ("/start", "/help"):
             await self.api.send(chat_id, HELP)
         elif command == "/digest":
@@ -262,6 +273,14 @@ class Bot:
             await self._watchlist(chat_id)
         elif command == "/tasks":
             await self._tasks(chat_id)
+        elif command == "/why":
+            await self._why(chat_id, rest)
+        elif command == "/recap":
+            from wealthpilot.services import recap
+            await self.api.send(chat_id, recap.text(await recap.build()))
+        elif command == "/macro":
+            from wealthpilot.services import macro
+            await self.api.send(chat_id, macro.text(await macro.snapshot()))
         elif command == "/new":
             self.history, self.conversation = [], f"{_PREFIX.get(self.channel, self.channel)}-{uuid.uuid4()}"
             self.last_message_id = None
@@ -482,17 +501,43 @@ class Bot:
         await self.api.send(chat_id, digest_text(digest) if digest else "还没有简报。发送 /digest run 立即检查一次。")
 
     async def _review(self, chat_id: int) -> None:
-        from wealthpilot.services import checkpoints
+        from wealthpilot.services import checkpoints, stance
         with self._session() as db:
             card = checkpoints.scorecard(db, self.uid)
+            try:
+                stances = await stance.scorecard(db, self.uid)
+            except Exception:  # noqa: BLE001 — 行情取不到时，成绩单的另一半照常给
+                stances = {"total": 0}
         if not card["total"]:
-            await self.api.send(chat_id, "还没有验证点。对一只具体的股票做一次研究后会自动生成。")
+            await self.api.send(chat_id, "还没有验证点。对一只具体的股票做一次研究后会自动生成。" + (f"\n\n{stance.text(stances)}" if stances["total"] else ""))
             return
         rate = "—" if card["hold_rate_pct"] is None else f"{card['hold_rate_pct']}%"
         lines = [f"成立率 {rate}：成立 {card['held']}，被证伪 {card['broken']}，待核对 {card['pending']}"]
         lines += [f"· {c['name']} {c['metric_label']} {c['op']} {c['threshold']}：{'成立' if c['status'] == 'held' else '被证伪'}，实际 {c['actual_value']}"
                   for c in card["recent_verified"][:6]]
+        if stances["total"]:
+            lines += ["", stance.text(stances)]
         await self.api.send(chat_id, "\n".join(lines))
+
+    async def _why(self, chat_id: int, rest: str) -> None:
+        """买入理由记录：刚下完单，顺手在手机里记一句；不带内容就是看按来源对账。"""
+        from wealthpilot.services import decisions, securities
+        if not rest:
+            with self._session() as db:
+                report = await decisions.review(db, self.uid)
+            await self.api.send(chat_id, decisions.text(report) + ("" if report["decisions"] else f"\n\n{decisions.USAGE}"))
+            return
+        try:
+            note = decisions.parse_note(rest)
+            hits = await securities.search(note.pop("query"), 1)
+            if not hits:
+                raise ValueError("没认出是哪只股票，换个写法或直接写代码。")
+            with self._session() as db:
+                row = decisions.add(db, self.uid, {"code": hits[0]["code"], "name": hits[0]["name"], **note})
+                done = f"记下了：{row.day} {'卖出' if row.action == 'sell' else '买入'} {row.name} —— {row.reason}（来源：{row.source_kind}）"
+        except ValueError as e:
+            done = str(e)
+        await self.api.send(chat_id, done)
 
     async def _stock(self, chat_id: int, query: str) -> None:
         from wealthpilot.services import securities, stocks
@@ -647,6 +692,20 @@ async def notify(text: str, buttons: list[list[tuple[str, str]]] | None = None) 
     url = get_settings().alert_webhook_url
     if url:
         sent = await send_webhook(url, plain(text)) or sent
+    return sent
+
+
+async def push_stateless(text: str) -> list[str]:
+    """不看"谁绑定了"，直接按配置推：群机器人的 webhook，和写明了聊天编号的 Telegram。返回发成功了的渠道。"""
+    settings, sent = get_settings(), []
+    if settings.alert_webhook_url and await send_webhook(settings.alert_webhook_url, plain(text)):
+        sent.append("群机器人")
+    if settings.telegram_bot_token and settings.telegram_chat_id:
+        try:
+            await Telegram(settings.telegram_bot_token, settings.telegram_api_base).send(settings.telegram_chat_id, text)
+            sent.append("Telegram")
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger("wealthpilot.channel").warning("Telegram 推送失败：%s: %s", type(e).__name__, e)
     return sent
 
 

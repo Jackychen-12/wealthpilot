@@ -128,11 +128,11 @@ class PlannerAgent:
             stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
             intent = "stock_compare" if len(stocks) >= 2 else "stock_deep" if stocks else intent
 
-        from wealthpilot.services.agents.playbooks import PLAYBOOKS, build_tasks
+        from wealthpilot.services.agents.playbooks import PLAYBOOKS, book_for, build_tasks
         if intent in PLAYBOOKS:
             tasks = build_tasks(intent, securities, holdings or [], nav_data or {}, message)
             if tasks:
-                book = PLAYBOOKS[intent]
+                book = book_for(intent, securities)      # 港股、美股用减过的那一套章节和证据要求
                 sections = list(book.sections)
                 # 建议模式：个股研究多一节明确的立场与操作建议
                 if getattr(get_settings(), "advice_mode", False) and intent in ("stock_deep", "stock_compare"):

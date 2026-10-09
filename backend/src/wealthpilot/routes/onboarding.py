@@ -19,6 +19,8 @@ from wealthpilot.services.stocks import fetch_stock_profile
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_session
 
+OVERSEAS_HOLDING = "港股、美股暂时只能加自选和做研究，还不能记成持仓：持仓的市值、盈亏和风险都按人民币算，汇率折算还没做"
+
 router = APIRouter(tags=["onboarding"])
 _FOREVER = 3650 * cache.DAY
 
@@ -95,6 +97,8 @@ async def parse_holdings(body: dict):
         hit = (await securities.search(row["query"], 1) or [None])[0] if row["query"] else None
         if hit is None:
             return {**row, "code": "", "name": "", "asset_type": "", "problem": row["problem"] or f"没找到「{row['query']}」"}
+        if hit.get("market") in ("hk", "us"):
+            return {**row, "code": hit["code"], "name": hit["name"], "asset_type": hit["asset_type"], "problem": OVERSEAS_HOLDING}
         return {**row, "code": hit["code"], "name": hit["name"], "asset_type": hit["asset_type"]}
 
     resolved = await asyncio.gather(*[resolve(r) for r in rows])

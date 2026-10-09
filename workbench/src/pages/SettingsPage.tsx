@@ -21,7 +21,7 @@ type ChannelName = 'telegram' | 'feishu' | 'dingtalk' | 'wecom'
 const CHANNEL_TABS = [['telegram', 'Telegram'], ['feishu', '飞书'], ['dingtalk', '钉钉'], ['wecom', '企业微信']] as const
 
 /**
- * 手机触达：在 Telegram、飞书或企业微信里收简报和提醒、直接提问、处理建议单。
+ * 手机渠道：在 Telegram、飞书或企业微信里收简报和提醒、直接提问、处理建议单。
  * 应用的凭证和其他设置一起保存；认谁做主人靠配对码 —— 在这里生成，在那个应用里发给机器人，谁发对了谁就是主人。
  */
 const Reach: React.FC<{
@@ -56,7 +56,7 @@ const Reach: React.FC<{
   )
   const callback = `${window.location.origin}/api/channel/wecom/callback`
   return (
-    <Section title="手机触达" hint="在手机上收每日简报和提醒、直接提问、处理建议单。三个里接一个就行">
+    <Section title="手机渠道" hint="在手机上收每日简报和提醒、直接提问、处理建议单。三个里接一个就行">
       <div className="mb-4 flex items-center gap-4 border-b border-hairline">
         <Segmented value={tab} onChange={(v) => setTab(v as ChannelName)} options={CHANNEL_TABS} />
         <span className="mb-1.5 ml-auto text-[13px] text-steel">
@@ -257,7 +257,7 @@ const UsagePanel: React.FC = () => {
   )
 }
 
-/** 说话方式：用户自己写的一段话，告诉它怎么跟自己说话。单独保存，不和上面的配置搅在一起。 */
+/** 回答风格：用户自己写的一段话，告诉它怎么跟自己说话。单独保存，不和上面的配置搅在一起。 */
 const PersonaPanel: React.FC = () => {
   const persona = useApi(api.persona)
   const [text, setText] = useState('')
@@ -277,7 +277,7 @@ const PersonaPanel: React.FC = () => {
     } finally { setBusy(false) }
   }
   return (
-    <Section title="说话方式" hint="你希望它怎么跟你说话。只管语气、措辞和详略">
+    <Section title="回答风格" hint="你希望它怎么跟你说话。只管语气、措辞和详略">
       <div className="grid max-w-2xl gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[13px] text-steel">现成的：</span>
@@ -286,14 +286,14 @@ const PersonaPanel: React.FC = () => {
               className={`rounded-full border px-2.5 py-0.5 text-[13px] transition-colors ${text.trim() === p.text.trim() ? 'border-primary text-ink' : 'border-hairline text-slate hover:bg-hover hover:text-ink'}`}>{p.label}</button>
           ))}
         </div>
-        <textarea id="s-persona" aria-label="说话方式" value={text} onChange={(e) => setText(e.target.value)} rows={7} maxLength={data.max_chars}
+        <textarea id="s-persona" aria-label="回答风格" value={text} onChange={(e) => setText(e.target.value)} rows={7} maxLength={data.max_chars}
           placeholder="例如：像一个懂行的朋友在跟我聊。先用大白话说结论，再说为什么；别用“综上所述”这类套话。"
           className="w-full rounded-md border border-hairline-strong bg-canvas px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-stone focus:border-primary focus:ring-1 focus:ring-primary" />
         <p className="text-[13px] text-steel">
           这段话每次研究都会带给模型（{text.length} / {data.max_chars} 字）。它不会让证据引用、数字核对、必须有的章节和风险提示消失——那些规则优先。留空就是默认的写法。
         </p>
         {note ? <Callout tone={note.tone}>{note.text}</Callout> : null}
-        <div><Button variant="secondary" size="sm" loading={busy} onClick={() => void save()}>保存说话方式</Button></div>
+        <div><Button variant="secondary" size="sm" loading={busy} onClick={() => void save()}>保存回答风格</Button></div>
       </div>
     </Section>
   )
@@ -353,7 +353,7 @@ const SettingsPage: React.FC = () => {
     return <Page title="设置" description="模型、研究方式、模拟盘和每日盯盘"><Callout tone="info">在线演示没有后端，这一页在本地运行后可用。</Callout></Page>
   }
   return (
-    <Page title="设置" description="模型、研究方式、手机触达、模拟盘和每日盯盘。保存后立即生效，不用重启">
+    <Page title="设置" description="模型、研究方式、手机渠道、模拟盘和每日盯盘。保存后立即生效，不用重启" terms={['备用模型', '回答风格', 'token', '每日简报', '模拟盘']}>
       <DataState loading={settings.loading && !data} error={settings.error} onRetry={settings.reload}>
         {data ? (
           <form onSubmit={save} className="flex flex-col gap-10">

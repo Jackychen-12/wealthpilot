@@ -27,8 +27,8 @@ from wealthpilot.settings import get_settings
 # 会改变账户状态的动作：名字里出现就屏蔽，不管前面是不是 get_
 _WRITE_RE = re.compile(
     r"place|submit|create|cancel|modify|amend|execute|transfer|withdraw|deposit|redeem|purchase|"
-    r"subscribe|(?<![a-z])(buy|sell|pay)(?![a-z])|"
-    r"下单|报单|撤单|改单|买入|卖出|申购|赎回|认购|转账|划转|出金|入金|支付",
+    r"subscribe|(?<![a-z])(buy|sell|pay|add|remove|delete|update|manage|edit|set)(?![a-z])|"
+    r"下单|报单|撤单|改单|买入|卖出|申购|赎回|认购|转账|划转|出金|入金|支付|添加|新增|删除|移除|修改",
     re.IGNORECASE,
 )
 # 交易相关名词：单独出现时屏蔽；但"查询成交记录"这类以查询动词开头的放行
@@ -61,7 +61,7 @@ class Connector:
             "name": self.name, "label": self.label, "kind": self.kind, "transport": self.transport,
             "endpoint": self.url if self.transport == "http" else "本机进程",
             "enabled": self.enabled, "description": self.description,
-            "auth": "不需要" if not self.auth_env else ("已配置" if os.environ.get(self.auth_env) else f"缺少环境变量 {self.auth_env}"),
+            "auth": "不需要" if not self.auth_env else ("已配置" if token_for(self) else f"还没填令牌（{self.auth_env}）"),
         }
 
 
@@ -84,6 +84,59 @@ def load_connectors() -> list[Connector]:
             continue
         out.append(Connector(**{k: v for k, v in item.items() if k in known}))
     return out
+
+
+def token_for(connector: Connector) -> str:
+    """这个连接器的令牌。先看进程的环境变量，再看数据目录里的 .env —— 之前只看前者，照着文档把令牌写进 .env 其实是读不到的。"""
+    if not connector.auth_env:
+        return ""
+    if os.environ.get(connector.auth_env):
+        return os.environ[connector.auth_env]
+    from wealthpilot.settings import HOME
+    try:
+        for line in (HOME / ".env").read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key.strip() == connector.auth_env:
+                return value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def save_connector(item: dict) -> Connector:
+    """把一个连接器写进 connectors.json（同名的替换掉）。只在本机的命令行里调用，网页上没有这个入口。"""
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,32}", str(item.get("name", ""))):
+        raise ValueError("名字只能用字母、数字和下划线，最多 32 个字符")
+    if item.get("transport", "http") == "http" and not str(item.get("url", "")).startswith(("http://", "https://")):
+        raise ValueError("要给一个 http:// 或 https:// 开头的服务地址")
+    path = config_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError):
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    known = set(Connector.__dataclass_fields__)
+    clean = {k: v for k, v in item.items() if k in known}
+    raw["connectors"] = [c for c in raw.get("connectors", []) if isinstance(c, dict) and c.get("name") != clean["name"]] + [clean]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _tool_cache.pop(clean["name"], None)
+    return Connector(**clean)
+
+
+def remove_connector(name: str) -> bool:
+    path = config_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    kept = [c for c in raw.get("connectors", []) if not (isinstance(c, dict) and c.get("name") == name)]
+    if len(kept) == len(raw.get("connectors", [])):
+        return False
+    raw["connectors"] = kept
+    path.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _tool_cache.pop(name, None)
+    return True
 
 
 def classify_tool(name: str, description: str = "", read_only_hint: bool | None = None) -> tuple[bool, str]:
@@ -114,7 +167,7 @@ def _client(connector: Connector):
         return Client(StdioServerParameters(command=connector.command, args=list(connector.args)),
                       read_timeout_seconds=30)
 
-    token = os.environ.get(connector.auth_env, "") if connector.auth_env else ""
+    token = token_for(connector)
     if not token:
         return Client(connector.url, read_timeout_seconds=30)
     from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client

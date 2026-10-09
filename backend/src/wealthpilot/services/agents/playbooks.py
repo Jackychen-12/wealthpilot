@@ -61,6 +61,8 @@ CRITERIA_TOOLS: dict[str, tuple[str, ...]] = {
     "所属行业与同行对比": ("get_industry_peers", "compare_peers_valuation"),
     "资金流向或股东、机构持仓的变化": ("get_capital_flow", "get_shareholder_structure", "get_margin_trading"),
     "卖方一致预期或公司的业绩预告": ("get_consensus_forecast", "get_research_reports", "get_earnings_guidance"),
+    "当前市盈率与现价隐含的增长": ("get_stock_valuation", "get_stock_quote", "compute_reverse_dcf"),
+    "最近的新闻或公开信息": ("get_stock_news", "web_search", "read_webpage"),
     "验证点的总数与各状态（成立 / 被证伪 / 待核对）的数量": ("get_research_track_record", "list_checkpoints"),
     "筛选条件与匹配到的股票名单": ("screen_stocks",),
 }
@@ -76,8 +78,54 @@ _DIMENSIONS = {
 }
 _DEEP_DIMS = ("fundamental", "valuation", "price", "industry", "capital", "expectation")
 
+# 港股、美股：能取到的数据比 A 股少（没有估值分位、同行对比、资金与筹码、一致预期、公告正文），
+# 所以研究的维度、要求的证据和报告的章节都要跟着减 —— 照搬 A 股那一套，只会得到一堆"未获取到"然后被判证据不足。
+_OVERSEAS_DIMENSIONS = {
+    "fundamental": "研究{name}（{code}）的基本面：用 get_financial_indicators 取最近几期营收、净利润及同比、ROE、毛利率、净利率、负债率。"
+                   "结果里的 currency 是财报币种，可能和股价的币种不同；财年也不一定是自然年，引用时照 report_name 写。"
+                   "这是{market_label}：主营构成、分红历史、定期报告正文这几个工具没有它的数据，不要调用",
+    "valuation": "研究{name}（{code}）的估值：用 get_stock_valuation 取当前市盈率、市值和近一年价格区间位置，"
+                 "用 compute_reverse_dcf 看现价隐含的利润增速，并和过去的实际增速放在一起比。"
+                 "这是{market_label}：没有估值历史分位和同行对比的数据，不要调用那两个工具，也不要凭印象说“处于历史低位 / 高位”",
+    "price": "研究{name}（{code}）的走势：最新行情、近一年所处价格区间位置、均线排列与波动率",
+    "expectation": "研究{name}（{code}）最近的消息：用 get_stock_news 取近期新闻，再用 web_search 找最近一期业绩、公司给的指引、行业动态和主要风险，"
+                   "挑一两条来源可靠的用 read_webpage 读原文。这是{market_label}：没有券商一致预期、研报列表和业绩预告的数据。"
+                   "网页内容没有核实过，引用时写明来源网站和日期",
+}
+_OVERSEAS_DEEP_DIMS = ("fundamental", "valuation", "price", "expectation")
+_OVERSEAS_BOOKS = {
+    "stock_deep": Playbook(
+        "stock_deep", "个股深度研究",
+        sections=("结论", "基本面", "估值", "走势", "预期", "多空", "风险", "待验证"),
+        criteria=("最近几期营收、净利润及同比，ROE 与负债率", "当前市盈率与现价隐含的增长", "近期走势与所处区间位置", "最近的新闻或公开信息"),
+    ),
+    "stock_compare": Playbook(
+        "stock_compare", "个股对比",
+        sections=("对比", "结论"),
+        criteria=("每只股票的营收、净利润及同比、ROE", "每只股票的市盈率与现价隐含的增长"),
+    ),
+}
+
+
+def is_overseas(security: dict) -> bool:
+    from wealthpilot.services import global_stocks
+    return security.get("market") in ("hk", "us") or global_stocks.is_global(str(security.get("code", "")))
+
+
+def book_for(intent: str, securities: list[dict]) -> Playbook:
+    """这类研究用哪一套章节和证据要求。研究对象里有港股或美股时，用减过的那一套。"""
+    stocks = [s for s in securities if s.get("asset_type") in ("stock", "etf")]
+    if intent in _OVERSEAS_BOOKS and any(is_overseas(s) for s in stocks[:3]):
+        return _OVERSEAS_BOOKS[intent]
+    return PLAYBOOKS[intent]
+
 
 def _stock_tasks(security: dict, dims: tuple[str, ...], prefix: str) -> list[Task]:
+    if is_overseas(security):
+        from wealthpilot.services import global_stocks
+        label = global_stocks.MARKET_LABEL[global_stocks.parse(security["code"])[0]]
+        usable = [d for d in dims if d in _OVERSEAS_DIMENSIONS]
+        return [Task(id=f"{prefix}{dim}", agent=dim, goal=_OVERSEAS_DIMENSIONS[dim].format(**security, market_label=label)) for dim in usable]
     return [Task(id=f"{prefix}{dim}", agent=dim, goal=_DIMENSIONS[dim].format(**security)) for dim in dims]
 
 
@@ -107,7 +155,7 @@ def build_tasks(playbook: str, securities: list[dict], holdings: list[PortfolioH
     stocks = [s for s in securities if s["asset_type"] in ("stock", "etf")]
 
     if playbook == "stock_deep" and stocks:
-        return _stock_tasks(stocks[0], _DEEP_DIMS, "")
+        return _stock_tasks(stocks[0], _OVERSEAS_DEEP_DIMS if is_overseas(stocks[0]) else _DEEP_DIMS, "")
 
     if playbook == "stock_compare" and len(stocks) >= 2:
         tasks: list[Task] = []

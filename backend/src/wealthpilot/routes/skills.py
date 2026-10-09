@@ -66,7 +66,10 @@ async def import_skill(body: dict, request: Request):
     """从一个链接取回别人分享的技能文件。只取回并校验，不保存 —— 这是写给 Agent 的指示，要用户自己看过再存。"""
     _local_only(request)
     try:
-        return _preview(await skills.fetch_remote(str(body.get("url") or "")))
+        url = str(body.get("url") or "")
+        content, skill, problems, adapted = skills.prepare(await skills.fetch_remote(url), url)
+        return {"content": content, "skill": skill.summary() if skill else None, "problems": problems, "adapted": adapted,
+                "note": skills.GENERIC_NOTE.lstrip("> ") if adapted else ""}
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
 

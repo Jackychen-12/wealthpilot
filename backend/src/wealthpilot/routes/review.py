@@ -114,6 +114,54 @@ def delete_memory(memory_id: int, db: Session = Depends(get_session), user_id: i
     return {"ok": True}
 
 
+@router.get("/stances")
+async def stance_scorecard(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """立场成绩单：给过立场的个股研究，之后相对沪深 300 的表现。"""
+    from wealthpilot.services import stance
+    return await stance.scorecard(db, user_id)
+
+
+@router.post("/trades/check")
+async def trades_check(body: dict):
+    """交易记录体检：贴成交记录进来，找反复出现的行为毛病。记录只在这次计算里用，不保存。"""
+    from wealthpilot.services import trades
+    text = str(body.get("text") or "")
+    if len(text) > 2_000_000:
+        raise HTTPException(413, "内容太大了。导出最近一两年的成交记录就够。")
+    return await trades.check(text)
+
+
+@router.get("/decisions")
+def list_decisions(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """记下的买卖理由，新的在前。"""
+    from wealthpilot.services import decisions
+    return {"decisions": [decisions.serialize(r) for r in decisions.listing(db, user_id)], "source_kinds": list(decisions.SOURCE_KINDS)}
+
+
+@router.post("/decisions", status_code=201)
+def add_decision(body: dict, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    from wealthpilot.services import decisions
+    try:
+        return decisions.serialize(decisions.add(db, user_id, body))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@router.delete("/decisions/{decision_id}")
+def delete_decision(decision_id: int, db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    from wealthpilot.services import decisions
+    if not decisions.remove(db, user_id, decision_id):
+        raise HTTPException(404, "没有这条记录")
+    return {"ok": True}
+
+
+@router.get("/decisions/review")
+async def review_decisions(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
+    """按来源对账：听博主买的、自己研究买的……之后相对沪深 300 各自怎么样。"""
+    from wealthpilot.services import decisions
+    return await decisions.review(db, user_id)
+
+
 @router.get("/lessons")
 def list_lessons(db: Session = Depends(get_session), user_id: int = Depends(current_user_id)):
     """它自己记下的经验：判断落空时自动记的，和它归纳出来的规律。"""

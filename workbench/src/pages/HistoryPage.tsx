@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, useApi } from '../api'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
 import { CheckpointTable, ProposalList } from '../components/Checkpoints'
+import { ExportButtons } from '../components/ExportButtons'
 import { securityPath } from '../components/SecuritySearch'
 import { Drawer, Tag } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
@@ -34,6 +35,7 @@ const Detail: React.FC<{ id: number }> = ({ id }) => {
             <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-steel">
               {STATUS[d.meta.status ?? ''] ? <Tag tone={STATUS[d.meta.status ?? ''].tone}>{STATUS[d.meta.status ?? ''].label}</Tag> : null}
               <span className="font-mono">{d.created_at.slice(0, 16).replace('T', ' ')}</span>
+              {d.answer ? <ExportButtons className="ml-auto" item={{ question: d.question, answer: d.answer, when: d.created_at, evidence }} /> : null}
             </p>
           </div>
           {d.meta.debate ? <div className="mb-4"><DebateCard debate={d.meta.debate} /></div> : null}
@@ -85,7 +87,7 @@ const HistoryPage: React.FC = () => {
   const selected = Number(useParams().id) || null
   const rows = history.data ?? []
   return (
-    <Page title="研究记录" description="做过的每一次研究：回答、校验结论和当时取得的证据">
+    <Page title="研究记录" description="做过的每一次研究：回答、校验结论和当时取得的证据" terms={['证据编号', '验证点', '多空辩论']}>
       <Section title="全部记录" hint={rows.length ? `最近 ${rows.length} 条，新的在前` : undefined}>
         <DataState loading={history.loading} error={history.error} onRetry={history.reload}
           empty={rows.length === 0 ? '还没有研究记录。在 AI 研究里提问后，会自动存到这里。' : undefined}

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import json
 import re
 import sys
@@ -29,7 +30,7 @@ from rich.table import Table
 from rich.text import Text
 
 from wealthpilot import __version__
-from wealthpilot.services import providers
+from wealthpilot.services import glossary, providers
 
 HOME = Path.home() / ".wealthpilot"
 COMMANDS: dict[str, str] = {
@@ -38,6 +39,11 @@ COMMANDS: dict[str, str] = {
     "/search": "/search <关键词> — 搜索股票 / ETF / 基金",
     "/screen": "/screen pe<15 roe>15 mv>200 [行业] — 选股（pe pb roe mv rev profit chg）",
     "/market": "大盘与行业强弱",
+    "/recap": "大盘复盘：涨停与连板、涨停题材、龙虎榜、市场情绪（不调用模型）",
+    "/macro": "宏观数据：PMI、物价、货币信贷、利率",
+    "/dcf": "/dcf <名称或代码> — 反向 DCF：现价的隐含增长率（不是目标价）",
+    "/trades": "/trades <成交记录文件> — 交易行为诊断：追涨、交易过频、亏损加仓、处置效应",
+    "/why": "/why [<名称或代码> <理由> [来自 <来源>] | rm <编号>] — 买入理由记录，以及按来源对账（听谁的买的、后来怎么样）",
     "/holdings": "我的持仓",
     "/watch": "/watch [add|rm <名称或代码>] — 自选股",
     "/review": "验证点成绩单（事后验证）",
@@ -50,7 +56,8 @@ COMMANDS: dict[str, str] = {
     "/order": "/order <buy|sell> <名称或代码> <数量> — 在模拟盘下单（会再确认一次）",
     "/sample": "/sample [clear] — 载入或清除示例持仓与自选",
     "/skills": "/skills [gallery | install <名称> | draft <一句描述>] — 研究方法：已有的、现成可装的、让 AI 起草",
-    "/memory": "/memory [add <内容> | rm <编号>] — AI 记住的事",
+    "/memory": "/memory [add <内容> | rm <编号>] — 记忆：它记住的关于你的事",
+    "/glossary": "/glossary [词] — 名词解释：封板率、处置效应、隐含增长率……一个词一两句话",
     "/audit": "审计日志（只追加，带完整性校验）",
     "/history": "/history [编号] — 研究记录；带编号则调出那一次，接着追问或 /rewrite",
     "/evidence": "/evidence [证据ID前4位] — 上一次回答的证据",
@@ -64,10 +71,10 @@ COMMANDS: dict[str, str] = {
     "/tasks": "/tasks [add <时间> | <问题>] [run|on|off|rm <编号>] — 定时任务，如 /tasks add 工作日 08:30 | 诊断一下我的持仓",
     "/alert": "/alert [<名称或代码> price<=1350] [rm <编号>] — 提醒（price 价格 / chg 涨跌幅 / pe、pb 历史分位）",
     "/model": "/model [服务名 | fallback <服务名|off>] — 现在用哪个模型；换一家已经配好的；设备用模型",
-    "/persona": "/persona [use <预设> | set <一段话> | clear] — 说话方式：你希望它怎么跟你说话（只管语气和详略）",
+    "/persona": "/persona [use <预设> | set <一段话> | clear] — 回答风格：你希望它怎么跟你说话（只管语气和详略）",
     "/usage": "今天、近 7 天、近 30 天用了多少 token，都花在哪类问题上",
     "/logs": "/logs [errors] — 后台出了什么事（研究失败、推送没发出去、盯盘出错）",
-    "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
+    "/doctor": "自检：模型、数据源、数据库、手机渠道、版本，哪一环不通、怎么修",
     "/update": "有没有新版本、怎么升级",
     "/setup": "重新走一遍首次配置（模型 Key、示例数据）",
     "/sessions": "/sessions [序号 | 关键词] — 以前的会话；带序号回到那个会话接着聊，带关键词只列提到过它的",
@@ -81,10 +88,10 @@ FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '�
 # /help 按用途分组：三十多个命令排成一列没法看
 HELP_GROUPS = [
     ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/retry", "/export", "/evidence", "/history", "/sessions", "/new"]),
-    ("行情", ["/stock", "/search", "/screen", "/market"]),
-    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/proposals", "/approve", "/reject", "/broker", "/order"]),
+    ("行情", ["/stock", "/search", "/screen", "/market", "/recap", "/macro", "/dcf"]),
+    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/trades", "/why", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
-    ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit"]),
+    ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit", "/glossary"]),
     ("其他", ["/setup", "/model", "/usage", "/sample", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
 ]
 ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
@@ -449,11 +456,108 @@ class App:
         card = await self.backend.request("GET", "/api/checkpoints/scorecard")
         if not card["total"]:
             self.console.print("[dim]还没有验证点。对一只具体的股票做深度研究后会自动生成。[/]")
+            await self._stances()
             return
         rate = "—" if card["hold_rate_pct"] is None else f"{card['hold_rate_pct']}%"
         self.console.print(f"[bold]成立率 {rate}[/]  成立 [green]{card['held']}[/] · 被证伪 [red]{card['broken']}[/] · 待核对 {card['pending']} · 共 {card['total']}")
         self.console.print(f"[dim]{card['note']}[/]")
         self.show_checkpoints(await self.backend.request("GET", "/api/checkpoints"))
+        await self._stances()
+
+    async def _stances(self) -> None:
+        """立场成绩单：给过立场的那些，之后相对沪深 300 怎么样。"""
+        try:
+            card = await self.backend.request("GET", "/api/stances")
+        except Exception:  # noqa: BLE001 — 行情取不到时不该把验证点那一半也带倒
+            return
+        if not card["total"]:
+            return
+        self.console.print(f"\n[bold]立场回溯[/] [dim]对比{card['benchmark']}，共 {card['total']} 次给过立场[/]")
+        t = self.table("期限", "已结算", "胜率", "看多平均超额收益", "看空平均超额收益", right=(1, 2, 3, 4))
+        for horizon, item in card["horizons"].items():
+            pct = lambda v: "—" if v is None else f"{v:+.1f}%"  # noqa: E731
+            t.add_row(f"{horizon} 个交易日", str(item["settled"]), f"{item['right']}（{item['hit_rate_pct']:g}%）" if item["settled"] else "未到期",
+                      pct(item["看多_avg_excess_pct"]), pct(item["看空_avg_excess_pct"]))
+        self.console.print(t)
+        if card["note"]:
+            self.console.print(f"[dim]{card['note']}[/]")
+
+    async def cmd_recap(self, _: str) -> None:
+        from wealthpilot.services import recap
+        try:
+            report = await self.backend.request("GET", "/api/market/recap")
+        except RuntimeError as e:
+            self.console.print(f"[dim]{e}[/]")
+            return
+        self.console.print(recap.text(report), highlight=False, markup=False)
+
+    async def cmd_macro(self, _: str) -> None:
+        from wealthpilot.services import macro
+        self.console.print(macro.text(await self.backend.request("GET", "/api/market/macro")), highlight=False, markup=False)
+
+    async def cmd_dcf(self, args: str) -> None:
+        if not args.strip():
+            raise ValueError("用法：/dcf <名称或代码>，如 /dcf 贵州茅台")
+        sec = await self.resolve(args)
+        r = await self.backend.request("GET", f"/api/market/stock/{sec['code']}/reverse-dcf")
+        if not r["ok"]:
+            self.console.print(f"[yellow]{r['name'] or sec['name']}：{r['reason']}[/]")
+            return
+        c = self.console
+        c.print(f"[bold]{r['name']}[/] [cyan]{r['code']}[/] 市值 {r['market_cap_yi']:g} 亿 · {r['profit_period']}归母净利润 {r['profit_ttm_yi']:g} 亿 · PE {r['pe_ttm']:g}", highlight=False)
+        c.print("隐含增长率（现价对应的未来十年利润年增速）：" + "，".join(
+            f"折现率 {i['discount_pct']:g}% → " + (f"{i['growth_pct']:g}%" if i["growth_pct"] is not None else "解释不了") for i in r["implied_growth"]), highlight=False)
+        if r.get("past_profit_cagr_3y_pct") is not None:
+            c.print(f"过去三年利润的实际年化增速：{r['past_profit_cagr_3y_pct']:g}%", highlight=False)
+        t = self.table("假设每年增长", f"算出来的价值是市值的几倍（折现率 {r['scenarios']['discount_pct']:g}%）", right=(0, 1))
+        for row in r["scenarios"]["rows"]:
+            t.add_row(f"{row['growth_pct']}%", f"{row['value_vs_market_cap']:.2f}")
+        c.print(t)
+        for note in r["notes"]:
+            c.print(f"[dim]{note}[/]", highlight=False)
+
+    async def cmd_trades(self, args: str) -> None:
+        from wealthpilot.services import trades
+        if not args.strip():
+            raise ValueError("用法：/trades <成交记录文件>。券商 App 里导出交割单（CSV），或自己写：每行“日期 代码 买/卖 价格 数量”")
+        path = Path(args.strip()).expanduser()
+        if not path.is_file():
+            raise ValueError(f"没有这个文件：{path}")
+        raw = path.read_bytes()
+        try:
+            content = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            content = raw.decode("gb18030", "replace")      # 券商导出的表多半是 GBK
+        with self.console.status("[dim]取行情、配对买卖…", spinner="dots"):
+            report = await self.backend.request("POST", "/api/trades/check", json={"text": content})
+        self.console.print(trades.text(report), highlight=False, markup=False)
+
+    async def cmd_why(self, args: str) -> None:
+        """买入理由记录。不带参数：看记录和按来源对账；带参数：记一条。"""
+        from wealthpilot.services import decisions
+        parts = args.split(None, 1)
+        if parts and parts[0] == "rm":
+            if len(parts) < 2 or not parts[1].strip().isdigit():
+                raise ValueError("用法：/why rm <编号>")
+            await self.backend.request("DELETE", f"/api/decisions/{parts[1].strip()}")
+            self.console.print("已删除")
+        elif parts:
+            note = decisions.parse_note(args)
+            sec = await self.resolve(note.pop("query"))
+            row = await self.backend.request("POST", "/api/decisions", json={"code": sec["code"], "name": sec["name"], **note})
+            self.console.print(f"记下了：{row['day']} {'卖出' if row['action'] == 'sell' else '买入'} {row['name']} —— {row['reason']}（来源：{row['source_kind']}）", highlight=False, markup=False)
+            return
+        with self.console.status("[dim]取行情、对账…", spinner="dots"):
+            report = await self.backend.request("GET", "/api/decisions/review")
+        if report["decisions"]:
+            t = self.table("编号", "日期", "", "名称", "理由", "来源")
+            for d in report["decisions"][:20]:
+                source = d["source_kind"] + (f"（{d['source_name']}）" if d["source_name"] and d["source_name"] != d["source_kind"] else "")
+                t.add_row(str(d["id"]), d["day"], "卖" if d["action"] == "sell" else "买", d["name"], escape(d["reason"]), escape(source))
+            self.console.print(t)
+        self.console.print(decisions.text(report), highlight=False, markup=False)
+        if not report["decisions"]:
+            self.console.print("[dim]记一条：/why 宁德时代 储能订单超预期 来自 雪球某某[/]", highlight=False)
 
     async def cmd_verify(self, _: str) -> None:
         r = await self.backend.request("POST", "/api/checkpoints/verify")
@@ -610,7 +714,7 @@ class App:
             elif line:
                 await self.cmd_add(line)
         c.print("\n[bold]第 3 步 · 问第一个问题[/] [dim]直接打字就行，比如：帮我诊断一下我的持仓 / 帮我深度分析一下招商银行[/]")
-        c.print("[dim]想在手机上收简报和提醒：网页版「设置 → 手机触达」。/help 看全部命令。[/]")
+        c.print("[dim]想在手机上收简报和提醒：网页版「设置 → 手机渠道」。/help 看全部命令。[/]")
 
     async def cmd_setup(self, _: str) -> None:
         if not isinstance(self.backend, LocalBackend):
@@ -875,6 +979,9 @@ class App:
         if action not in ("use", "set"):
             self.console.print(f"[dim]/persona use 看现成的；/persona set <一段话> 自己写；也可以直接编辑 {data['path']}。它只管语气和详略，证据引用和数字核对不受影响[/]", highlight=False)
 
+    async def cmd_glossary(self, args: str) -> None:
+        self.console.print(glossary.explain(args), highlight=False, markup=False)
+
     async def cmd_logs(self, args: str) -> None:
         if not isinstance(self.backend, LocalBackend):
             raise ValueError("日志在运行后端的那台机器上：到那边运行 wealthpilot logs")
@@ -1032,6 +1139,8 @@ class App:
                 t.add_row(f"[cyan]{name}[/]", escape(COMMANDS[name]))   # 说明里的 [可选参数] 不是样式标记
             self.console.print(t)
             self.console.print()
+        words = "、".join(sorted({w for w, cmd in glossary.COMMAND_WORDS.items() if hasattr(self, f"cmd_{cmd[1:]}")}, key=len)[:14])
+        self.console.print(f"[dim]不想记命令：直接打这些词也行（不调用模型）—— {words}。看不懂的词：/glossary 封板率[/]", highlight=False)
         self.console.print("[dim]直接输入问题就是一次研究，例如：帮我深度分析一下宁德时代 / 对比茅台和五粮液 / 复盘一下之前的研究[/]")
 
     # —— 主循环 ——
@@ -1044,11 +1153,16 @@ class App:
         if line in ("/quit", "/exit", "quit", "exit"):
             return False
         try:
+            word = line.lstrip("/")
+            if word in glossary.COMMAND_WORDS and hasattr(self, f"cmd_{glossary.COMMAND_WORDS[word][1:]}"):
+                line = glossary.COMMAND_WORDS[word]      # 整句话正好是"复盘""持仓"这类词：直接给，不调用模型
             if line.startswith("/"):
                 name, _, args = line.partition(" ")
                 handler = getattr(self, f"cmd_{name[1:]}", None)
                 if handler is None:
-                    self.console.print(f"[red]没有这个命令：{name}[/]（/help 看全部）")
+                    close = difflib.get_close_matches(name, list(COMMANDS), n=2, cutoff=0.6)
+                    hint = f"是不是想用 {' 或 '.join(close)}？" if close else "/help 看全部"
+                    self.console.print(f"[red]没有这个命令：{name}[/]（{hint}）")
                 else:
                     await handler(args.strip())
             else:

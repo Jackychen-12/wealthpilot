@@ -10,6 +10,7 @@ import { securityPath } from '../components/SecuritySearch'
 import { Button, Callout, Tag, type Tone } from '../components/kit'
 import { DataState, Metric, Metrics, Page, Section, Table, Td, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
+import { MacroSection, RecapSection } from './DepthSections'
 import { PLAYBOOK, STATUS } from './ResearchPage'
 
 const EVENT: Record<string, { label: string; tone: Tone }> = {
@@ -157,7 +158,7 @@ const TodayPage: React.FC = () => {
   }
 
   return (
-    <Page title="今日" description="有什么等你处理，你的股票现在怎么样，当初的判断还成立几条">
+    <Page title="今日" description="有什么等你处理，你的股票现在怎么样，当初的判断还成立几条" terms={['每日简报', '验证点', '建议单']}>
       <form onSubmit={(e) => { e.preventDefault(); ask(draft) }}
         className="flex items-center gap-2 rounded-xl border border-hairline-strong bg-canvas p-2 shadow-subtle focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
         <input value={draft} onChange={(e) => setDraft(e.target.value)} disabled={DEMO} aria-label="向 AI 提问"
@@ -244,7 +245,7 @@ const TodayPage: React.FC = () => {
             </Section>
 
             {d.verified_recent.length > 0 ? (
-              <Section title="最近核对出结果的判断" actions={<More to="/review">验证与复盘</More>}>
+              <Section title="最近核对出结果的判断" actions={<More to="/review">验证与回溯</More>}>
                 <ul className="divide-y divide-hairline-soft rounded-lg border border-hairline">
                   {d.verified_recent.map((c) => (
                     <li key={c.id} className="flex items-baseline gap-3 px-4 py-2.5 text-sm">
@@ -259,6 +260,8 @@ const TodayPage: React.FC = () => {
           </>
         ) : null}
       </DataState>
+
+      <RecapSection />
 
       <Section title="市场" hint={m ? `截至 ${m.breadth.trade_date} 收盘` : undefined} actions={<More to="/screener">选股器</More>}>
         <DataState loading={market.loading} error={market.error} onRetry={market.reload} empty={!market.loading && !m ? String(market.data?.data ?? '没有取到大盘数据') : undefined}>
@@ -284,6 +287,8 @@ const TodayPage: React.FC = () => {
           </div>
         ) : null}
       </Section>
+
+      <MacroSection />
 
       <Section title="最近的研究" actions={<More to="/history">全部记录</More>}>
         <DataState loading={history.loading} error={history.error} onRetry={history.reload} empty={history.data?.length === 0 ? '还没有研究记录。' : undefined}>

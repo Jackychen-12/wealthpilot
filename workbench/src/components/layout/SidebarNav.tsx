@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { AlarmClock, BookOpenText, Brain, BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, ScrollText, Search, Settings, ShieldCheck, Star, Sun, UserRoundCog, Wallet, Zap } from 'lucide-react'
+import { AlarmClock, BookA, BookOpenText, Brain, BriefcaseBusiness, Cable, CandlestickChart, ChevronRight, ClipboardCheck, FileText, History, Home, Layers, ListFilter, LogIn, LogOut, MessageSquareText, Moon, NotebookText, Scale, ScrollText, Search, Settings, ShieldCheck, Star, Stethoscope, Sun, UserRoundCog, Wallet, Zap } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { cn } from '../../utils/cn'
@@ -33,10 +33,16 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: '我的', items: [
     { to: '/holdings', label: '持仓', icon: BriefcaseBusiness },
     { to: '/broker', label: '模拟盘', icon: Wallet },
-    { to: '/review', label: '验证与复盘', icon: ClipboardCheck },
     { to: '/automations', label: '自动任务', icon: AlarmClock },
   ] },
-  { label: '分析工具', items: [
+  // 事后回头看的东西放在一起：研究过什么、说得对不对、自己的买卖有什么毛病
+  { label: '回头看', items: [
+    { to: '/history', label: '研究记录', icon: NotebookText },
+    { to: '/review', label: '验证与回溯', icon: ClipboardCheck },
+    { to: '/trades', label: '交易行为诊断', icon: Stethoscope },
+    { to: '/report', label: '周报', icon: FileText },
+  ] },
+  { label: '组合分析', items: [
     { to: '/lookthrough', label: '持仓穿透', icon: Layers },
     { to: '/risk', label: '风险体检', icon: ShieldCheck, badge: 'alerts' },
     { to: '/stress', label: '压力测试', icon: Zap },
@@ -47,17 +53,16 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: '设置', items: [
     { to: '/settings', label: '设置', icon: Settings },
     { to: '/skills', label: '研究方法', icon: BookOpenText },
-    { to: '/memory', label: 'AI 记住的事', icon: Brain },
+    { to: '/memory', label: '记忆', icon: Brain },
     { to: '/profile', label: '风险画像', icon: UserRoundCog },
     { to: '/connectors', label: '数据连接', icon: Cable },
-    { to: '/report', label: '周报', icon: FileText },
-    { to: '/history', label: '研究记录', icon: NotebookText },
     { to: '/audit', label: '审计日志', icon: ScrollText },
+    { to: '/glossary', label: '名词解释', icon: BookA },
   ] },
 ]
-const DEFAULT_COLLAPSED = ['分析工具', '设置']
+const DEFAULT_COLLAPSED = ['组合分析', '设置']
 
-const COLLAPSED_KEY = 'wp_nav_collapsed_v2'
+const COLLAPSED_KEY = 'wp_nav_collapsed_v3'
 const readCollapsed = (): string[] => {
   try { const saved = localStorage.getItem(COLLAPSED_KEY); return saved ? JSON.parse(saved) as string[] : DEFAULT_COLLAPSED } catch { return DEFAULT_COLLAPSED }
 }

@@ -233,6 +233,28 @@ def test_the_installer_parses_and_uninstall_keeps_your_data(tmp_path):
     assert not app.exists() and not (bin_dir / "wealthpilot").exists() and (data / ".env").exists()
 
 
+def test_the_windows_installer_is_safe_to_pipe_into_a_shell_and_matches_the_unix_one():
+    """这台机器上没有 PowerShell，跑不了它；能钉住的只有这几条会让它在别人电脑上出事的写法。"""
+    import re
+    from pathlib import Path
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    raw = (scripts / "install.ps1").read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf"), "不能带 BOM：irm | iex 会把它当成第一个命令的一部分"
+    text = raw.decode("utf-8")
+    code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    assert not re.search(r"^\s*exit\b", code, re.M), "脚本是在用户自己的窗口里运行的，exit 会把窗口关掉"
+    assert not re.search(r"[\u4e00-\u9fff\uff00-\uffef]`", text), "中文后面紧跟反引号：文件被按 GBK 读错时会吞掉转义"
+    for opener, closer in ("{}", "()"):
+        assert code.count(opener) == code.count(closer), f"{opener}{closer} 没配平"
+    assert code.count("'") % 2 == 0
+    unix = (scripts / "install.sh").read_text(encoding="utf-8")
+    for name in ("WEALTHPILOT_KEY", "WEALTHPILOT_HOME", "WEALTHPILOT_DIR", "WEALTHPILOT_BIN_DIR", "WEALTHPILOT_REPO", "WEALTHPILOT_BRANCH", "WEALTHPILOT_SKIP_WEB"):
+        assert name in text and name in unix, name                       # 两边认同一套环境变量
+    for same in ("uv sync --quiet --extra feishu --extra dingtalk", "--outDir dist-app --emptyOutDir", "setup --key", "--depth 1 --branch"):
+        assert same in text and same in unix, same                      # 装的是同一样东西
+    assert "PYTHONUTF8=1" in text and "npm.cmd" in text and "ExpandString" in text
+
+
 def test_channels_can_be_set_up_and_paired_without_the_web_page(monkeypatch):
     from wealthpilot.services import channels
 

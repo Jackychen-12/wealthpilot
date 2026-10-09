@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：53 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、资金与筹码、一致预期与消息、选股、联网搜索）、基金查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：58 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、资金与筹码、一致预期与消息、选股、联网搜索、每日复盘、宏观、反向 DCF）、基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -477,6 +477,41 @@ async def read_webpage(url: str) -> str:
     """Read the main text of a public web page (first few thousand characters). Local and private-network addresses are refused.
     读一个公网网页的正文；本机和内网地址不读。"""
     return await execute_tool("read_webpage", {"url": url}, [], {}, None)
+
+
+@mcp.tool()
+async def get_market_recap() -> str:
+    """Today's A-share market recap: indices, breadth, limit-up/limit-down counts, consecutive-limit ladder, themes with reasons, billboard seats, a rule-based mood gauge.
+    今天的大盘复盘：涨停与连板、题材热点、龙虎榜、情绪刻度。"""
+    return await execute_tool("get_market_recap", {}, [], {}, None)
+
+
+@mcp.tool()
+async def get_macro_indicators() -> str:
+    """China macro indicators: PMI, CPI, PPI, M1/M2, new loans, GDP, LPR, China and US treasury yields.
+    宏观数据：景气、物价、货币信贷、利率。"""
+    return await execute_tool("get_macro_indicators", {}, [], {}, None)
+
+
+@mcp.tool()
+async def get_concept_boards(top: int = 10) -> str:
+    """Concept boards ranked by today's change, with stock counts and leaders.
+    概念板块今天的强弱。"""
+    return await execute_tool("get_concept_boards", {"top": top}, [], {}, None)
+
+
+@mcp.tool()
+async def get_concept_stocks(name: str, limit: int = 30) -> str:
+    """Constituents of a concept board (by today's change), with market cap, PE and turnover.
+    一个概念板块里有哪些股票。"""
+    return await execute_tool("get_concept_stocks", {"name": name, "limit": limit}, [], {}, None)
+
+
+@mcp.tool()
+async def compute_reverse_dcf(code: str) -> str:
+    """Reverse DCF: the profit growth the current market cap implies, next to the past three-year growth. Not a price target.
+    反向 DCF：现价隐含了多高的利润增速。不是目标价。"""
+    return await execute_tool("compute_reverse_dcf", {"code": code}, [], {}, None)
 
 
 def main() -> None:

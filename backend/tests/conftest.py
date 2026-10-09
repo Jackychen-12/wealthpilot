@@ -17,6 +17,7 @@ _TMP_DIR = Path(tempfile.mkdtemp(prefix="wealthpilot-test-"))
 # 配置文件（.env）也放到临时目录：网页设置接口写的就是它，测试要是写到开发者自己的 backend/.env，
 # 轻则留下一堆多余的配置，重则中途崩掉时把里面的模型 Key 冲掉
 os.environ["WEALTHPILOT_HOME"] = str(_TMP_DIR)
+os.environ["RECAP_PUSH"] = "false"   # 简报推送时不去取大盘复盘：测试不联网
 os.environ["DB_PATH"] = str(_TMP_DIR / "test.db")
 # 测试不得打真实模型：开发者 .env 里配了 Key 时，周报等路径会真的发请求
 # （花钱、变慢、结果不确定）。环境变量优先级高于 .env，这里统一清空。

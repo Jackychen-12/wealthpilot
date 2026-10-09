@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     stt_base_url: str = Field(default="", description="语音转文字服务的接口地址（兼容 OpenAI /audio/transcriptions）")
     stt_api_key: str = Field(default="", description="语音转文字服务的 Key")
     stt_model: str = Field(default="", description="语音转文字的模型名，如 FunAudioLLM/SenseVoiceSmall、whisper-1")
+    telegram_chat_id: str = Field(default="", description="不经过配对、直接往这个 Telegram 聊天推送（给没有数据库的定时环境用，如 GitHub Actions）")
+    recap_push: bool = Field(default=True, description="每日简报推送时带上当天的大盘复盘（涨停、连板、题材热点、龙虎榜）")
     web_search: str = Field(default="auto", description="联网搜索用哪家：auto（不用 Key，读搜索引擎结果页，不稳定）/ bocha / tavily / brave / searxng / off")
     web_search_api_key: str = Field(default="", description="搜索服务的 Key（bocha / tavily / brave）")
     web_search_url: str = Field(default="", description="自己搭的 SearXNG 的地址")
@@ -99,7 +101,7 @@ class Settings(BaseSettings):
     research_reuse_hours: float = Field(default=4, ge=0, description="几小时内对同一只股票再做深度研究时，沿用上一次取到的数据而不是重新取数；0 = 每次都重新取")
     update_check: bool = Field(default=True, description="启动时看一眼有没有新版本（只读取本仓库的远端，不上传任何东西）")
 
-    # 手机触达：Telegram 机器人。令牌在网页「设置」里填；绑定哪个聊天由配对码决定，存在数据库里
+    # 手机渠道：Telegram 机器人。令牌在网页「设置」里填；绑定哪个聊天由配对码决定，存在数据库里
     telegram_bot_token: str = Field(default="", description="Telegram 机器人令牌（@BotFather 给的）")
     telegram_api_base: str = Field(default="https://api.telegram.org", description="Telegram 接口地址；需要走中转时改这里")
 

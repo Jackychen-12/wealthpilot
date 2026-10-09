@@ -25,7 +25,7 @@ const RiskPage: React.FC = () => {
   const names = correlation.data?.names ?? {}
 
   return (
-    <Page title="风险体检" description="回撤、健康度、相关性与预警">
+    <Page title="风险体检" description="回撤、健康度、相关性与预警" terms={['最大回撤', '集中度', '相关性', '健康度']}>
       {dd?.summary && h ? (
         <Metrics>
           <Metric label="健康度总分" value={h.overall_score} hint={h.overall_status} />
