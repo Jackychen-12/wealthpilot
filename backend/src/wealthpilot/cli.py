@@ -486,6 +486,88 @@ def cmd_channels(args, *, out: Out = print) -> int:
     return 2
 
 
+def cmd_connectors(args, *, out: Out = print) -> int:
+    """外部数据服务（MCP）：看现成的、接一个、试一下、拿掉。接进来的一律只读。"""
+    from wealthpilot.services import connectors
+    from wealthpilot.services.connector_presets import BY_KEY, PRESETS, STATUS_LABEL
+
+    action, name = args.action or "list", (args.name or "").strip()
+    if action == "gallery":
+        for p in PRESETS:
+            out(f"{p['key']:<11} {p['label']}  [{'官方' if p['official'] else '社区'} · {STATUS_LABEL[p['status']]}]")
+            out(f"            有什么：{p['provides']}")
+            out(f"            要什么：{p['needs']}")
+            out(f"            注意：{p['caveat']}")
+            for link in p["links"]:
+                out(f"            {link}")
+        out("接一个：wealthpilot connectors add <第一列> [--url 服务地址] [--token 令牌]。这张表是查公开资料整理的，没有一家实际连过。")
+        return 0
+    if action == "list":
+        found = connectors.load_connectors()
+        for c in found:
+            info = c.public()
+            out(f"  {c.name:<12} {_pad(c.label, 16)} {'开着' if c.enabled else '关着'}  令牌：{info['auth']}  {c.url or c.command}")
+        out("试一下能不能连上：wealthpilot connectors test <名字>" if found else "还没有接外部数据服务。wealthpilot connectors gallery 看现成的有哪些。")
+        return 0
+    if action == "add":
+        preset = BY_KEY.get(name.lower())
+        if preset is None:
+            out(f"没有「{name}」这个现成的服务。可选：{'、'.join(BY_KEY)}（wealthpilot connectors gallery 看说明）")
+            return 2
+        if preset["connector"] is None:
+            out(f"{preset['label']}：{preset['caveat']}")
+            return 1
+        item = {**preset["connector"], "enabled": True}
+        item["url"] = (args.url or item.get("url") or "").strip()
+        item["name"] = (args.rename or item["name"]).strip()
+        if not item["url"]:
+            out(f"{preset['label']} 要你提供服务地址：wealthpilot connectors add {preset['key']} --url <地址> [--token <令牌>]\n要什么：{preset['needs']}")
+            return 2
+        try:
+            saved = connectors.save_connector(item)
+        except ValueError as e:
+            out(f"✗ 没有保存：{e}")
+            return 1
+        if args.token:
+            from wealthpilot.routes.config import _write_env
+            _settings().ensure_dirs()
+            _write_env({saved.auth_env: args.token.strip()})
+        elif not preset.get("token_optional") and not connectors.token_for(saved):
+            out(f"还差令牌：再运行一次并带上 --token <令牌>（会存进配置文件的 {saved.auth_env}，不回显）")
+        out(f"✓ 已接上「{saved.label}」（{saved.url}）。只读：下单、转账、增删自选这类工具会被屏蔽。")
+        out(f"  试一下：wealthpilot connectors test {saved.name}    注意：{preset['caveat']}")
+        return 0
+    if not name:
+        out("要说是哪一个：wealthpilot connectors 看已经接了哪些")
+        return 2
+    if action == "remove":
+        out("✓ 已拿掉" if connectors.remove_connector(name) else f"没有接过「{name}」")
+        return 0
+    if action == "test":
+        target = next((c for c in connectors.load_connectors() if c.name == name), None)
+        if target is None:
+            out(f"没有接过「{name}」。wealthpilot connectors 看已经接了哪些")
+            return 1
+        try:
+            tools = asyncio.run(connectors.list_tools(target, refresh=True))
+        except BaseException as e:  # noqa: BLE001 — 连不上的原因五花八门（包括 MCP 库抛出的异常组），都要说成人话
+            while getattr(e, "exceptions", None):       # 异常组里包着真正的原因：一层层剥到最里面那一个
+                e = e.exceptions[0]
+            why = {"ConnectError": "服务没有开着，或者地址不对", "ConnectTimeout": "连接超时", "ReadTimeout": "对方迟迟不回",
+                   "HTTPStatusError": "对方拒绝了请求（多半是令牌不对）"}.get(type(e).__name__, f"{type(e).__name__}: {str(e)[:120]}")
+            out(f"✗ 连不上「{target.label}」：{why}\n  wealthpilot connectors 看地址和令牌填得对不对。")
+            return 1
+        allowed = [t for t in tools if t["allowed"]]
+        blocked = [t for t in tools if not t["allowed"]]
+        out(f"✓ 连上了「{target.label}」：{len(allowed)} 个工具可以给 AI 用" + (f"，{len(blocked)} 个被屏蔽" if blocked else ""))
+        for t in allowed[:12]:
+            out(f"  · {t['name']}")
+        for t in blocked[:8]:
+            out(f"  ✗ {t['name']}（{t['reason']}）")
+        return 0
+    return 2
+
+
 def cmd_recap(_args, *, out: Out = print) -> int:
     """今天市场发生了什么。不调用模型。"""
     from wealthpilot.services import recap
@@ -756,6 +838,12 @@ def register(sub) -> dict:
     logs.add_argument("--errors", action="store_true", help="只看警告和错误")
     logs.add_argument("-f", "--follow", action="store_true", help="一直跟着看新写进来的（Ctrl-C 停）")
     logs.add_argument("--path", action="store_true", help="只打印日志文件在哪")
+    conn = sub.add_parser("connectors", help="外部数据服务（MCP）：妙想、iFinD 等（connectors / gallery / add / test / remove）")
+    conn.add_argument("action", nargs="?", choices=["list", "gallery", "add", "test", "remove"])
+    conn.add_argument("name", nargs="?", help="add 时是现成服务的名字（见 gallery）；test / remove 时是已接服务的名字")
+    conn.add_argument("--url", help="服务地址")
+    conn.add_argument("--token", help="令牌（存进配置文件，不回显）")
+    conn.add_argument("--as", dest="rename", help="接进来之后叫什么名字（同一种服务接两个时用）")
     sub.add_parser("recap", help="大盘复盘：涨停与连板、涨停题材、龙虎榜、市场情绪（不调用模型）")
     sub.add_parser("macro", help="宏观数据：PMI、物价、货币信贷、利率")
     trades = sub.add_parser("trades", help="交易行为诊断：从成交记录里找追涨、交易过频、亏损加仓、处置效应（trades 交割单.csv）")
@@ -780,4 +868,5 @@ def register(sub) -> dict:
     restore.add_argument("--yes", action="store_true", help="不再确认")
     return {"setup": cmd_setup, "model": cmd_model, "config": cmd_config, "status": cmd_status, "skills": cmd_skills,
             "import": cmd_import, "sessions": cmd_sessions, "logs": cmd_logs, "backup": cmd_backup, "restore": cmd_restore,
-            "channels": cmd_channels, "persona": cmd_persona, "recap": cmd_recap, "macro": cmd_macro, "trades": cmd_trades, "daily": cmd_daily}
+            "channels": cmd_channels, "persona": cmd_persona, "recap": cmd_recap, "macro": cmd_macro, "trades": cmd_trades, "daily": cmd_daily,
+            "connectors": cmd_connectors}

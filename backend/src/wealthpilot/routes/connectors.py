@@ -20,6 +20,13 @@ def list_connectors():
     }
 
 
+@router.get("/presets")
+def connector_presets():
+    """现成的金融数据 MCP 服务：能不能接、要什么。接入只能在本机的命令行里做（wealthpilot connectors add）。"""
+    from wealthpilot.services.connector_presets import PRESETS, STATUS_LABEL
+    return [{k: p[k] for k in ("key", "label", "official", "status", "provides", "needs", "links", "caveat")} | {"status_label": STATUS_LABEL[p["status"]]} for p in PRESETS]
+
+
 @router.post("/{name}/test")
 async def test_connector(name: str):
     """连接一次并列出它提供的工具，标明哪些可用、哪些被屏蔽。"""

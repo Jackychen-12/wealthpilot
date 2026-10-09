@@ -246,6 +246,7 @@ OVERVIEW = """WealthPilot — 你自己的 A 股投研 Agent
   persona               回答风格：你希望它怎么跟你说话
   skills                研究方法（skills gallery / install）
   channels              手机渠道：Telegram / 飞书 / 钉钉 / 企业微信
+  connectors            外部数据服务（MCP）：妙想、iFinD 等，接进来只读
   config                看和改其他配置（config list / get / set）
 
 出了问题
