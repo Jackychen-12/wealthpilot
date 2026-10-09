@@ -83,8 +83,8 @@ export const MacroSection: React.FC = () => {
                   <Td>{i.label}</Td>
                   <Td right num>{i.value}{i.unit}</Td>
                   <Td right num className={signClass(i.change ?? 0)}>{i.change == null ? '—' : `${i.change > 0 ? '+' : ''}${i.change}`}</Td>
-                  <Td className="text-steel">{i.unit === '%' && i.as_of.length >= 10 && ['cn10y', 'cn2y', 'us10y', 'us2y', 'lpr1y', 'lpr5y'].includes(i.key) ? i.as_of : i.as_of.slice(0, 7)}</Td>
-                  <Td className="text-steel">{i.how_to_read ?? ''}</Td>
+                  <Td className={i.lag_note ? 'text-on-yellow' : 'text-steel'}>{i.unit === '%' && i.as_of.length >= 10 && ['cn10y', 'cn2y', 'us10y', 'us2y', 'lpr1y', 'lpr5y'].includes(i.key) ? i.as_of : i.as_of.slice(0, 7)}</Td>
+                  <Td className="text-steel">{i.lag_note ? <span className="text-on-yellow">{i.lag_note}。</span> : null}{i.how_to_read ?? ''}</Td>
                 </tr>
               ))}
             </Table>

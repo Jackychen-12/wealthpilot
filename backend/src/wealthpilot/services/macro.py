@@ -1,15 +1,21 @@
 """宏观数据：景气、物价、货币信贷、利率。个股研究之外的那层背景。
 
-都来自东方财富数据中心整理的官方口径（统计局、央行、中债、美国财政部），不调用模型。
-社会融资规模暂时没有接：试过的接口取不到，这里用"新增人民币贷款"和 M2 看信用松紧，并如实标出来。
+大部分来自东方财富数据中心整理的官方口径（统计局、央行、中债、美国财政部），不调用模型。
+社会融资规模东方财富没有，用的是商务部商务数据中心转载的央行数据。这个来源更新得慢，经常比别的月度数据晚几个月 ——
+晚了就在这一项上写明"只更新到哪个月"，不拿旧数字冒充最新的。
 """
 
 from __future__ import annotations
 
 import asyncio
 
+import httpx
+
 from wealthpilot.services import cache
 from wealthpilot.services.stocks import datacenter
+
+TSF_URL = "https://data.mofcom.gov.cn/datamofcom/front/gnmy/shrzgmQuery"
+TSF_HOW = "当月新增；贷款之外还算上债券、股票、表外融资，比新增贷款更全地反映实体拿到了多少钱（季节性很强，和去年同月比）"
 
 # (键, 名称, 报表, 字段, 单位, 怎么读)
 SERIES = (
@@ -37,11 +43,41 @@ def _point(rows: list[dict], field: str, date_field: str = "REPORT_DATE") -> dic
             "series": [{"date": d, "value": round(v, 2)} for d, v in reversed(seen[:12])]}
 
 
+def _months_between(earlier: str, later: str) -> int:
+    return (int(later[:4]) - int(earlier[:4])) * 12 + int(later[5:7]) - int(earlier[5:7])
+
+
+def tsf_point(rows: list[dict], reference: str = "") -> dict | None:
+    """社会融资规模增量（亿元）。reference 是别的月度数据已经到了哪个月：比它晚两个月以上就标出来。"""
+    usable = [{"REPORT_DATE": f"{str(r.get('date'))[:4]}-{str(r.get('date'))[4:6]}-01", "TSF": r.get("tiosfs")} for r in rows
+              if len(str(r.get("date") or "")) == 6 and str(r.get("date")).isdigit()]
+    point = _point(sorted(usable, key=lambda r: r["REPORT_DATE"], reverse=True), "TSF")
+    if point is None:
+        return None
+    out = {"key": "tsf", "label": "社会融资规模增量", "unit": "亿元", "how_to_read": TSF_HOW, **point}
+    behind = _months_between(point["as_of"], reference) if reference else 0
+    if behind >= 2:
+        out["lag_note"] = f"这个来源只更新到 {point['as_of'][:7]}，比其他月度数据晚 {behind} 个月"
+    return out
+
+
+async def _tsf_rows(transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=10, transport=transport, headers={"User-Agent": "Mozilla/5.0"}) as client:
+            resp = await client.post(TSF_URL)
+            rows = resp.json() if resp.status_code == 200 else []
+            return rows if isinstance(rows, list) else []
+    except (httpx.HTTPError, ValueError):
+        return []
+
+
 async def snapshot() -> dict:
     async def load():
         reports = sorted({s[2] for s in SERIES})
+        tsf_task = asyncio.create_task(_tsf_rows())            # 和东方财富那几张表同时取
         loaded = await asyncio.gather(*(datacenter(r, sort="REPORT_DATE", page_size=14) for r in reports), datacenter("RPTA_WEB_RATE", sort="TRADE_DATE", page_size=14),
                                       datacenter("RPTA_WEB_TREASURYYIELD", sort="SOLAR_DATE", page_size=30), return_exceptions=True)
+        tsf_rows = await tsf_task
         by_report = {r: (v[0] if isinstance(v, tuple) else []) for r, v in zip(reports, loaded, strict=False)}
         lpr_rows = loaded[-2][0] if isinstance(loaded[-2], tuple) else []
         yield_rows = loaded[-1][0] if isinstance(loaded[-1], tuple) else []
@@ -50,6 +86,10 @@ async def snapshot() -> dict:
             point = _point(by_report.get(report) or [], field)
             if point:
                 indicators.append({"key": key, "label": label, "unit": unit, "how_to_read": how, **point})
+        loans = next((i for i in indicators if i["key"] == "loans"), None)
+        tsf = tsf_point(tsf_rows, loans["as_of"] if loans else "")
+        if tsf:
+            indicators.insert(indicators.index(loans) + 1 if loans else len(indicators), tsf)
         rates = []
         for key, label, field in (("lpr1y", "LPR 1 年期", "LPR1Y"), ("lpr5y", "LPR 5 年期以上", "LPR5Y")):
             point = _point(lpr_rows, field, "TRADE_DATE")
@@ -67,7 +107,7 @@ async def snapshot() -> dict:
         if not indicators and not rates:
             return None
         return {"indicators": indicators, "rates": rates, "spread": spread,
-                "missing": ["社会融资规模（暂时没有接上数据源，先看新增人民币贷款和 M2）"],
+                "missing": [] if tsf else ["社会融资规模（这次没取到，先看新增人民币贷款和 M2）"],
                 "note": "月度数据在次月中上旬公布，as_of 是数据所属的月份而不是公布日。LPR 每月 20 日报价。"}
     return await cache.cached("macro:snapshot", 6 * cache.HOUR, load) or {"indicators": [], "rates": [], "spread": None, "missing": [], "note": ""}
 
@@ -78,7 +118,8 @@ def text(snap: dict) -> str:
 
     def line(item: dict, daily: bool = False) -> str:
         moved = "" if item.get("change") in (None, 0) else f"（比上期{'升' if item['change'] > 0 else '降'} {abs(item['change']):g}）"
-        return f"{item['label']} {item['value']:g}{item['unit']}{moved} · {item['as_of'] if daily else item['as_of'][:7]}"
+        late = f"（注意：{item['lag_note']}）" if item.get("lag_note") else ""
+        return f"{item['label']} {item['value']:g}{item['unit']}{moved} · {item['as_of'] if daily else item['as_of'][:7]}{late}"
     lines = [line(i) for i in snap["indicators"]] + [line(r, daily=True) for r in snap["rates"]]
     if snap.get("spread"):
         lines.append(f"{snap['spread']['label']} {snap['spread']['value']:+g} {snap['spread']['unit']}")

@@ -88,6 +88,27 @@ def test_macro_points_skip_gaps_and_keep_a_short_series():
     assert "取不到" in macro.text({"indicators": [], "rates": []})
 
 
+async def test_social_financing_is_shown_with_its_own_month_and_flagged_when_the_source_lags():
+    import httpx
+    rows = [{"date": "202604", "tiosfs": 6245, "rmblaon": -4006}, {"date": "202603", "tiosfs": 52240}, {"date": "bad", "tiosfs": 1}, {"date": "202602", "tiosfs": None}]
+    fresh = macro.tsf_point(rows, "2026-05-01")
+    assert (fresh["value"], fresh["as_of"], fresh["previous"], fresh["unit"]) == (6245, "2026-04-01", 52240, "亿元") and "lag_note" not in fresh
+    late = macro.tsf_point(rows, "2026-08-01")
+    assert late["lag_note"] == "这个来源只更新到 2026-04，比其他月度数据晚 4 个月"
+    out = macro.text({"indicators": [late], "rates": []})
+    assert "社会融资规模增量 6245亿元（比上期降 45995） · 2026-04（注意：这个来源只更新到 2026-04，比其他月度数据晚 4 个月）" in out
+    assert macro.tsf_point([], "2026-08-01") is None and macro.tsf_point([{"date": "202604"}]) is None
+
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, str(request.url)))
+        return httpx.Response(200, json=rows)
+    assert len(await macro._tsf_rows(httpx.MockTransport(handler))) == 4 and seen == [("POST", macro.TSF_URL)]
+    assert await macro._tsf_rows(httpx.MockTransport(lambda r: httpx.Response(503))) == []                # 对方挂了：当作没有，不报错
+    assert await macro._tsf_rows(httpx.MockTransport(lambda r: httpx.Response(200, text="<html>维护中</html>"))) == []
+
+
 # ── 反向 DCF ────────────────────────────────────────────
 
 ROWS = [{"report_date": "2026-06-30", "net_profit_yi": 460.0}, {"report_date": "2025-12-31", "net_profit_yi": 800.0}, {"report_date": "2025-06-30", "net_profit_yi": 440.0},
