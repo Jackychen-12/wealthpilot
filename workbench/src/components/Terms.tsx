@@ -1,11 +1,11 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import { DEMO, api, type GlossaryTerm } from '../api'
+import { api, type GlossaryTerm } from '../api'
 
 // 词条只取一次，全站共用
 let loaded: Promise<GlossaryTerm[]> | null = null
 export const loadGlossary = (): Promise<GlossaryTerm[]> => {
-  if (!loaded) loaded = (DEMO ? Promise.resolve([]) : api.glossary()).catch(() => { loaded = null; return [] })
+  if (!loaded) loaded = api.glossary().catch(() => { loaded = null; return [] })
   return loaded
 }
 

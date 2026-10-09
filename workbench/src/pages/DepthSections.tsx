@@ -9,9 +9,9 @@ const MOOD_TONE: Record<string, string> = { 冰点: 'text-down', 偏冷: 'text-d
 
 /** 今天市场发生了什么：涨停与连板、题材热点、龙虎榜。全是取数和计数，不调用模型。 */
 export const RecapSection: React.FC = () => {
-  const recap = useApi(() => (DEMO ? Promise.reject(new Error('demo')) : api.recap()))
+  const recap = useApi(api.recap)
   const r = recap.data
-  if (DEMO || (!recap.loading && !r)) return null     // 休市、没开盘、演示：这一块不占地方
+  if (!recap.loading && !r) return null     // 休市、没开盘：这一块不占地方
   return (
     <Section title="大盘复盘" hint={r ? `${r.day} 收盘 · 市场情绪：${r.mood.label}（五项指标固定打分，描述今天，不预测明天）` : undefined}>
       <DataState loading={recap.loading && !r}>
@@ -68,10 +68,10 @@ export const RecapSection: React.FC = () => {
 
 /** 宏观数据：景气、物价、货币信贷、利率。 */
 export const MacroSection: React.FC = () => {
-  const macro = useApi(() => (DEMO ? Promise.reject(new Error('demo')) : api.macro()))
+  const macro = useApi(api.macro)
   const m = macro.data
   const rows = [...(m?.indicators ?? []), ...(m?.rates ?? [])]
-  if (DEMO || (!macro.loading && !rows.length)) return null
+  if (!macro.loading && !rows.length) return null
   return (
     <Section title="宏观" hint="景气、物价、货币信贷、利率。月度数据次月公布">
       <DataState loading={macro.loading && !m}>
@@ -143,9 +143,9 @@ export const StanceSection: React.FC = () => {
 
 /** 反向 DCF：现价隐含了多高的利润增速。不是目标价。 */
 export const ReverseDcfSection: React.FC<{ code: string }> = ({ code }) => {
-  const dcf = useApi(() => (DEMO ? Promise.reject(new Error('demo')) : api.reverseDcf(code)), [code])
+  const dcf = useApi(() => api.reverseDcf(code), [code])
   const d = dcf.data
-  if (DEMO) return null
+  if (DEMO && !dcf.loading && !d) return null     // 演示里只录了一只股票的
   return (
     <Section title="隐含增长率（反向 DCF）" hint="按现在的市值倒推：利润要以多高的速度增长十年，才配得上这个价钱。不是目标价">
       <DataState loading={dcf.loading && !d} error={dcf.error} onRetry={dcf.reload}>

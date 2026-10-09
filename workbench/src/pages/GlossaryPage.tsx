@@ -1,8 +1,7 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import { DEMO, type GlossaryTerm } from '../api'
+import type { GlossaryTerm } from '../api'
 import { loadGlossary } from '../components/Terms'
-import { Callout } from '../components/kit'
 import { Page, Section } from '../components/ui'
 
 /** 名词解释：界面上出现的术语，各用一两句话说清楚是什么、怎么读。 */
@@ -12,7 +11,6 @@ const GlossaryPage: React.FC = () => {
   useEffect(() => { void loadGlossary().then(setTerms) }, [])
   const key = q.trim().toLowerCase()
   const shown = key ? terms.filter((t) => [t.term, ...t.aliases].some((w) => w.toLowerCase().includes(key))) : terms
-  if (DEMO) return <Page title="名词解释" description="界面上出现的术语，各用一两句话说清楚"><Callout tone="info">在线演示没有后端，这一页在本地运行后可用。</Callout></Page>
   return (
     <Page title="名词解释" description="界面上用的是行情软件和研报里通行的叫法，方便对照和查找；每个词在这里都有一两句大白话">
       <Section title={`${shown.length} 个词条`} hint="终端里用 /glossary 封板率，手机里发“解释 封板率”，看到的是同一份">
