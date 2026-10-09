@@ -104,9 +104,10 @@ async def test_social_financing_is_shown_with_its_own_month_and_flagged_when_the
     def handler(request):
         seen.append((request.method, str(request.url)))
         return httpx.Response(200, json=rows)
-    assert len(await macro._tsf_rows(httpx.MockTransport(handler))) == 4 and seen == [("POST", macro.TSF_URL)]
-    assert await macro._tsf_rows(httpx.MockTransport(lambda r: httpx.Response(503))) == []                # 对方挂了：当作没有，不报错
-    assert await macro._tsf_rows(httpx.MockTransport(lambda r: httpx.Response(200, text="<html>维护中</html>"))) == []
+    assert len(await macro._tsf_mofcom(httpx.MockTransport(handler))) == 4 and seen == [("POST", macro.TSF_URL)]
+    for broken in (httpx.Response(503), httpx.Response(200, text="<html>维护中</html>"), httpx.Response(200, json={"error": "x"})):
+        with pytest.raises(macro.SourceError):                      # 对方挂了、返回的不是表：算这个来源失败，好换下一个
+            await macro._tsf_mofcom(httpx.MockTransport(lambda r, broken=broken: broken))
 
 
 # ── 反向 DCF ────────────────────────────────────────────

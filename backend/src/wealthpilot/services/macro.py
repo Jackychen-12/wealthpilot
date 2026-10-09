@@ -1,18 +1,24 @@
 """宏观数据：景气、物价、货币信贷、利率。个股研究之外的那层背景。
 
-大部分来自东方财富数据中心整理的官方口径（统计局、央行、中债、美国财政部），不调用模型。
-社会融资规模东方财富没有，用的是商务部商务数据中心转载的央行数据。这个来源更新得慢，经常比别的月度数据晚几个月 ——
-晚了就在这一项上写明"只更新到哪个月"，不拿旧数字冒充最新的。
+PMI、物价、货币、GDP、国债收益率来自东方财富数据中心整理的官方口径（统计局、央行、中债、美国财政部），不调用模型。
+能直接用发布方自己的，就用发布方的：
+  LPR           中国货币网（全国银行间同业拆借中心）；不通时退回东方财富
+  社会融资规模   中国人民银行官网的统计表；不通时退回商务部商务数据中心的转载 —— 那个转载更新得慢，经常晚几个月，
+                晚了就在这一项上写明"只更新到哪个月"，不拿旧数字冒充最新的
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
+from datetime import date, timedelta
+from urllib.parse import urljoin
 
 import httpx
 
-from wealthpilot.services import cache
-from wealthpilot.services.stocks import datacenter
+from wealthpilot.services import cache, sources
+from wealthpilot.services.sources import SourceError
+from wealthpilot.services.stocks import _HEADERS, datacenter
 
 TSF_URL = "https://data.mofcom.gov.cn/datamofcom/front/gnmy/shrzgmQuery"
 TSF_HOW = "当月新增；贷款之外还算上债券、股票、表外融资，比新增贷款更全地反映实体拿到了多少钱（季节性很强，和去年同月比）"
@@ -61,25 +67,125 @@ def tsf_point(rows: list[dict], reference: str = "") -> dict | None:
     return out
 
 
-async def _tsf_rows(transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
+async def _tsf_mofcom(transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
+    """商务部商务数据中心转载的社融数据：[{date: '202604', tiosfs: 6245, …}]。"""
+    async with httpx.AsyncClient(timeout=10, transport=transport, headers={"User-Agent": "Mozilla/5.0"}) as client:
+        resp = await client.post(TSF_URL)
     try:
-        async with httpx.AsyncClient(timeout=10, transport=transport, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            resp = await client.post(TSF_URL)
-            rows = resp.json() if resp.status_code == 200 else []
-            return rows if isinstance(rows, list) else []
-    except (httpx.HTTPError, ValueError):
-        return []
+        rows = resp.json()
+    except ValueError as e:
+        raise SourceError(f"商务数据中心返回 {resp.status_code}，不是预期的结构") from e
+    if resp.status_code != 200 or not isinstance(rows, list):
+        raise SourceError(f"商务数据中心返回 {resp.status_code}，不是预期的结构")
+    return rows
+
+
+PBC_INDEX = "http://www.pbc.gov.cn/diaochatongjisi/116219/116319/index.html"
+_LINK = re.compile(r"""<a[^>]+href=['"]([^'"]+)['"][^>]*>(.*?)</a>""", re.S)
+
+
+def _pbc_link(html: str, text: str) -> str:
+    """页面里文字是 text 的那个链接。"""
+    return next((href for href, label in _LINK.findall(html) if re.sub(r"<[^>]+>|\s+", "", label).startswith(text)), "")
+
+
+def parse_pbc_table(html: str) -> list[dict]:
+    """央行“社会融资规模增量统计表”：每行第一格是 2026.08 这样的月份，第二格是当月增量（亿元）。"""
+    out = []
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S):
+        cells = [re.sub(r"<[^>]+>|&nbsp;|\s+", "", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
+        if len(cells) >= 2 and re.fullmatch(r"20\d\d\.\d\d", cells[0]):
+            try:
+                out.append({"date": cells[0].replace(".", ""), "tiosfs": float(cells[1].replace(",", ""))})
+            except ValueError:
+                continue
+    return out
+
+
+async def _tsf_pbc(transport: httpx.AsyncBaseTransport | None = None, today: date | None = None) -> list[dict]:
+    """中国人民银行官网：统计数据 → 某年 → 社会融资规模 → 增量统计表。今年和去年各取一张，够算上期和近十二个月。"""
+    today = today or date.today()
+
+    async def page(client: httpx.AsyncClient, url: str) -> str:
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            raise SourceError(f"央行官网返回 {resp.status_code}")
+        text = resp.content.decode("utf-8", errors="replace")
+        return text if "统计" in text or "社会融资" in text else resp.content.decode("gb18030", errors="replace")
+
+    async def year_rows(client: httpx.AsyncClient, index: str, year: int) -> list[dict]:
+        year_url = _pbc_link(index, f"{year}年统计数据")
+        if not year_url:
+            return []                                       # 一月份新一年的页面还没建：不算出错
+        year_page = await page(client, urljoin(PBC_INDEX, year_url))
+        tsf_url = _pbc_link(year_page, "社会融资规模")
+        if not tsf_url:
+            raise SourceError(f"央行 {year} 年统计数据的页面里找不到“社会融资规模”")
+        tsf_page = await page(client, urljoin(urljoin(PBC_INDEX, year_url), tsf_url))
+        at = tsf_page.find("社会融资规模增量统计表")
+        match = re.search(r"""href=['"]([^'"]+\.htm)['"]""", tsf_page[at:]) if at >= 0 else None
+        if not match:
+            raise SourceError(f"央行 {year} 年的社融页面里找不到增量统计表")
+        return parse_pbc_table(await page(client, urljoin(urljoin(urljoin(PBC_INDEX, year_url), tsf_url), match.group(1))))
+
+    async with httpx.AsyncClient(timeout=15, transport=transport, headers=_HEADERS, follow_redirects=True) as client:
+        index = await page(client, PBC_INDEX)
+        if "年统计数据" not in index:
+            raise SourceError("央行统计数据的页面结构变了：找不到按年份的链接")
+        this_year, last_year = await asyncio.gather(year_rows(client, index, today.year), year_rows(client, index, today.year - 1))
+    rows = sorted(this_year + last_year, key=lambda r: r["date"], reverse=True)
+    if not rows:
+        raise SourceError("央行的社融统计表里没有认出任何月份")
+    return rows
+
+
+async def _tsf_rows() -> list[dict]:
+    rows, _ = await sources.first([("pbc", _tsf_pbc), ("mofcom", _tsf_mofcom)])
+    return rows or []
+
+
+async def _lpr_chinamoney(transport: httpx.AsyncBaseTransport | None = None, today: date | None = None) -> list[dict]:
+    """中国货币网的 LPR 历史，整理成和东方财富那张表一样的行：[{TRADE_DATE, LPR1Y, LPR5Y}]，新的在前。"""
+    today = today or date.today()
+    async with httpx.AsyncClient(timeout=10, transport=transport, headers={**_HEADERS, "Referer": "https://www.chinamoney.com.cn/chinese/bklpr/"}) as client:
+        resp = await client.post("https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/LprHis",
+                                 params={"lang": "CN", "strStartDate": (today - timedelta(days=360)).isoformat(), "strEndDate": today.isoformat()})   # 它只给一年以内的
+    try:
+        body = resp.json()
+        records = body["records"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise SourceError(f"中国货币网返回 {resp.status_code}，不是预期的结构") from e
+    if not records:
+        raise SourceError(f"中国货币网没有给出 LPR 记录：{(body.get('data') or {}).get('message') or '空'}")
+    rows = []
+    for r in records or []:
+        try:
+            rows.append({"TRADE_DATE": str(r["showDateCN"])[:10], "LPR1Y": float(r["1Y"]), "LPR5Y": float(r["5Y"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    if records and not rows:
+        raise SourceError("中国货币网的 LPR 记录里找不到 showDateCN / 1Y / 5Y，字段改名了")
+    return sorted(rows, key=lambda r: r["TRADE_DATE"], reverse=True)
+
+
+async def _lpr_rows() -> list[dict]:
+    async def eastmoney():
+        rows, _ = await datacenter("RPTA_WEB_RATE", sort="TRADE_DATE", page_size=14, strict=True)
+        return rows
+    rows, _ = await sources.first([("chinamoney", _lpr_chinamoney), ("eastmoney", eastmoney)])
+    return rows or []
 
 
 async def snapshot() -> dict:
     async def load():
         reports = sorted({s[2] for s in SERIES})
         tsf_task = asyncio.create_task(_tsf_rows())            # 和东方财富那几张表同时取
-        loaded = await asyncio.gather(*(datacenter(r, sort="REPORT_DATE", page_size=14) for r in reports), datacenter("RPTA_WEB_RATE", sort="TRADE_DATE", page_size=14),
+        lpr_task = asyncio.create_task(_lpr_rows())
+        loaded = await asyncio.gather(*(datacenter(r, sort="REPORT_DATE", page_size=14) for r in reports),
                                       datacenter("RPTA_WEB_TREASURYYIELD", sort="SOLAR_DATE", page_size=30), return_exceptions=True)
         tsf_rows = await tsf_task
         by_report = {r: (v[0] if isinstance(v, tuple) else []) for r, v in zip(reports, loaded, strict=False)}
-        lpr_rows = loaded[-2][0] if isinstance(loaded[-2], tuple) else []
+        lpr_rows = await lpr_task
         yield_rows = loaded[-1][0] if isinstance(loaded[-1], tuple) else []
         indicators = []
         for key, label, report, field, unit, how in SERIES:
