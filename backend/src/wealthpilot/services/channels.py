@@ -33,10 +33,11 @@ HELP = ("直接发问题就是一次研究，例如：帮我分析一下宁德�
         "不用模型、马上就有的（直接发这几个词）：\n"
         "复盘 — 今天的大盘：涨停、连板、题材、龙虎榜\n宏观 — PMI、物价、利率\n持仓 / 自选 — 现价和盈亏\n"
         "简报 — 你的股票今天有什么事\n回溯 — 之前的判断对不对\n建议单 — 等你决定的操作建议\n"
+        "记一笔 宁德时代 储能订单超预期 来自 雪球某某 — 记下为什么买；只发“对账”看按来源的结果\n"
         "状态 / 用量 — 模型、今天花了多少\n停 — 停掉正在查的这一个\n解释 封板率 — 看不懂的词\n\n"
         "要它研究的：\n/quick 问题 — 快速回答（十来秒）\n/deep 问题 — 重新取数，完整研究\n"
         "/rewrite 要求 — 把上一个回答换个写法\n/stock 名称 — 行情与估值分位\n/new — 开始新会话\n\n"
-        "斜杠命令照旧可用：/recap /macro /holdings /watch /digest /review /proposals /tasks /status /usage /stop /help")
+        "斜杠命令照旧可用：/recap /macro /holdings /watch /digest /review /why /proposals /tasks /status /usage /stop /help")
 FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
 STATUS = {"passed": "已通过校验", "partial": "部分证据缺失", "rejected": "未通过校验，未发布", "insufficient_data": "证据不足，未发布", "failed": "执行失败"}
 
@@ -232,6 +233,8 @@ class Bot:
         word = text.strip().lstrip("/")
         if word in glossary.COMMAND_WORDS:          # 手机上打斜杠和英文不方便：整句话正好是"复盘""持仓"就当命令
             text = glossary.COMMAND_WORDS[word]
+        elif text.startswith("记一笔 "):            # “记一笔 宁德时代 理由…”：记买入理由，不是提问
+            text = "/why " + text.split(None, 1)[1]
         command, _, rest = text.partition(" ")
         rest = rest.strip()
         if command in ("解释", "/解释", "/glossary", "什么是") and rest:
@@ -270,6 +273,8 @@ class Bot:
             await self._watchlist(chat_id)
         elif command == "/tasks":
             await self._tasks(chat_id)
+        elif command == "/why":
+            await self._why(chat_id, rest)
         elif command == "/recap":
             from wealthpilot.services import recap
             await self.api.send(chat_id, recap.text(await recap.build()))
@@ -513,6 +518,26 @@ class Bot:
         if stances["total"]:
             lines += ["", stance.text(stances)]
         await self.api.send(chat_id, "\n".join(lines))
+
+    async def _why(self, chat_id: int, rest: str) -> None:
+        """买入理由记录：刚下完单，顺手在手机里记一句；不带内容就是看按来源对账。"""
+        from wealthpilot.services import decisions, securities
+        if not rest:
+            with self._session() as db:
+                report = await decisions.review(db, self.uid)
+            await self.api.send(chat_id, decisions.text(report) + ("" if report["decisions"] else f"\n\n{decisions.USAGE}"))
+            return
+        try:
+            note = decisions.parse_note(rest)
+            hits = await securities.search(note.pop("query"), 1)
+            if not hits:
+                raise ValueError("没认出是哪只股票，换个写法或直接写代码。")
+            with self._session() as db:
+                row = decisions.add(db, self.uid, {"code": hits[0]["code"], "name": hits[0]["name"], **note})
+                done = f"记下了：{row.day} {'卖出' if row.action == 'sell' else '买入'} {row.name} —— {row.reason}（来源：{row.source_kind}）"
+        except ValueError as e:
+            done = str(e)
+        await self.api.send(chat_id, done)
 
     async def _stock(self, chat_id: int, query: str) -> None:
         from wealthpilot.services import securities, stocks

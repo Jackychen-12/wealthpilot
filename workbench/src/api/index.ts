@@ -189,6 +189,9 @@ export const api = {
   reverseDcf: (code: string) => request<ReverseDcf>(`/api/market/stock/${code}/reverse-dcf`),
   stances: () => request<StanceCard>('/api/stances'),
   checkTrades: (text: string) => request<TradesReport>('/api/trades/check', json('POST', { text })),
+  decisionsReview: () => request<DecisionReview>('/api/decisions/review'),
+  addDecision: (body: Omit<Decision, 'id' | 'price'>) => request<Decision>('/api/decisions', json('POST', body)),
+  removeDecision: (id: number) => request<unknown>(`/api/decisions/${id}`, { method: 'DELETE' }),
   glossary: () => request<GlossaryTerm[]>('/api/settings/glossary'),
   persona: () => request<Persona>('/api/settings/persona'),
   savePersona: (text: string) => request<Persona>('/api/settings/persona', json('PUT', { text })),
@@ -204,6 +207,7 @@ export const api = {
   version: (refresh = false) => request<VersionInfo>(`/api/settings/version${refresh ? '?refresh=1' : ''}`),
   doctor: (model = false) => request<{ items: DoctorItem[] }>(`/api/settings/doctor${model ? '?model=1' : ''}`),
   connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
+  connectorPresets: () => request<ConnectorPreset[]>('/api/connectors/presets'),
   testConnector: (name: string) => request<ConnectorTest>(`/api/connectors/${name}/test`, { method: 'POST' }),
   fundNav: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/fund/${code}/nav?days=${days}`),
   login: (username: string, password: string) =>
@@ -249,7 +253,7 @@ export interface Recap { day: string; indices: { name: string; change: string }[
   billboard: { count: number; institution_net_yi: number | null; northbound_net_yi: number | null; top_buy: { code: string; name: string; net_yi: number; change_pct: number }[]
     seats: { seat: string; kind: string; net_yi: number; stocks: string[] }[] } | null
   mood: { label: string; points: number; basis: string[] } }
-export interface MacroPoint { key: string; label: string; unit: string; value: number; as_of: string; previous: number | null; change: number | null; how_to_read?: string }
+export interface MacroPoint { key: string; label: string; unit: string; value: number; as_of: string; previous: number | null; change: number | null; how_to_read?: string; lag_note?: string }
 export interface MacroSnapshot { indicators: MacroPoint[]; rates: MacroPoint[]; spread: { label: string; value: number; unit: string; how_to_read: string } | null; missing: string[]; note: string }
 export interface ReverseDcf { ok: boolean; reason?: string; code: string; name: string; market_cap_yi: number | null; profit_ttm_yi?: number; profit_period?: string; pe_ttm?: number
   implied_growth?: { discount_pct: number; growth_pct: number | null }[]; past_profit_cagr_3y_pct?: number | null
@@ -258,6 +262,11 @@ export interface StanceHorizon { settled: number; pending: number; right: number
 export interface StanceCall { message_id: number; code: string; name: string; stance: string; asked: string
   results: Record<string, { settled: boolean; excess_pct?: number; return_pct?: number; benchmark_pct?: number; right?: boolean }> }
 export interface StanceCard { total: number; calls: StanceCall[]; horizons: Record<string, StanceHorizon>; note: string; benchmark: string; neutral_band_pct: number }
+export interface Decision { id: number; code: string; name: string; action: string; day: string; price: number | null; reason: string; source_kind: string; source_name: string }
+interface DecisionHorizon { settled: number; beat: number; avg_excess_pct: number | null }
+export interface DecisionGroup { source: string; count: number; d20: DecisionHorizon; d60: DecisionHorizon }
+export interface DecisionReview { decisions: Decision[]; by_source: DecisionGroup[]; by_name: DecisionGroup[]; note: string; benchmark: string }
+export interface ConnectorPreset { key: string; label: string; official: boolean; status: 'ready' | 'needs_url' | 'unsupported'; status_label: string; provides: string; needs: string; links: string[]; caveat: string }
 export interface TradesReport { ok: boolean; reason?: string; problems: string[]; trades: number; stocks?: number; closed?: number; period?: { from: string; to: string }
   findings?: { key: string; label: string; flag: boolean; text: string; examples: string[] }[]; flagged?: string[]; worst_stocks?: { name: string; pnl: number }[]
   missing_prices?: string[]; note?: string }

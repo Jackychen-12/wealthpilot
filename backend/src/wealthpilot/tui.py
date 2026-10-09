@@ -43,6 +43,7 @@ COMMANDS: dict[str, str] = {
     "/macro": "宏观数据：PMI、物价、货币信贷、利率",
     "/dcf": "/dcf <名称或代码> — 反向 DCF：现价的隐含增长率（不是目标价）",
     "/trades": "/trades <成交记录文件> — 交易行为诊断：追涨、交易过频、亏损加仓、处置效应",
+    "/why": "/why [<名称或代码> <理由> [来自 <来源>] | rm <编号>] — 买入理由记录，以及按来源对账（听谁的买的、后来怎么样）",
     "/holdings": "我的持仓",
     "/watch": "/watch [add|rm <名称或代码>] — 自选股",
     "/review": "验证点成绩单（事后验证）",
@@ -88,7 +89,7 @@ FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '�
 HELP_GROUPS = [
     ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/retry", "/export", "/evidence", "/history", "/sessions", "/new"]),
     ("行情", ["/stock", "/search", "/screen", "/market", "/recap", "/macro", "/dcf"]),
-    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/trades", "/proposals", "/approve", "/reject", "/broker", "/order"]),
+    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/trades", "/why", "/proposals", "/approve", "/reject", "/broker", "/order"]),
     ("自己干活", ["/digest", "/tasks", "/alert"]),
     ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit", "/glossary"]),
     ("其他", ["/setup", "/model", "/usage", "/sample", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
@@ -530,6 +531,33 @@ class App:
         with self.console.status("[dim]取行情、配对买卖…", spinner="dots"):
             report = await self.backend.request("POST", "/api/trades/check", json={"text": content})
         self.console.print(trades.text(report), highlight=False, markup=False)
+
+    async def cmd_why(self, args: str) -> None:
+        """买入理由记录。不带参数：看记录和按来源对账；带参数：记一条。"""
+        from wealthpilot.services import decisions
+        parts = args.split(None, 1)
+        if parts and parts[0] == "rm":
+            if len(parts) < 2 or not parts[1].strip().isdigit():
+                raise ValueError("用法：/why rm <编号>")
+            await self.backend.request("DELETE", f"/api/decisions/{parts[1].strip()}")
+            self.console.print("已删除")
+        elif parts:
+            note = decisions.parse_note(args)
+            sec = await self.resolve(note.pop("query"))
+            row = await self.backend.request("POST", "/api/decisions", json={"code": sec["code"], "name": sec["name"], **note})
+            self.console.print(f"记下了：{row['day']} {'卖出' if row['action'] == 'sell' else '买入'} {row['name']} —— {row['reason']}（来源：{row['source_kind']}）", highlight=False, markup=False)
+            return
+        with self.console.status("[dim]取行情、对账…", spinner="dots"):
+            report = await self.backend.request("GET", "/api/decisions/review")
+        if report["decisions"]:
+            t = self.table("编号", "日期", "", "名称", "理由", "来源")
+            for d in report["decisions"][:20]:
+                source = d["source_kind"] + (f"（{d['source_name']}）" if d["source_name"] and d["source_name"] != d["source_kind"] else "")
+                t.add_row(str(d["id"]), d["day"], "卖" if d["action"] == "sell" else "买", d["name"], escape(d["reason"]), escape(source))
+            self.console.print(t)
+        self.console.print(decisions.text(report), highlight=False, markup=False)
+        if not report["decisions"]:
+            self.console.print("[dim]记一条：/why 宁德时代 储能订单超预期 来自 雪球某某[/]", highlight=False)
 
     async def cmd_verify(self, _: str) -> None:
         r = await self.backend.request("POST", "/api/checkpoints/verify")

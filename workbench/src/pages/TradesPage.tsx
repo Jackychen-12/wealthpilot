@@ -4,6 +4,7 @@ import { DEMO, api, type TradesReport } from '../api'
 import { Button, Callout, Tag } from '../components/kit'
 import { Terms } from '../components/Terms'
 import { Metric, Metrics, Page, Section } from '../components/ui'
+import { DecisionsSection } from './DecisionsSection'
 
 const SAMPLE = '成交日期,证券代码,证券名称,操作,成交均价,成交数量\n20260112,600519,贵州茅台,证券买入,1500,100\n20260305,600519,贵州茅台,证券卖出,1420,100'
 
@@ -32,8 +33,9 @@ const TradesPage: React.FC = () => {
     return <Page title="交易行为诊断" description="从你自己的成交记录里，找反复出现的行为偏差"><Callout tone="info">在线演示没有后端，这一页在本地运行后可用。</Callout></Page>
   }
   return (
-    <Page title="交易行为诊断" description="从你自己的成交记录里，找反复出现的行为偏差：追涨、交易过频、亏损加仓、处置效应。只看行为，不评价选股">
-      <Section title="成交记录" hint="券商 App 里导出交割单（CSV），或者自己写：每行“日期 代码 买/卖 价格 数量”。只在这次计算里用，不保存">
+    <Page title="交易行为诊断" description="两件事：记下每次为什么买、过后按来源对账；从成交记录里找反复出现的行为偏差。都不调用模型">
+      <DecisionsSection />
+      <Section title="成交记录诊断" hint="券商 App 里导出交割单（CSV），或者自己写：每行“日期 代码 买/卖 价格 数量”。只在这次计算里用，不保存">
         <div className="grid max-w-3xl gap-3">
           <textarea aria-label="成交记录" value={text} onChange={(e) => setText(e.target.value)} rows={8} placeholder={SAMPLE}
             className="w-full rounded-md border border-hairline-strong bg-canvas px-3 py-2 font-mono text-[13px] leading-relaxed text-ink outline-none placeholder:text-stone focus:border-primary focus:ring-1 focus:ring-primary" />

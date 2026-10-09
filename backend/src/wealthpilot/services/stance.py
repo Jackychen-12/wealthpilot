@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import json
 from datetime import date, datetime
 
@@ -30,14 +31,19 @@ def _closes(records: list[dict]) -> list[tuple[str, float]]:
 def settle(stance: str, asked: str, stock: list[tuple[str, float]], bench: list[tuple[str, float]]) -> dict[int, dict]:
     """一条立场在各个期限上的结果。asked 是 YYYY-MM-DD；从当天（休市则下一个交易日）的收盘价算起。"""
     out: dict[int, dict] = {}
-    bench_by_day = dict(bench)
+    bench_days = [day for day, _ in bench]
+
+    def bench_on(day: str) -> float | None:
+        """大盘在这一天的收盘价；这一天 A 股休市（港股、美股的交易日历不一样）就用之前最近的一个交易日。"""
+        at = bisect.bisect_right(bench_days, day) - 1
+        return bench[at][1] if at >= 0 else None
     start = next((i for i, (day, _) in enumerate(stock) if day >= asked), None)
     for horizon in HORIZONS:
         if start is None or start + horizon >= len(stock):
             out[horizon] = {"settled": False}
             continue
         (day0, p0), (day1, p1) = stock[start], stock[start + horizon]
-        b0, b1 = bench_by_day.get(day0), bench_by_day.get(day1)
+        b0, b1 = bench_on(day0), bench_on(day1)
         if not p0 or not b0 or not b1:
             out[horizon] = {"settled": False}
             continue
