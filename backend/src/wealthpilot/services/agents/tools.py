@@ -5,7 +5,7 @@ import json
 
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.profile import InvestorProfile
-from wealthpilot.services import filings, screener
+from wealthpilot.services import expectation, filings, global_stocks, screener
 from wealthpilot.services.agents import depth_tools, insight_tools, web_tools
 from wealthpilot.services.analysis import (
     calculate_attribution_by_fund,
@@ -602,6 +602,18 @@ async def execute_tool(
     profile: InvestorProfile | None = None,
 ) -> str:
     """统一工具执行器。"""
+    code_arg = str(input_data.get("code") or "") if isinstance(input_data, dict) else ""
+    if code_arg and global_stocks.is_global(code_arg):
+        if name not in global_stocks.SUPPORTED_TOOLS:
+            return global_stocks.only_a_share(name, code_arg)
+        input_data = {**input_data, "code": global_stocks.canonical(code_arg)}
+        if name == "get_stock_news":          # 新闻按公司名搜，和市场无关
+            quote = await fetch_stock_quote(code_arg)
+            news = await expectation.fetch_stock_news((quote or {}).get("name") or code_arg, int(input_data.get("limit") or 8))
+            if not news:
+                return f"未获取到 {code_arg} 的相关新闻"
+            return json.dumps({"code": input_data["code"], "news": [{**n, "source_url": n["url"], "published_at": n["date"]} for n in news],
+                               "note": "按时间倒序。新闻是媒体的转述，标题常有夸张，引用时写明媒体和日期。"}, ensure_ascii=False)
     if name in insight_tools.NAMES:
         return await insight_tools.execute(name, input_data)
     if name in web_tools.NAMES:
@@ -726,6 +738,8 @@ async def execute_tool(
             return json.dumps(quote, ensure_ascii=False)
         kline = await fetch_stock_kline(code, 250)
         result = {k: quote[k] for k in ("code", "name", "price", "pe_ttm", "pb", "total_mv_yi", "quote_time")}
+        if quote.get("currency"):          # 港美股：把币种带上，市值是当地货币
+            result |= {"currency": quote["currency"], "market": global_stocks.MARKET_LABEL.get(quote.get("market", ""), "")}
         if kline:
             summary = summarize_kline(kline)
             result["price_range_1y"] = {k: summary[k] for k in

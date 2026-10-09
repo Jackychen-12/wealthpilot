@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from wealthpilot.services import macro, recap
+from wealthpilot.services import global_stocks, macro, recap
 from wealthpilot.services import valuation_models as vm
 from wealthpilot.services.stocks import (
     fetch_financial_indicators,
@@ -48,12 +48,14 @@ def _dump(payload: dict) -> str:
 
 async def reverse_dcf_for(code: str) -> dict | None:
     """页面和工具共用：取市值和财务指标，算反向 DCF。行情取不到返回 None。"""
-    code = plain_code(code)
+    overseas = global_stocks.is_global(code)
+    code = global_stocks.canonical(code) if overseas else plain_code(code)
     quote, rows, profile = await asyncio.gather(fetch_stock_quote(code), fetch_financial_indicators(code, 20), fetch_stock_profile(code), return_exceptions=True)
     if not isinstance(quote, dict):
         return None
     industry = (profile or {}).get("industry", "") if isinstance(profile, dict) else ""
-    out = vm.reverse_dcf(quote.get("total_mv_yi") or 0, rows if isinstance(rows, list) else [], name=quote.get("name") or code, industry=industry)
+    out = vm.reverse_dcf(quote.get("total_mv_yi") or 0, rows if isinstance(rows, list) else [], name=quote.get("name") or code, industry=industry,
+                         pe_ttm=(quote.get("pe_ttm") or 0) if overseas else None, currency=quote.get("currency", ""))
     return {"code": code, "price": quote.get("price"), "industry": industry, **out}
 
 
@@ -88,7 +90,8 @@ async def execute(name: str, input_data: dict) -> str:
             return f"未获取到概念板块「{query}」的成分股（没有这个板块，或者暂时取不到）。可以先用 get_concept_boards 看有哪些板块"
         return _dump({**found, "note": "属于这个板块不等于主营业务就是它：很多公司只是沾边。要看一家公司到底有多少收入来自这个题材，用 get_business_segments。"})
     if name == "compute_reverse_dcf":
-        code = plain_code(str(input_data.get("code") or ""))
+        raw = str(input_data.get("code") or "")
+        code = global_stocks.canonical(raw) if global_stocks.is_global(raw) else plain_code(raw)
         result = await reverse_dcf_for(code) if code else None
         if result is None:
             return f"未获取到 {code} 的行情，算不了反向 DCF"

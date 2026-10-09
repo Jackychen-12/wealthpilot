@@ -57,18 +57,26 @@ def ttm_profit(rows: list[dict]) -> tuple[float, str] | None:
 
 
 def annual_cagr(rows: list[dict], years: int = 3) -> float | None:
+    # A 股的年报都截止在 12-31；港美股的财年各不相同，由数据里的 annual 标记说了算
     annual = sorted(((r["report_date"], r["net_profit_yi"]) for r in rows
-                     if str(r.get("report_date", "")).endswith("12-31") and isinstance(r.get("net_profit_yi"), (int, float))), reverse=True)
+                     if (r.get("annual") or str(r.get("report_date", "")).endswith("12-31")) and isinstance(r.get("net_profit_yi"), (int, float))), reverse=True)
     if len(annual) <= years or annual[years][1] <= 0 or annual[0][1] <= 0:
         return None
     return (annual[0][1] / annual[years][1]) ** (1 / years) - 1
 
 
-def reverse_dcf(market_cap_yi: float, rows: list[dict], *, name: str = "", industry: str = "") -> dict:
-    """market_cap_yi 总市值（亿元）；rows 是财务指标。算不了就返回带 reason 的结果，不硬算。"""
-    base = {"name": name, "market_cap_yi": round(market_cap_yi, 1) if market_cap_yi else None,
+def reverse_dcf(market_cap_yi: float, rows: list[dict], *, name: str = "", industry: str = "", pe_ttm: float | None = None, currency: str = "") -> dict:
+    """market_cap_yi 总市值（亿）；rows 是财务指标。算不了就返回带 reason 的结果，不硬算。
+
+    给了 pe_ttm 就用"市值 ÷ 市盈率"当近四个季度的利润：港美股的财年不统一、财报和股价的币种还可能不同，
+    行情里的市盈率已经把这两件事对齐了，比自己拿财报去拼更不容易错。
+    """
+    base = {"name": name, "market_cap_yi": round(market_cap_yi, 1) if market_cap_yi else None, "currency": currency or "人民币",
             "assumptions": {"years": YEARS, "terminal_growth_pct": TERMINAL_GROWTH * 100, "profit_basis": "归母净利润（未扣资本开支）"}}
-    profit = ttm_profit(rows)
+    if pe_ttm is not None:
+        profit = (market_cap_yi / pe_ttm, "按滚动市盈率倒推的近四个季度") if pe_ttm and pe_ttm > 0 and market_cap_yi else (-1.0, "") if pe_ttm is not None and pe_ttm <= 0 else None
+    else:
+        profit = ttm_profit(rows)
     if not market_cap_yi or market_cap_yi <= 0:
         return {**base, "ok": False, "reason": "没有取到总市值"}
     if profit is None:

@@ -53,6 +53,10 @@ def add_holding(
     db: Session = Depends(get_session),
     user_id: int = Depends(current_user_id),
 ):
+    from wealthpilot.routes.onboarding import OVERSEAS_HOLDING
+    from wealthpilot.services import global_stocks
+    if global_stocks.is_global(req.fund_code):
+        raise HTTPException(422, OVERSEAS_HOLDING)
     holding = PortfolioHolding(
         user_id=user_id,
         asset_type=(req.asset_type or "fund").lower(),

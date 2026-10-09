@@ -11,7 +11,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import random
 import re
 import time
 
@@ -55,6 +57,9 @@ async def fetch_stock_kline(code: str, days: int = 60) -> list[dict]:
     输出沿用基金净值的字段名（nav_date / nav / daily_return），这样回撤、相关性、
     回测这些已有的分析不用区分资产类型；另带 open / high / low / volume。
     """
+    from wealthpilot.services import global_stocks
+    if global_stocks.is_global(code):
+        return await global_stocks.fetch_kline(code, days)
     symbol = market_symbol(code)
     days = max(2, int(days))
     rows: list = []
@@ -155,7 +160,10 @@ async def _eastmoney_kline(symbol: str, count: int) -> list[list]:
 
 
 async def fetch_stock_quote(code: str) -> dict | None:
-    """实时行情 + 估值。停牌或代码不存在返回 None。"""
+    """实时行情 + 估值。停牌或代码不存在返回 None。港股、美股代码转给 global_stocks。"""
+    from wealthpilot.services import global_stocks
+    if global_stocks.is_global(code):
+        return await global_stocks.fetch_quote(code)
     symbol = market_symbol(code)
     try:
         async with httpx.AsyncClient(timeout=8.0, headers=_HEADERS) as client:
@@ -186,6 +194,9 @@ async def fetch_stock_quote(code: str) -> dict | None:
 
 async def fetch_stock_financials(code: str, periods: int = 4) -> list[dict]:
     """最近几期业绩报表（东方财富），最新在前。"""
+    from wealthpilot.services import global_stocks
+    if global_stocks.is_global(code):
+        return await global_stocks.fetch_indicators(code, periods)
     try:
         async with httpx.AsyncClient(timeout=10.0, headers=_HEADERS) as client:
             resp = await client.get(
@@ -222,6 +233,9 @@ async def fetch_stock_profile(code: str) -> dict | None:
     行业取自东方财富业绩报表里的板块归属（它的行情接口 push2 经常直接断开连接，不能依赖），
     市值取自腾讯行情。两边都取不到才返回 None。
     """
+    from wealthpilot.services import global_stocks
+    if global_stocks.is_global(code):
+        return await global_stocks.fetch_profile(code)
     rows, quote = [], None
     try:
         async with httpx.AsyncClient(timeout=10.0, headers=_HEADERS) as client:
@@ -265,12 +279,34 @@ async def datacenter(report: str, *, filter: str = "", columns: str = "ALL", pag
         params["sortColumns"] = sort
         params["sortTypes"] = -1 if desc else 1
     try:
-        async with httpx.AsyncClient(timeout=15.0, headers=_HEADERS) as client:
+        async with _em_gate(), httpx.AsyncClient(timeout=15.0, headers=_HEADERS) as client:
             resp = await client.get(_DATACENTER, params=params)
         result = resp.json().get("result") or {}
         return result.get("data") or [], int(result.get("pages") or 0)
     except Exception:
         return [], 0
+
+
+# 东方财富数据中心是这里用得最重的一个源：一次深度研究六个 Agent 并行，几秒内能打出去几十个请求。
+# 打得太密会被对方按 IP 限流甚至封一段时间，那时所有财务、估值、筹码数据一起没有。
+# 所以在这一个出口上限速：同时最多几个，两个请求的起始时间至少隔开一小段，再加一点抖动。
+EM_MAX_CONCURRENT = 4
+EM_MIN_INTERVAL = 0.12
+_em_state: dict = {"loop": None, "sem": None, "lock": None, "last": 0.0}
+
+
+@contextlib.asynccontextmanager
+async def _em_gate():
+    loop = asyncio.get_running_loop()
+    if _em_state["loop"] is not loop:      # 信号量绑在事件循环上；换了循环（测试、命令行里多次 asyncio.run）就重建
+        _em_state.update(loop=loop, sem=asyncio.Semaphore(EM_MAX_CONCURRENT), lock=asyncio.Lock(), last=0.0)
+    async with _em_state["sem"]:
+        async with _em_state["lock"]:
+            wait = _em_state["last"] + EM_MIN_INTERVAL + random.uniform(0, EM_MIN_INTERVAL / 2) - loop.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            _em_state["last"] = loop.time()
+        yield
 
 
 def _r(value, digits: int = 2):
@@ -321,6 +357,9 @@ def summarize_valuation(history: list[dict]) -> dict:
 
 async def fetch_financial_indicators(code: str, periods: int = 8) -> list[dict]:
     """主要财务指标（盈利能力、成长、杠杆、现金流），按报告期，最新在前。"""
+    from wealthpilot.services import global_stocks
+    if global_stocks.is_global(code):
+        return await global_stocks.fetch_indicators(code, periods)
     rows, _ = await datacenter(
         "RPT_F10_FINANCE_MAINFINADATA", filter=f'(SECURITY_CODE="{plain_code(code)}")',
         page_size=max(1, min(int(periods), 20)), sort="REPORT_DATE",
