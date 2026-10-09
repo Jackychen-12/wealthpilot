@@ -409,8 +409,12 @@ async def test_checking_now_probes_every_source_and_the_page_and_doctor_show_the
     monkeypatch.setattr(stocks, "datacenter", datacenter)
     monkeypatch.setattr(stocks, "_tencent_kline", broken)
     monkeypatch.setattr(stocks, "_eastmoney_kline", nothing)
-    for name in ("_lpr_chinamoney", "_tsf_pbc", "_tsf_mofcom"):
+    for name in ("_lpr_chinamoney", "_tsf_pbc", "_tsf_mofcom", "_sina_macro"):
         monkeypatch.setattr(macro, name, works)
+    from wealthpilot.services import capital, fx
+    monkeypatch.setattr(capital, "_margin_sse", works)
+    monkeypatch.setattr(capital, "_margin_szse", works)
+    monkeypatch.setattr(fx, "_chinamoney", works)
     sources.fail("baidu", "x")
     sources.fail("baidu", "x")                                                # 正在跳过的，明说要查时也照样去问
     report = await sources.check()
@@ -419,7 +423,8 @@ async def test_checking_now_probes_every_source_and_the_page_and_doctor_show_the
     assert by_name["eastmoney_kline"]["error"] == "连上了，但没有返回数据" and len(by_name) == len(sources.SOURCES) and report["checked_at"]
     states = {d["key"]: d["state"] for d in report["datasets"]}
     assert states["kline"] == "fallback" and states["quote"] == "ok" and states["tsf"] == "ok"
-    assert sources.problems(report) == ["A 股日线在用备用来源（腾讯财经不通）：最后一个备用源是不复权价，会标出来"]
+    assert sources.problems(report) == ["A 股日线在用备用来源（腾讯财经不通）：最后一个备用源是不复权价，会标出来",
+                                        "港股、美股日线在用备用来源（腾讯财经不通）：备用源只有美股，而且是不复权价；港股日线只有腾讯"]
     assert all(set(d["chain"]) <= set(sources.SOURCES) for d in sources.DATASETS)        # 每类数据写的来源都登记过
 
     client = TestClient(app)
@@ -429,7 +434,6 @@ async def test_checking_now_probes_every_source_and_the_page_and_doctor_show_the
 
     async def flow(*a, **k):
         return [1]
-    from wealthpilot.services import capital
     monkeypatch.setattr(capital, "_sina_json", flow)
 
     async def no_search():

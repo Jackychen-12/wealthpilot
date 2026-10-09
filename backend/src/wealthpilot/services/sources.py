@@ -32,15 +32,17 @@ class SourceError(Exception):
 SOURCES: dict[str, dict] = {
     "tencent": {"label": "腾讯财经", "official": False, "what": "实时行情"},
     "tencent_kline": {"label": "腾讯财经", "official": False, "what": "前复权日线"},
-    "sina": {"label": "新浪财经", "official": False, "what": "行情、财务指标、概念板块"},
+    "sina": {"label": "新浪财经", "official": False, "what": "行情、财务指标、美股日线"},
+    "sina_macro": {"label": "新浪财经", "official": False, "what": "制造业 PMI、CPI、M1 / M2、GDP"},
     "eastmoney": {"label": "东方财富数据中心", "official": False, "what": "财务、估值、股东、研报、宏观"},
     "eastmoney_kline": {"label": "东方财富行情", "official": False, "what": "前复权日线"},
     "eastmoney_notice": {"label": "东方财富公告", "official": False, "what": "公告列表与正文"},
     "baidu": {"label": "百度股市通", "official": False, "what": "市盈率、市净率历史（A 股、港股、美股）"},
     "cninfo": {"label": "巨潮资讯", "official": True, "what": "上市公司公告（证监会指定的信息披露网站）"},
-    "chinamoney": {"label": "中国货币网", "official": True, "what": "LPR（全国银行间同业拆借中心发布）"},
+    "chinamoney": {"label": "中国货币网", "official": True, "what": "LPR、人民币汇率中间价（全国银行间同业拆借中心发布）"},
     "pbc": {"label": "中国人民银行", "official": True, "what": "社会融资规模"},
     "mofcom": {"label": "商务部商务数据中心", "official": True, "what": "社会融资规模（转载央行数据，更新慢）"},
+    "exchange": {"label": "沪深交易所", "official": True, "what": "融资融券明细（上交所、深交所每天公布）"},
 }
 
 # 每类数据先用谁、不行换谁。只有一个来源的也列在这里 —— 那就是它断了就没有的意思，不藏着
@@ -53,8 +55,13 @@ DATASETS: list[dict] = [
     {"key": "overseas_valuation", "label": "港股、美股估值历史", "chain": ["baidu"]},
     {"key": "lpr", "label": "LPR", "chain": ["chinamoney", "eastmoney"]},
     {"key": "tsf", "label": "社会融资规模", "chain": ["pbc", "mofcom"], "note": "备用源经常晚几个月，晚了会写明"},
-    {"key": "fundamentals_more", "label": "分红、股东、机构持仓、融资融券、一致预期、研报、宏观（PMI、物价、货币）", "chain": ["eastmoney"]},
-    {"key": "overseas", "label": "港股、美股行情与日线", "chain": ["tencent"]},
+    {"key": "fx", "label": "汇率（港元、美元兑人民币）", "chain": ["chinamoney", "sina"], "note": "备用源是即时汇率，不是中间价，也没有历史"},
+    {"key": "margin", "label": "融资融券", "chain": ["eastmoney", "exchange"], "note": "备用源是交易所的原始数据：没有占流通市值的比例，深市只取最近一个月"},
+    {"key": "macro", "label": "PMI、物价、货币、GDP", "chain": ["eastmoney", "sina_macro"], "note": "备用源只有制造业 PMI、CPI、M1 / M2、GDP；非制造业 PMI、PPI、新增贷款、国债收益率没有"},
+    {"key": "overseas", "label": "港股、美股行情", "chain": ["tencent", "sina"], "note": "备用源没有市盈率和市净率"},
+    {"key": "overseas_kline", "label": "港股、美股日线", "chain": ["tencent_kline", "sina"], "note": "备用源只有美股，而且是不复权价；港股日线只有腾讯"},
+    {"key": "slow", "label": "分红、股东户数、十大股东、机构持仓、主营构成", "chain": ["eastmoney"], "note": "只有这一个来源。按报告期更新，取不到时用上一次取到的，最多留五个月"},
+    {"key": "expectation", "label": "一致预期、研报", "chain": ["eastmoney"], "note": "只有这一个来源。取不到时用上一次取到的，最多留一个半月"},
 ]
 
 BREAK_AFTER = 2          # 连续失败几次就先跳过：单次抖动就切换，会让同一份数据一会儿来自这家一会儿来自那家
@@ -194,6 +201,16 @@ async def check() -> dict:
     async def datacenter():
         rows, _ = await stocks.datacenter("RPT_LICO_FN_CPD", filter=f'(SECURITY_CODE="{PROBE}")', page_size=1, strict=True)
         return rows
+
+    async def chinamoney():               # LPR 和汇率中间价是它的两个接口，都要通
+        from wealthpilot.services import fx
+        lpr, hkd = await asyncio.gather(macro._lpr_chinamoney(), fx._chinamoney("HKD", None))
+        return lpr and hkd
+
+    async def exchange():                 # 两家都要通才算通
+        from wealthpilot.services import capital
+        sse, szse = await asyncio.gather(capital._margin_sse(PROBE, 5), capital._margin_szse("000001", 2))
+        return sse and szse
     probes: dict[str, Callable[[], Awaitable[Any]]] = {
         "tencent": lambda: stocks._tencent_quote(f"sh{PROBE}", PROBE),
         "tencent_kline": lambda: stocks._tencent_kline(f"sh{PROBE}", 5),
@@ -203,7 +220,9 @@ async def check() -> dict:
         "eastmoney_notice": lambda: stocks._em_announcements(PROBE, 1),
         "baidu": lambda: stocks._baidu_valuation(PROBE, "ab", 1),
         "cninfo": lambda: stocks._cninfo_announcements(PROBE, 1),
-        "chinamoney": macro._lpr_chinamoney,
+        "chinamoney": chinamoney,
+        "sina_macro": lambda: macro._sina_macro("RPT_ECONOMY_PMI"),
+        "exchange": exchange,
         "pbc": macro._tsf_pbc,
         "mofcom": macro._tsf_mofcom,
     }

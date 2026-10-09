@@ -10,6 +10,7 @@ PMI、物价、货币、GDP、国债收益率来自东方财富数据中心整�
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import date, timedelta
 from urllib.parse import urljoin
@@ -176,15 +177,72 @@ async def _lpr_rows() -> list[dict]:
     return rows or []
 
 
+# 新浪宏观数据里能顶上的几项：报表 → （分类, 编号, {字段: (第几列, 换算)}）。
+# 它的非制造业 PMI 和 PPI 停在 2019 年，新增贷款没有 —— 这几项东方财富不通时就是没有
+_SINA_MACRO: dict[str, tuple[str, int, dict]] = {
+    "RPT_ECONOMY_PMI": ("boom", 5, {"MAKE_INDEX": (1, None)}),
+    "RPT_ECONOMY_CPI": ("price", 0, {"NATIONAL_SAME": (1, lambda v: v - 100)}),          # 它给的是上年同月 = 100 的指数
+    "RPT_ECONOMY_CURRENCY_SUPPLY": ("fininfo", 1, {"BASIC_CURRENCY_SAME": (2, None), "CURRENCY_SAME": (4, None)}),
+    "RPT_ECONOMY_GDP": ("nation", 1, {"SUM_SAME": (2, None)}),
+}
+
+
+async def _sina_macro(report: str, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
+    """新浪的宏观数据，整理成东方财富那张表的行：[{REPORT_DATE, 字段…}]，新的在前。"""
+    cate, event, fields = _SINA_MACRO[report]
+    async with httpx.AsyncClient(timeout=10, transport=transport, headers={**_HEADERS, "Referer": "https://finance.sina.com.cn/mac/"}) as client:
+        resp = await client.get("https://quotes.sina.cn/mac/api/jsonp_v3.php/x/MacPage_Service.get_pagedata",
+                                params={"cate": cate, "event": str(event), "from": "0", "num": "14", "condition": ""})
+    text = resp.content.decode("gbk", errors="replace")
+    start, end = text.rfind("data:[["), text.rfind("]]")       # 前面还有一个 data 是筛选项，要的是最后那个
+    if resp.status_code != 200 or start < 0 or end < start:
+        raise SourceError(f"新浪宏观数据返回 {resp.status_code}，不是预期的结构")
+    try:
+        table = json.loads(text[start + 5:end + 2])
+    except ValueError as e:
+        raise SourceError("新浪宏观数据的表格解析不了") from e
+    rows = []
+    for line in table:
+        stamp = re.fullmatch(r"(20\d\d)\.(\d{1,2})", str(line[0]))
+        if not stamp:
+            continue
+        year, part = int(stamp.group(1)), int(stamp.group(2))
+        month = part * 3 if report == "RPT_ECONOMY_GDP" else part            # GDP 按季度：2026.2 是二季度
+        row = {"REPORT_DATE": f"{year}-{month:02d}-01", "source": "新浪财经（备用源）"}
+        for field, (column, convert) in fields.items():
+            try:
+                value = float(line[column])
+            except (IndexError, TypeError, ValueError):
+                continue
+            row[field] = round(convert(value) if convert else value, 2)
+        if len(row) > 2:
+            rows.append(row)
+    if table and not rows:
+        raise SourceError("新浪宏观数据的列变了：认不出月份或数值")
+    stale = rows and (date.today() - date.fromisoformat(rows[0]["REPORT_DATE"])).days > 400
+    if stale:
+        raise SourceError(f"新浪的这项宏观数据停在 {rows[0]['REPORT_DATE'][:7]}，不再更新")
+    return rows
+
+
+async def _macro_rows(report: str) -> list[dict]:
+    async def eastmoney():
+        rows, _ = await datacenter(report, sort="REPORT_DATE", page_size=14, strict=True)
+        return rows
+    backup = [("sina_macro", lambda: _sina_macro(report))] if report in _SINA_MACRO else []
+    rows, _ = await sources.first([("eastmoney", eastmoney), *backup])
+    return rows or []
+
+
 async def snapshot() -> dict:
     async def load():
         reports = sorted({s[2] for s in SERIES})
         tsf_task = asyncio.create_task(_tsf_rows())            # 和东方财富那几张表同时取
         lpr_task = asyncio.create_task(_lpr_rows())
-        loaded = await asyncio.gather(*(datacenter(r, sort="REPORT_DATE", page_size=14) for r in reports),
+        loaded = await asyncio.gather(*(_macro_rows(r) for r in reports),
                                       datacenter("RPTA_WEB_TREASURYYIELD", sort="SOLAR_DATE", page_size=30), return_exceptions=True)
         tsf_rows = await tsf_task
-        by_report = {r: (v[0] if isinstance(v, tuple) else []) for r, v in zip(reports, loaded, strict=False)}
+        by_report = {r: (v if isinstance(v, list) else []) for r, v in zip(reports, loaded, strict=False)}
         lpr_rows = await lpr_task
         yield_rows = loaded[-1][0] if isinstance(loaded[-1], tuple) else []
         indicators = []
@@ -215,7 +273,9 @@ async def snapshot() -> dict:
         return {"indicators": indicators, "rates": rates, "spread": spread,
                 "missing": [] if tsf else ["社会融资规模（这次没取到，先看新增人民币贷款和 M2）"],
                 "note": "月度数据在次月中上旬公布，as_of 是数据所属的月份而不是公布日。LPR 每月 20 日报价。"}
-    return await cache.cached("macro:snapshot", 6 * cache.HOUR, load) or {"indicators": [], "rates": [], "spread": None, "missing": [], "note": ""}
+    # 月度数据：都取不到时，上一次取到的那份留一个半月还有用（会标明日期）
+    return await cache.resilient("macro:snapshot", 6 * cache.HOUR, load, keep=45 * cache.DAY, what="宏观数据") \
+        or {"indicators": [], "rates": [], "spread": None, "missing": [], "note": ""}
 
 
 def text(snap: dict) -> str:

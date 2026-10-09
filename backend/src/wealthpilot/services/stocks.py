@@ -376,6 +376,10 @@ async def fetch_stock_profile(code: str) -> dict | None:
 _DATACENTER = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
 
+# 按报告期更新的数据（分红、股东、机构持仓、主营构成）：上一次取到的那份留这么久。
+# 这些数一个季度甚至一年才变一次，断线期间拿出来的多半就是最新的那一期
+SLOW = 150 * cache.DAY
+
 _EM_EMPTY = 9201     # “返回数据为空”：这只股票本来就没有这项数据，不是接口坏了
 
 
@@ -578,6 +582,12 @@ async def fetch_financial_indicators(code: str, periods: int = 8) -> list[dict]:
 
 
 async def fetch_dividends(code: str, limit: int = 8) -> list[dict]:
+    """分红记录。一年变一两次，只有东方财富这一个来源：取不到时用上一次取到的，最多留满大半年。"""
+    return await cache.resilient(f"dividends:{plain_code(code)}:{limit}", cache.DAY, lambda: _load_dividends(code, limit), keep=SLOW,
+                                 what=f"{plain_code(code)} 的分红记录") or []
+
+
+async def _load_dividends(code: str, limit: int) -> list[dict]:
     rows, _ = await datacenter(
         "RPT_SHAREBONUS_DET", filter=f'(SECURITY_CODE="{plain_code(code)}")',
         page_size=max(1, min(limit, 30)), sort="EX_DIVIDEND_DATE",
@@ -720,7 +730,11 @@ def summarize_kline(records: list[dict]) -> dict:
 
 
 async def fetch_business_segments(code: str) -> dict | None:
-    """最新一期的主营构成：按产品、按地区、按行业各自的收入占比与毛利率。"""
+    """最新一期的主营构成：按产品、按地区、按行业各自的收入占比与毛利率。半年变一次，取不到时用上一次的。"""
+    return await cache.resilient(f"segments:{plain_code(code)}", cache.DAY, lambda: _load_segments(code), keep=SLOW, what=f"{plain_code(code)} 的主营构成")
+
+
+async def _load_segments(code: str) -> dict | None:
     rows, _ = await datacenter("RPT_F10_FN_MAINOP", filter=f'(SECURITY_CODE="{plain_code(code)}")', page_size=60, sort="REPORT_DATE")
     if not rows:
         return None
