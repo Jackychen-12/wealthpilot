@@ -37,7 +37,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ onNavigate, backend, use
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
       {key === 'research' && researchBusy ? <Dot tone="purple" pulse className="ml-auto" /> : null}
-      {key === 'holdings' && alertCount > 0 ? <span className="ml-auto rounded-xs bg-tint-rose px-1.5 text-xs font-medium tabular-nums text-on-rose" title="组合分析里有预警">{alertCount}</span> : null}
+      {key === 'holdings' && alertCount > 0 ? <span className="ml-auto rounded-xs bg-tint-rose px-1.5 text-xs font-medium tabular-nums text-on-rose" title="风险体检里有预警">{alertCount}</span> : null}
     </Link>
   )
 
