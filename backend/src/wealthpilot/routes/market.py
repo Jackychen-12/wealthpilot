@@ -80,6 +80,20 @@ async def get_valuation_series(code: str):
     return {"code": code, "data": [{"date": r["date"], "pe": r["pe_ttm"], "pb": r["pb"]} for r in rows[::5] + rows[-1:]]}
 
 
+@router.get("/sources")
+def data_sources():
+    """内置数据源：每类数据先用谁、不行换谁，各来源现在通不通。只读最近的记录，不联网。"""
+    from wealthpilot.services import sources
+    return sources.overview()
+
+
+@router.post("/sources/check")
+async def check_data_sources():
+    """现在把每个来源问一遍（十来秒，不调用模型）。"""
+    from wealthpilot.services import sources
+    return await sources.check()
+
+
 @router.get("/recap")
 async def market_recap():
     """今天市场发生了什么：涨停与连板、题材热点、龙虎榜、情绪刻度。不调用模型。"""

@@ -14,7 +14,7 @@ import { PLAYBOOK, STATUS } from './ResearchPage'
 const EVENT: Record<string, { label: string; tone: Tone }> = {
   checkpoint: { label: '验证点', tone: 'purple' }, report: { label: '新财报', tone: 'blue' }, filing: { label: '公告', tone: 'yellow' },
   valuation: { label: '估值', tone: 'orange' }, move: { label: '异动', tone: 'pink' }, proposal: { label: '待办', tone: 'green' }, sync: { label: '同步', tone: 'gray' },
-  task: { label: '定时任务', tone: 'blue' }, alert: { label: '提醒', tone: 'pink' },
+  task: { label: '定时任务', tone: 'blue' }, alert: { label: '提醒', tone: 'pink' }, source: { label: '数据源', tone: 'yellow' },
 }
 // 第一次用会碰到的几个词。不指望用户先去读文档
 const GLOSSARY: [string, string][] = [

@@ -32,23 +32,23 @@ async def _timed(call) -> tuple[bool, float]:
 
 
 async def _sources() -> list[dict]:
-    from wealthpilot.services import capital, stocks
-    from wealthpilot.services.assets import fetch_sina_quotes
+    """每类数据现在是什么状态：主来源在用、换到了备用的、还是彻底取不到。探测的是每个来源本身，不走缓存。"""
+    from wealthpilot.services import capital, sources
 
-    async def consensus():   # 直接问数据中心，不走缓存：要测的是现在通不通
-        rows, _ = await stocks.datacenter("RPT_WEB_RESPREDICT", filter='(SECURITY_CODE="600519")', page_size=1)
-        return rows
-
-    probes = [("行情（新浪）", lambda: fetch_sina_quotes(["600519"]), "报价、当日涨跌、提醒"),
-              ("日线（腾讯 / 东方财富）", lambda: stocks.fetch_stock_kline("600519", 5), "走势、回撤、回测"),
-              ("财务与估值（东方财富数据中心）", lambda: stocks.fetch_financial_indicators("600519", 1), "基本面、估值分位、选股"),
-              ("公告（东方财富）", lambda: stocks.fetch_announcements("600519", 1), "公告与财报正文"),
-              ("资金流向（新浪）", lambda: capital._sina_json("MoneyFlow.ssi_ssfx_flzjtj", {"daima": "sh600519"}), "资金流向"),
-              ("一致预期与筹码（东方财富数据中心）", consensus, "一致预期、融资融券、股东与机构持仓、增减持")]
-    results = await asyncio.gather(*[_timed(call) for _, call, _ in probes])
-    items = [_item(name, "ok" if ok else "fail", f"{seconds:.1f} 秒" if ok else "取不到数据",
-                   "" if ok else f"影响：{used}。多半是网络或对方限流，过几分钟再试；公司网络可能需要代理。")
-             for (name, _, used), (ok, seconds) in zip(probes, results, strict=True)]
+    report, (flow_ok, _) = await asyncio.gather(sources.check(), _timed(lambda: capital._sina_json("MoneyFlow.ssi_ssfx_flzjtj", {"daima": "sh600519"})))
+    by_name = {s["name"]: s for s in report["sources"]}
+    items = []
+    for d in report["datasets"]:
+        chain = " → ".join(s["label"] + ("（官方）" if s["official"] else "") for s in d["chain"])
+        failing = [by_name[s["name"]] for s in d["chain"] if s["status"] == "failing"]
+        why = "；".join(f"{s['label']}：{s['error']}" for s in failing)
+        if d["state"] == "down":
+            items.append(_item(d["label"], "fail", f"取不到（{chain}）", f"{why}。多半是网络或对方限流，过几分钟再试；公司网络可能需要代理。之前取到过的数据还会接着用，会标明日期。"))
+        elif d["state"] == "fallback":
+            items.append(_item(d["label"], "warn", f"在用备用来源（{chain}）", f"{why}。{d['note'] or '备用来源的数据是一样的，可以照常用'}。"))
+        else:
+            items.append(_item(d["label"], "ok", chain))
+    items.append(_item("资金流向（新浪）", "ok" if flow_ok else "fail", "通" if flow_ok else "取不到数据", "" if flow_ok else "影响：资金流向。只有这一个来源。"))
     return [*items, await _web_search()]
 
 
