@@ -88,7 +88,7 @@ const ReviewPage: React.FC = () => {
       {message ? <Callout tone={message.tone}>{message.text}</Callout> : null}
 
       <DataState loading={card.loading} error={card.error} onRetry={card.reload}
-        empty={c && c.total === 0 ? '还没有验证点。在 AI 研究里对一只具体的股票做深度研究或对比，回答发布后会自动生成。' : undefined}>
+        empty={c && c.total === 0 ? '还没有验证点。在「研究」里对一只具体的股票做深度研究或对比，回答发布后会自动生成。' : undefined}>
         {c ? (
           <>
             <Metrics>

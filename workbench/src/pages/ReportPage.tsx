@@ -59,7 +59,7 @@ const ReportPage: React.FC = () => {
           ) : null}
         </DataState>
       </div>
-      <p className="text-[13px] text-steel">周报由大模型根据分析数据撰写，没有经过"AI 研究"里的证据校验流程，数字请以总览和风险体检页为准。</p>
+      <p className="text-[13px] text-steel">周报由大模型根据分析数据撰写，没有经过「研究」里的证据校验流程，数字请以总览和风险体检页为准。</p>
     </Page>
   )
 }

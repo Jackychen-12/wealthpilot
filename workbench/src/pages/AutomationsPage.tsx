@@ -176,7 +176,7 @@ const AutomationsPage: React.FC = () => {
               <textarea id="auto-prompt" rows={3} value={task.prompt} onChange={(e) => setTask({ ...task, prompt: e.target.value })}
                 placeholder="复盘一下我的持仓，今天有什么需要注意的"
                 className="w-full resize-y rounded-md border border-hairline-strong bg-canvas px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-primary focus:ring-1 focus:ring-primary" />
-              <p className="text-xs text-steel">和在「AI 研究」里提问一样写。它会用当时最新的数据重新查一遍。</p>
+              <p className="text-xs text-steel">和在「研究」里提问一样写。它会用当时最新的数据重新查一遍。</p>
             </div>
             <div>
               <Input id="auto-when" label="什么时候" value={task.schedule} onChange={(e) => setTask({ ...task, schedule: e.target.value })} placeholder="工作日 08:30" />

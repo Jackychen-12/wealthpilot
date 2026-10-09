@@ -5,6 +5,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { DEMO } from '../../api'
 import { Drawer } from '../kit'
 import { SidebarNav, type SidebarNavProps } from './SidebarNav'
+import { SectionTabs } from './sections'
 
 /** 应用外壳：左侧暖灰色导航栏贴边到底，右侧白色画布；窄屏时导航收进抽屉。 */
 export const Shell: React.FC<Omit<SidebarNavProps, 'onNavigate'>> = (navProps) => {
@@ -32,6 +33,7 @@ export const Shell: React.FC<Omit<SidebarNavProps, 'onNavigate'>> = (navProps) =
             <a className="font-medium underline underline-offset-2" href="https://github.com/Jackychen-12/wealthpilot#quick-start" target="_blank" rel="noreferrer">在本地运行完整版</a>
           </div>
         ) : null}
+        <SectionTabs alertCount={navProps.alertCount} />
         <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto"><Outlet /></main>
       </div>
       <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} title="导航" side="left" width="max-w-[280px]">
