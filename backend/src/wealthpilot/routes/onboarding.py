@@ -12,14 +12,15 @@ from wealthpilot.models.chat import ChatMessage
 from wealthpilot.models.portfolio import PortfolioHolding
 from wealthpilot.models.research import WatchItem
 from wealthpilot.routes.config import _local_only
-from wealthpilot.services import cache, channels, securities
+from wealthpilot.services import cache, channels, fx, securities
 from wealthpilot.services.ai_client import _PLACEHOLDER_KEYS
 from wealthpilot.services.deps import current_user_id
+from wealthpilot.services.sources import SourceError
 from wealthpilot.services.stocks import fetch_stock_profile
 from wealthpilot.settings import get_settings
 from wealthpilot.storage.db import get_session
 
-OVERSEAS_HOLDING = "港股、美股暂时只能加自选和做研究，还不能记成持仓：持仓的市值、盈亏和风险都按人民币算，汇率折算还没做"
+OVERSEAS_NOTE = "成本价按{currency}填；入账时按今天的人民币汇率中间价折成人民币"
 
 router = APIRouter(tags=["onboarding"])
 _FOREVER = 3650 * cache.DAY
@@ -97,8 +98,9 @@ async def parse_holdings(body: dict):
         hit = (await securities.search(row["query"], 1) or [None])[0] if row["query"] else None
         if hit is None:
             return {**row, "code": "", "name": "", "asset_type": "", "problem": row["problem"] or f"没找到「{row['query']}」"}
-        if hit.get("market") in ("hk", "us"):
-            return {**row, "code": hit["code"], "name": hit["name"], "asset_type": hit["asset_type"], "problem": OVERSEAS_HOLDING}
+        if hit.get("market") in ("hk", "us"):       # 港股美股能记：提醒一句成本价是按哪种货币填的
+            return {**row, "code": hit["code"], "name": hit["name"], "asset_type": hit["asset_type"],
+                    "note": OVERSEAS_NOTE.format(currency="港元" if hit["market"] == "hk" else "美元")}
         return {**row, "code": hit["code"], "name": hit["name"], "asset_type": hit["asset_type"]}
 
     resolved = await asyncio.gather(*[resolve(r) for r in rows])
@@ -117,16 +119,25 @@ async def add_holdings(body: dict, db: Session = Depends(get_session), user_id: 
         except (KeyError, TypeError, ValueError):
             skipped.append(f"{name or code}：数量或成本价不对")
             continue
-        if not re.fullmatch(r"\d{6}", code) or shares <= 0 or cost <= 0:
+        # 这里收的是预览里确认过的行，港股美股的代码已经是 00700.HK / AAPL.US 的写法；别的字母串不当成美股
+        overseas = bool(re.fullmatch(r"\d{5}\.HK|[A-Z][A-Z.\-]{0,6}\.US", code))
+        if not (re.fullmatch(r"\d{6}", code) or overseas) or shares <= 0 or cost <= 0:
             skipped.append(f"{name or code}：数量或成本价不对")
             continue
+        try:
+            booked = await fx.book(code, cost, date.today())       # 港股美股：成本按今天的汇率折成人民币入账
+        except SourceError as e:
+            skipped.append(f"{name or code}：{e}")
+            continue
+        code = booked["code"]
         if code in existing:
             skipped.append(f"{name}（{code}）已经在持仓里，没有改动")
             continue
         asset_type = row.get("asset_type") if row.get("asset_type") in ("stock", "etf", "fund") else "stock"
         profile = await fetch_stock_profile(code) if asset_type == "stock" else None
         db.add(PortfolioHolding(user_id=user_id, asset_type=asset_type, fund_code=code, fund_name=name or code, shares=shares,
-                                cost_price=cost, buy_date=date.today(), industry=(profile or {}).get("industry", "")))
+                                cost_price=booked["cost_price"], currency=booked["currency"], cost_native=booked["cost_native"], cost_fx=booked["cost_fx"],
+                                buy_date=date.today(), industry=(profile or {}).get("industry", "")))
         existing.add(code)
         added += 1
     db.commit()

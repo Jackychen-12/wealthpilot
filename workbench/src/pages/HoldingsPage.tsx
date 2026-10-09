@@ -23,6 +23,9 @@ const groupSum = (rows: Holding[], key: (h: Holding) => string) => {
 const options = (map: Record<string, string>) => Object.entries(map).map(([value, label]) => ({ value, label }))
 
 const TABS = [['list', '明细'], ['analysis', '收益与归因']] as const
+const SIGN: Record<string, string> = { HKD: 'HK$', USD: 'US$', CNY: '¥' }
+const foreign = (h: Holding) => !!h.currency && h.currency !== 'CNY'
+const overseasUnit = (code: string) => (/\.HK$|^hk\d/i.test(code) ? '港元' : /\.US$/i.test(code) ? '美元' : '')
 
 /**
  * 粘贴导入：把券商 App 里的持仓照着敲几行（或直接复制过来），先解析成预览，
@@ -65,6 +68,7 @@ const PasteImport: React.FC<{ open: boolean; onClose: () => void; onDone: (text:
                         {r.asset_type !== 'stock' ? <Tag className="ml-2 !py-0">{ASSET[r.asset_type] ?? r.asset_type}</Tag> : null}</span>
                       <span className="shrink-0 tabular-nums text-charcoal">{r.shares?.toLocaleString()} 股</span>
                       <span className="w-24 shrink-0 text-right tabular-nums text-charcoal">成本 {r.cost}</span>
+                      {r.note ? <span className="basis-full text-xs text-steel">{r.note}</span> : null}
                     </>
                   ) : (
                     <>
@@ -193,7 +197,7 @@ const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }
       ) : null}
 
       {tab === 'list' ? (
-      <Section title="持仓明细" hint="最新价来自实时行情；取不到时按成本价计">
+      <Section title="持仓明细" hint={`最新价来自实时行情；取不到时按成本价计${rows.some(foreign) ? '。港股美股按人民币记账：小字是原币种的数和折算用的汇率（人民币汇率中间价）' : ''}`}>
         <DataState loading={holdings.loading} error={holdings.error} onRetry={holdings.reload}
           empty={rows.length === 0 ? '还没有持仓。点右上角「添加持仓」录入股票、ETF 或基金，或导入天天基金导出的 CSV。' : undefined}>
           <Table minWidth={980} head={[
@@ -214,14 +218,14 @@ const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }
                 <Td><Link to={securityPath({ code: h.fund_code, asset_type: h.asset_type })} className="font-medium text-ink hover:underline">{h.fund_name}</Link><div className="font-mono text-xs text-stone">{h.fund_code} · {h.buy_date}</div></Td>
                 <Td>{CATEGORY[h.category] ?? h.category}{h.industry ? <div className="text-xs text-steel">{h.industry}</div> : null}</Td>
                 <Td right num>{yuan(h.shares, 2)}</Td>
-                <Td right num>{h.cost_price.toFixed(4)}</Td>
-                <Td right num>{h.latest_nav == null ? '—' : h.latest_nav.toFixed(4)}</Td>
+                <Td right num>{h.cost_price.toFixed(4)}{foreign(h) && h.cost_native != null ? <div className="text-xs text-steel">{SIGN[h.currency!]}{h.cost_native} × {h.cost_fx}</div> : null}</Td>
+                <Td right num>{h.latest_nav == null ? '—' : h.latest_nav.toFixed(4)}{foreign(h) && h.native_price != null ? <div className="text-xs text-steel">{SIGN[h.currency!]}{h.native_price} × {h.fx_rate}</div> : null}</Td>
                 <Td right num>{yuan(h.market_value)}</Td>
                 <Td right num>{total && h.market_value != null ? `${((h.market_value / total) * 100).toFixed(1)}%` : '—'}</Td>
                 <Td right num className={signClass(h.total_return)}>{signed(h.total_return, 0)}</Td>
                 <Td right num className={signClass(h.return_pct)}>{signed(h.return_pct, 2, '%')}</Td>
                 <Td right className="whitespace-nowrap">
-                  <Button size="xs" variant="ghost" onClick={() => setEditing({ id: h.id, form: { asset_type: h.asset_type, fund_code: h.fund_code, fund_name: h.fund_name, shares: h.shares, cost_price: h.cost_price, buy_date: h.buy_date, category: h.category, industry: h.industry } })}>修改</Button>
+                  <Button size="xs" variant="ghost" onClick={() => setEditing({ id: h.id, form: { asset_type: h.asset_type, fund_code: h.fund_code, fund_name: h.fund_name, shares: h.shares, cost_price: foreign(h) && h.cost_native != null ? h.cost_native : h.cost_price, buy_date: h.buy_date, category: h.category, industry: h.industry } })}>修改</Button>
                   <Button size="xs" variant="danger" onClick={() => setRemoving(h)}>删除</Button>
                 </Td>
               </tr>
@@ -239,13 +243,14 @@ const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }
         {editing ? (
           <form className="flex flex-col gap-4" onSubmit={save}>
             <Select id="h-type" label="资产类型" value={editing.form.asset_type} onChange={(v) => set('asset_type', v)} options={options(ASSET)} />
-            <Input id="h-code" label="代码" placeholder={editing.form.asset_type === 'fund' ? '如 110011' : '如 600519'} hint={editing.form.asset_type === 'stock' || editing.form.asset_type === 'etf' ? '填完代码后会自动带出名称和行业' : undefined}
+            <Input id="h-code" label="代码" placeholder={editing.form.asset_type === 'fund' ? '如 110011' : '如 600519；港股 00700.HK，美股 AAPL.US'} hint={editing.form.asset_type === 'stock' || editing.form.asset_type === 'etf' ? '填完代码后会自动带出名称和行业' : undefined}
               value={editing.form.fund_code} onChange={(e) => set('fund_code', e.target.value.trim())} onBlur={() => void autofill()} required />
             <Input id="h-name" label="名称" value={editing.form.fund_name} onChange={(e) => set('fund_name', e.target.value)} required />
             <div className="grid grid-cols-2 gap-3">
               <Input id="h-shares" label="持有份额" type="number" step="any" min="0" value={editing.form.shares || ''} onChange={(e) => set('shares', Number(e.target.value))} required />
-              <Input id="h-cost" label="成本价" type="number" step="any" min="0" value={editing.form.cost_price || ''} onChange={(e) => set('cost_price', Number(e.target.value))} required />
+              <Input id="h-cost" label={`成本价${overseasUnit(editing.form.fund_code) ? `（${overseasUnit(editing.form.fund_code)}）` : ''}`} type="number" step="any" min="0" value={editing.form.cost_price || ''} onChange={(e) => set('cost_price', Number(e.target.value))} required />
             </div>
+            {overseasUnit(editing.form.fund_code) ? <p className="-mt-2 text-[13px] leading-relaxed text-steel">成本价照券商里看到的{overseasUnit(editing.form.fund_code)}数填。持仓的账是人民币的：成本按买入日的人民币汇率中间价折算，现价按今天的折算，所以盈亏里包含汇率的涨跌。</p> : null}
             <Input id="h-date" label="买入日期" type="date" value={editing.form.buy_date} onChange={(e) => set('buy_date', e.target.value)} required />
             <Select id="h-cat" label="类别" value={editing.form.category} onChange={(v) => set('category', v)} options={options(CATEGORY)} />
             <Input id="h-ind" label="行业标签" hint="用于按行业归因和行业排除校验，可留空" placeholder="如 科技、消费" value={editing.form.industry} onChange={(e) => set('industry', e.target.value)} />

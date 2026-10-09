@@ -296,17 +296,20 @@ async def desk(db: Session = Depends(get_session), user_id: int = Depends(curren
     proposals = db.exec(select(TradeProposal).where(TradeProposal.user_id == user_id, TradeProposal.status == "proposed")).all()
     holdings = {h.fund_code: h for h in db.exec(select(PortfolioHolding).where(PortfolioHolding.user_id == user_id)).all()}
 
+    from wealthpilot.services import fx
     stocks = []
     for t in targets:
         code, quote, mine = t["code"], quotes.get(t["code"]) or {}, [c for c in points if c.code == t["code"]]
         last = (research.get(code) or [None])[0]
         h = holdings.get(code)
         price = quote.get("price")
+        # 现价照行情的原币种给人看；市值和持有收益是账上的事，账是人民币的，港股美股要先折算（取不到汇率就不算）
+        in_cny = price * factor if h and price and (factor := await fx.factor(code)) else None
         stocks.append({
             "code": code, "name": t["name"], "asset_type": t["asset_type"], "held": t["held"],
-            "price": price, "change_pct": quote.get("change_pct"),
-            "market_value": round(h.shares * price, 2) if h and price else None,
-            "return_pct": round((price / h.cost_price - 1) * 100, 2) if h and price and h.cost_price else None,
+            "price": price, "change_pct": quote.get("change_pct"), "currency": fx.currency_of(code),
+            "market_value": round(h.shares * in_cny, 2) if in_cny else None,
+            "return_pct": round((in_cny / h.cost_price - 1) * 100, 2) if in_cny and h.cost_price else None,
             "pe_percentile": (states.get(code) or {}).get("pe_percentile"),
             "checkpoints": {s: sum(1 for c in mine if c.status == s) for s in ("pending", "held", "broken")},
             "last_research": {"id": last["id"], "date": last["date"][:10], "status": last["status"]} if last else None,

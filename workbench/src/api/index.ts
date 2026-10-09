@@ -60,6 +60,8 @@ export interface Holding {
   id: number; asset_type: string; fund_code: string; fund_name: string; shares: number; cost_price: number
   buy_date: string; category: string; industry: string
   latest_nav: number | null; market_value: number | null; total_return: number | null; return_pct: number | null
+  /** 港股美股才有：账是人民币的，这几项是原币种的成本、现价，和折算用的汇率 */
+  currency?: 'CNY' | 'HKD' | 'USD'; cost_native?: number | null; cost_fx?: number | null; native_price?: number | null; fx_rate?: number | null
 }
 export interface HoldingInput {
   asset_type: string; fund_code: string; fund_name: string; shares: number; cost_price: number
@@ -332,7 +334,7 @@ export interface ReportExcerpts { title: string; date: string; category: string;
 export interface ScreenBacktest { start: string; end: string; top_n: number; total_return_pct: number; benchmark_return_pct: number; excess_return_pct: number; annualized_pct: number
   max_drawdown_pct: number; periods_beating_benchmark: number; period_count: number; benchmark: string; limitations: string[]
   periods: { start: string; end: string; picked: number; held?: number; return_pct: number | null; benchmark_pct: number | null; equity?: number; benchmark_equity?: number; top: { code: string; name: string; return_pct: number }[] }[] }
-export interface DeskStock { code: string; name: string; asset_type: string; held: boolean; price: number | null; change_pct: number | null; market_value: number | null; return_pct: number | null
+export interface DeskStock { code: string; name: string; asset_type: string; held: boolean; price: number | null; change_pct: number | null; currency?: 'CNY' | 'HKD' | 'USD'; market_value: number | null; return_pct: number | null
   pe_percentile: number | null; checkpoints: { pending: number; held: number; broken: number }; last_research: { id: number; date: string; status: string } | null; open_proposals: number }
 export interface Desk { sample?: boolean; stocks: DeskStock[]; todo: { proposals: number; broken: number; pending: number; unresearched: number }; verified_recent: Checkpoint[]; digest: Digest | null }
 export interface Thesis { code: string; latest: { id: number; date: string; status: string; playbook: string; conclusion: string; stance: string } | null; research_dates: string[]
@@ -388,7 +390,7 @@ export interface DebateSide { points: { text: string; evidence: string[] }[]; we
 export interface Debate { bull: DebateSide; bear: DebateSide }
 export interface SkillPreview { content: string; skill: SkillInfo | null; problems: string[] }
 export interface Onboarding { steps: { key: string; title: string; done: boolean; to: string; hint: string; optional?: boolean }[]; complete: boolean; dismissed: boolean }
-export interface ParsedHolding { line: string; query: string; shares: number | null; cost: number | null; code: string; name: string; asset_type: string; problem: string; ok: boolean }
+export interface ParsedHolding { line: string; query: string; shares: number | null; cost: number | null; code: string; name: string; asset_type: string; problem: string; ok: boolean; note?: string }
 export interface Automation { id: number; kind: 'task' | 'alert'; title: string; enabled: boolean; last_run_at: string | null; last_status: string; last_result: string; created_at: string
   schedule?: string; prompt?: string; depth?: string; last_message_id?: number | null; next_run_at?: string | null
   code?: string; name?: string; metric?: string; op?: '>=' | '<='; threshold?: number; repeat?: boolean; condition?: string; unit?: string }

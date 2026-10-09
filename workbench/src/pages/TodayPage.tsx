@@ -180,7 +180,7 @@ const TodayPage: React.FC = () => {
                         <span className="ml-2 font-mono text-xs text-stone">{x.code}</span>
                         {x.held ? <Tag tone="purple" className="ml-2 !py-0">持有</Tag> : null}
                       </Td>
-                      <Td right num>{x.price == null ? '—' : x.price.toFixed(x.price < 10 ? 3 : 2)}</Td>
+                      <Td right num>{x.price == null ? '—' : `${x.currency === 'HKD' ? 'HK$' : x.currency === 'USD' ? 'US$' : ''}${x.price.toFixed(x.price < 10 ? 3 : 2)}`}</Td>
                       <Td right num className={signClass(x.change_pct)}>{signed(x.change_pct, 2, '%')}</Td>
                       <Td right num className={signClass(x.return_pct)}>{x.return_pct == null ? '—' : signed(x.return_pct, 2, '%')}</Td>
                       <Td><Percentile value={x.pe_percentile} /></Td>

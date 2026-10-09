@@ -27,6 +27,13 @@ async def load_market_context(
     nav_data = {h.fund_code: prices.get(h.fund_code, h.cost_price) for h in holdings}
     nav_history = {c: hist for c, hist in zip(codes, histories, strict=True)
                    if hist and not isinstance(hist, BaseException)}
+    # 港股美股的历史价是原币种的：按现在的汇率统一折成人民币，免得和别的持仓加总时量纲不一样。
+    # 用的是同一个汇率，所以涨跌幅、回撤、相关性不受影响；历史上汇率本身的波动没有算进去
+    from wealthpilot.services import fx
+    for code in list(nav_history):
+        factor = await fx.factor(code) if types[code] in ("stock", "etf") else 1.0
+        if factor not in (None, 1.0):
+            nav_history[code] = [{**row, "nav": round(row["nav"] * factor, 4)} if isinstance(row.get("nav"), (int, float)) else row for row in nav_history[code]]
     return nav_data, nav_history
 
 

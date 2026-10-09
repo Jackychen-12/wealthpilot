@@ -83,7 +83,7 @@ def test_overseas_research_drops_what_cannot_be_evidenced():
     assert all(c in playbooks.CRITERIA_TOOLS for c in book.criteria)                                    # 每条证据要求都有工具能满足，不会被判"证据不足"
     assert len(playbooks.build_tasks("stock_deep", [cn], [], {}, "分析茅台")) == 6 and "资金" in playbooks.book_for("stock_deep", [cn]).sections
     mixed = playbooks.build_tasks("stock_compare", [cn, hk], [], {}, "对比")
-    assert [t.id for t in mixed] == ["s1_fundamental", "s1_valuation", "s2_fundamental", "s2_valuation"] and "get_valuation_history" in mixed[3].goal and "不要调用同行对比" in mixed[3].goal
+    assert [t.id for t in mixed] == ["s1_fundamental", "s1_valuation", "s2_fundamental", "s2_valuation"] and "get_valuation_history" in mixed[3].goal and "compare_stocks" in mixed[3].goal
     assert playbooks.book_for("stock_compare", [cn, hk]).criteria[1] == "每只股票的市盈率与现价隐含的增长"
 
 
@@ -118,14 +118,6 @@ async def test_search_and_question_parsing_find_overseas_stocks(monkeypatch):
     monkeypatch.setattr(securities, "snapshot", empty_snapshot)
     found = await securities.resolve_text("对比一下 00700.HK 和 $AAPL，PE 和 ROE 哪个更好")
     assert {s["code"] for s in found} == {"00700.HK", "AAPL.US"}                               # PE、ROE 这种大写缩写不会被当成美股代码
-
-
-def test_overseas_stocks_cannot_be_booked_as_holdings_yet():
-    from fastapi.testclient import TestClient
-
-    from wealthpilot.main import app
-    resp = TestClient(app).post("/api/portfolio", json={"fund_code": "00700.HK", "fund_name": "腾讯控股", "shares": 100, "cost_price": 400, "asset_type": "stock", "buy_date": "2026-01-05"})
-    assert resp.status_code == 422 and "汇率折算还没做" in resp.json()["detail"]
 
 
 async def test_eastmoney_requests_are_spaced_and_capped(monkeypatch):
