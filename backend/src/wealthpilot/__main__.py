@@ -223,16 +223,38 @@ def cmd_ask(args: argparse.Namespace) -> None:
     print()
 
 
-OVERVIEW = """WealthPilot — 你自己的 A 股投研 Agent
+# 不带参数的 --help 只说怎么开始、进去之后有哪五件事；二十多个子命令的全表在 wealthpilot help
+OVERVIEW = """WealthPilot — 你自己的投研 Agent
 
-第一次用
-  wealthpilot setup     选一家模型、贴一个 Key、放进股票（一分钟）
+开始
+  wealthpilot setup     第一次用：选一家模型、贴一个 Key、放进股票（一分钟）
   wealthpilot           进入终端直接提问；网页版同时在 http://localhost:8000
 
-不调用模型、马上就有的
+进去之后只有五件事（终端里直接打这几个词，网页左边栏也是这五项）
+  今日                  你的股票今天有什么事
+  研究                  直接提问，或 /stock 茅台 看一只股票
+  市场                  大盘、复盘、宏观
+  持仓                  持仓、自选
+  回顾                  之前的判断对不对
+
+不进终端直接看（不调用模型）
+  watch                 每日简报：你的持仓和自选今天有什么事
+  recap / macro         大盘复盘 / 宏观数据
+  status                现在的状态：模型、持仓、盯盘、手机、今天的用量
+
+出了问题
+  doctor                自检：哪一环不通、怎么修
+  update                升级到最新版本
+
+其余命令（换模型、手机渠道、研究方法、外部数据、备份……）：wealthpilot help
+每个命令后面加 --help 看细节，例如：wealthpilot model --help"""
+
+OVERVIEW_ALL = """全部命令
+
+不进终端直接看（不调用模型）
+  watch                 每日简报：你的持仓和自选今天有什么事
   recap                 大盘复盘：涨停与连板、涨停题材、龙虎榜、市场情绪
   macro                 宏观数据：PMI、物价、货币信贷、利率
-  watch                 每日简报：你的持仓和自选今天有什么事
   trades <文件>         交易行为诊断：追涨、交易过频、亏损加仓、处置效应
   status                现在的状态：模型、持仓、盯盘、手机、今天的用量
 
@@ -242,6 +264,7 @@ OVERVIEW = """WealthPilot — 你自己的 A 股投研 Agent
   backup / restore      备份与恢复（换电脑、重装时用）
 
 调整它
+  setup                 重新走一遍首次配置
   model                 看 / 换模型，设备用模型（model list / set / fallback）
   persona               回答风格：你希望它怎么跟你说话
   skills                研究方法（skills gallery / install）
@@ -260,8 +283,7 @@ OVERVIEW = """WealthPilot — 你自己的 A 股投研 Agent
   daily                 不靠数据库的日报（GitHub Actions 用）
   run / mcp             只启动接口服务 / MCP Server
 
-每个命令后面加 --help 看细节，例如：wealthpilot model --help
-看不懂的词：进入终端后输入 /glossary 封板率"""
+每个命令后面加 --help 看细节。看不懂的词：进入终端后输入 /glossary 封板率"""
 
 
 def main() -> None:
@@ -293,6 +315,7 @@ def main() -> None:
     doctor_p.add_argument("--offline", action="store_true", help="不实测模型调用")
     doctor_p.add_argument("--port", type=int, default=8000)
     sub.add_parser("mcp", help="启动 MCP Server (stdio, for Claude Code)")
+    sub.add_parser("help", help="全部命令和一句说明")
 
     ask_p = sub.add_parser("ask", help="非交互式 AI 查询（支持管道输入）")
     ask_p.add_argument("query", help="查询内容，传 '-' 从 stdin 读取")
@@ -310,6 +333,9 @@ def main() -> None:
         "ask": cmd_ask,
     }
 
+    if args.command == "help":
+        print(OVERVIEW_ALL)
+        return
     if args.command == "completion":
         print(cli.completion_script(args.shell, sub), end="")
         return

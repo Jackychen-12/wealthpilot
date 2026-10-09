@@ -118,6 +118,7 @@ def as_list() -> list[dict]:
 # 用中文叫命令：手机上打斜杠和英文不方便，终端里也不该先背一遍命令表。
 # 只收不调用模型的命令，而且要整句话正好是这个词才算 —— 正常的提问不会被截走。
 COMMAND_WORDS: dict[str, str] = {
+    "今日": "/digest", "今天": "/digest", "研究": "/help", "大盘": "/market", "市场": "/market", "回顾": "/review",
     "复盘": "/recap", "大盘复盘": "/recap", "今日复盘": "/recap", "宏观": "/macro", "宏观数据": "/macro",
     "持仓": "/holdings", "我的持仓": "/holdings", "自选": "/watch", "自选股": "/watch",
     "简报": "/digest", "每日简报": "/digest", "回溯": "/review", "成绩单": "/review", "建议单": "/proposals", "对账": "/why", "买入理由": "/why",

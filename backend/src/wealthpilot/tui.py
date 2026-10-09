@@ -34,7 +34,7 @@ from wealthpilot.services import glossary, providers
 
 HOME = Path.home() / ".wealthpilot"
 COMMANDS: dict[str, str] = {
-    "/help": "显示命令",
+    "/help": "/help [all] — 常用的几个；all 是全部命令",
     "/stock": "/stock <名称或代码> — 行情、估值分位、最近一期财务",
     "/search": "/search <关键词> — 搜索股票 / ETF / 基金",
     "/screen": "/screen pe<15 roe>15 mv>200 [行业] — 选股（pe pb roe mv rev profit chg）",
@@ -85,15 +85,28 @@ COMMANDS: dict[str, str] = {
     "/quit": "退出",
 }
 FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
-# /help 按用途分组：三十多个命令排成一列没法看
+# 整个产品只有五件事：今日、研究、市场、持仓、回顾（网页左边栏也是这五项）。命令都归在这五件事下面。
+# /help 只给每件事最常用的一两个；五十多个命令的全表在 /help all。
 HELP_GROUPS = [
-    ("研究", ["/quick", "/deep", "/depth", "/rewrite", "/retry", "/export", "/evidence", "/history", "/sessions", "/new"]),
-    ("行情", ["/stock", "/search", "/screen", "/market", "/recap", "/macro", "/dcf"]),
-    ("我的", ["/holdings", "/add", "/watch", "/review", "/verify", "/trades", "/why", "/proposals", "/approve", "/reject", "/broker", "/order"]),
-    ("自己干活", ["/digest", "/tasks", "/alert"]),
-    ("调教与追责", ["/persona", "/skills", "/memory", "/lessons", "/audit", "/glossary"]),
-    ("其他", ["/setup", "/model", "/usage", "/sample", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
+    ("今日", ["/digest", "/alert", "/tasks"]),
+    ("研究", ["/stock", "/search", "/dcf", "/quick", "/deep", "/depth", "/rewrite", "/retry", "/evidence", "/export", "/history", "/sessions", "/new"]),
+    ("市场", ["/market", "/recap", "/macro", "/screen"]),
+    ("持仓", ["/holdings", "/add", "/watch", "/broker", "/order", "/sample"]),
+    ("回顾", ["/review", "/verify", "/why", "/trades", "/proposals", "/approve", "/reject"]),
+    ("设置", ["/setup", "/model", "/persona", "/skills", "/memory", "/lessons", "/usage", "/glossary", "/audit", "/doctor", "/logs", "/update", "/status", "/login", "/help", "/quit"]),
 ]
+HELP_CORE = """直接打字就是提问，例如：帮我分析一下宁德时代 / 我的持仓有什么风险
+
+[bold]今日[/]  [cyan]简报[/]                你的股票今天有什么事
+[bold]研究[/]  [cyan]/stock 茅台[/]         一只股票的行情、估值、财务
+      [cyan]/quick 问题[/]         快速回答（十来秒）     [cyan]/deep 问题[/]  完整研究
+[bold]市场[/]  [cyan]大盘[/]  [cyan]复盘[/]  [cyan]宏观[/]     指数与行业 · 涨停与题材 · PMI 和利率
+[bold]持仓[/]  [cyan]持仓[/]  [cyan]自选[/]           现价和盈亏；录入：/add 茅台 100 1500
+[bold]回顾[/]  [cyan]回顾[/]                之前的判断对不对
+      [cyan]对账[/]                按消息来源看买入之后的结果；记一笔：/why 茅台 理由 来自 谁
+      [cyan]建议单[/]              等你决定的操作建议
+
+[dim]青色的中文词直接打就行，不调用模型。全部命令：/help all　看不懂的词：/glossary 封板率　退出：/quit[/]"""
 ALERT_KEYS = {"price": "price", "chg": "change_pct", "pe": "pe_percentile", "pb": "pb_percentile"}
 STATUS = {"passed": ("green", "已通过校验"), "partial": ("yellow", "部分证据缺失"), "rejected": ("red", "未通过校验 · 未发布"),
           "insufficient_data": ("red", "证据不足 · 未发布"), "failed": ("red", "执行失败")}
@@ -1132,16 +1145,18 @@ class App:
         token_file.chmod(0o600)
         self.console.print(f"已登录：{res['username']}")
 
-    async def cmd_help(self, _: str) -> None:
+    async def cmd_help(self, args: str) -> None:
+        if args.strip() not in ("all", "全部"):
+            self.console.print(HELP_CORE, highlight=False)             # 默认只给五件事各自最常用的；全表要了才给
+            return
         for title, names in HELP_GROUPS:
             t = self.table(title, "")
             for name in names:
                 t.add_row(f"[cyan]{name}[/]", escape(COMMANDS[name]))   # 说明里的 [可选参数] 不是样式标记
             self.console.print(t)
             self.console.print()
-        words = "、".join(sorted({w for w, cmd in glossary.COMMAND_WORDS.items() if hasattr(self, f"cmd_{cmd[1:]}")}, key=len)[:14])
-        self.console.print(f"[dim]不想记命令：直接打这些词也行（不调用模型）—— {words}。看不懂的词：/glossary 封板率[/]", highlight=False)
-        self.console.print("[dim]直接输入问题就是一次研究，例如：帮我深度分析一下宁德时代 / 对比茅台和五粮液 / 复盘一下之前的研究[/]")
+        words = "、".join(sorted({w for w, cmd in glossary.COMMAND_WORDS.items() if hasattr(self, f"cmd_{cmd[1:]}")}, key=len)[:16])
+        self.console.print(f"[dim]不想记命令：直接打这些词也行（不调用模型）—— {words}[/]", highlight=False)
 
     # —— 主循环 ——
 
@@ -1161,7 +1176,7 @@ class App:
                 handler = getattr(self, f"cmd_{name[1:]}", None)
                 if handler is None:
                     close = difflib.get_close_matches(name, list(COMMANDS), n=2, cutoff=0.6)
-                    hint = f"是不是想用 {' 或 '.join(close)}？" if close else "/help 看全部"
+                    hint = f"是不是想用 {' 或 '.join(close)}？" if close else "/help all 看全部"
                     self.console.print(f"[red]没有这个命令：{name}[/]（{hint}）")
                 else:
                     await handler(args.strip())
@@ -1186,7 +1201,7 @@ class App:
         if getattr(self.backend, "own_scheduler", False):
             from wealthpilot.services import watcher
             self._scheduler = asyncio.ensure_future(watcher.scheduler())
-        c.print("[dim]输入问题开始研究，/help 看命令，Ctrl-C 中断当前研究，/quit 退出[/]")
+        c.print("[dim]直接打字就是提问。不调用模型、马上就有的：今日 · 市场 · 持仓 · 回顾。/help 看更多，Ctrl-C 中断当前研究，/quit 退出[/]")
         await self.greet()
         read = self._reader()
         if isinstance(self.backend, LocalBackend) and sys.stdin.isatty():
