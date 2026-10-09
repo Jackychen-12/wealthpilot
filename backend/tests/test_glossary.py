@@ -107,3 +107,24 @@ def test_command_line_help_is_grouped_by_purpose_and_lists_every_command():
     assert not missing, f"帮助里漏了这些命令：{missing}"
     one = subprocess.run([sys.executable, "-m", "wealthpilot", "model", "--help"], capture_output=True, text=True).stdout
     assert "fallback" in one                                                                    # 单个命令的帮助照旧
+
+
+def test_workflow_files_only_use_contexts_that_exist_where_they_are_written():
+    """GitHub 对工作流文件很严：job 这一级的 env 里拿不到 runner（运行器还没分配），写了整个文件就作废，而且只在推上去之后才知道。"""
+    from pathlib import Path
+
+    import yaml
+    folder = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+    files = sorted(folder.glob("*.yml"))
+    assert {f.name for f in files} >= {"deploy.yml", "test.yml", "daily.yml"}
+    for file in files:
+        flow = yaml.safe_load(file.read_text(encoding="utf-8"))
+        assert isinstance(flow.get("jobs"), dict) and (True in flow or "on" in flow), file.name       # YAML 把 on 读成 True
+        for value in (flow.get("env") or {}).values():
+            assert "runner." not in str(value) and "steps." not in str(value), file.name
+        for name, job in flow["jobs"].items():
+            for value in (job.get("env") or {}).values():
+                assert "runner." not in str(value) and "steps." not in str(value), f"{file.name} · {name}"
+            assert "runner." not in str(job.get("if", "")), f"{file.name} · {name}"
+            for step in job.get("steps") or []:
+                assert ("run" in step) != ("uses" in step), f"{file.name} · {name}：每一步要么 run 要么 uses"

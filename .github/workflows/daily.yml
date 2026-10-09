@@ -23,7 +23,6 @@ jobs:
       ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      WEALTHPILOT_HOME: ${{ runner.temp }}/wealthpilot
     steps:
       - name: 有没有配推送地址
         id: ready
@@ -38,7 +37,9 @@ jobs:
       - name: 跑日报并推送
         if: steps.ready.outputs.go == 'yes'
         working-directory: backend
+        # 数据目录放在运行器的临时目录里（这一级才拿得到它的路径；写在上面 job 的 env 里，整个文件会被判为无效）
         run: |
+          export WEALTHPILOT_HOME="$RUNNER_TEMP/wealthpilot"
           mkdir -p "$WEALTHPILOT_HOME"
           uv sync --quiet
           uv run wealthpilot daily --push
