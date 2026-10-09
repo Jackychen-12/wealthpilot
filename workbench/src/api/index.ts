@@ -265,7 +265,7 @@ export interface GlossaryTerm { term: string; plain: string; how: string; aliase
 export interface Persona { text: string; path: string; max_chars: number; presets: { key: string; label: string; text: string }[] }
 export interface ModelPreset { key: string; label: string; provider: string; base_url: string; model: string; needs_key: boolean; note: string; key_page: string }
 export interface AppSettings { values: Record<string, string | number | boolean>; secrets: Record<string, { set: boolean; hint: string }>; overridden: string[]; active_model: string; fallback_active?: string; env_file: string; presets?: ModelPreset[] }
-export interface StockQuote { code: string; name: string; price: number; prev_close: number; open: number; high: number; low: number
+export interface StockQuote { currency?: string; market?: string; code: string; name: string; price: number; prev_close: number; open: number; high: number; low: number
   change: number; change_pct: number; amount_yi: number | null; turnover_pct: number | null; pe_ttm: number | null; pb: number | null
   total_mv_yi: number | null; quote_time: string }
 export interface StockValuation { price_range_1y?: { period_high: number; period_low: number; range_position_pct: number | null; trading_days: number }; note: string }
