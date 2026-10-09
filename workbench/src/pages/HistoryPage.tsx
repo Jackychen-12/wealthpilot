@@ -90,7 +90,7 @@ const HistoryPage: React.FC = () => {
     <Page title="研究记录" description="做过的每一次研究：回答、校验结论和当时取得的证据" terms={['证据编号', '验证点', '多空辩论']}>
       <Section title="全部记录" hint={rows.length ? `最近 ${rows.length} 条，新的在前` : undefined}>
         <DataState loading={history.loading} error={history.error} onRetry={history.reload}
-          empty={rows.length === 0 ? '还没有研究记录。在 AI 研究里提问后，会自动存到这里。' : undefined}
+          empty={rows.length === 0 ? '还没有研究记录。在「研究」里提问后，会自动存到这里。' : undefined}
           emptyAction={<Link to="/research" className="font-medium text-ink underline underline-offset-2">去提问</Link>}>
           <Table minWidth={760} head={[{ label: '问题' }, { label: '涉及证券' }, { label: '类型' }, { label: '结论' }, { label: '证据', right: true }, { label: '时间', right: true }]}>
             {rows.map((r) => (

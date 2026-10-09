@@ -29,15 +29,21 @@ CHANNELS = {"telegram": "Telegram", "feishu": "飞书", "dingtalk": "钉钉", "w
 _FOREVER = 3650 * cache.DAY
 PAIR_TTL = 600
 CHUNK = 3800   # Telegram 单条上限 4096
+# 和网页、终端同一套划分：今日、研究、市场、持仓、回顾。默认只说常用的，其余在“帮助 全部”里
 HELP = ("直接发问题就是一次研究，例如：帮我分析一下宁德时代。也可以发截图或语音。\n\n"
-        "不用模型、马上就有的（直接发这几个词）：\n"
-        "复盘 — 今天的大盘：涨停、连板、题材、龙虎榜\n宏观 — PMI、物价、利率\n持仓 / 自选 — 现价和盈亏\n"
-        "简报 — 你的股票今天有什么事\n回溯 — 之前的判断对不对\n建议单 — 等你决定的操作建议\n"
-        "记一笔 宁德时代 储能订单超预期 来自 雪球某某 — 记下为什么买；只发“对账”看按来源的结果\n"
-        "状态 / 用量 — 模型、今天花了多少\n停 — 停掉正在查的这一个\n解释 封板率 — 看不懂的词\n\n"
-        "要它研究的：\n/quick 问题 — 快速回答（十来秒）\n/deep 问题 — 重新取数，完整研究\n"
-        "/rewrite 要求 — 把上一个回答换个写法\n/stock 名称 — 行情与估值分位\n/new — 开始新会话\n\n"
-        "斜杠命令照旧可用：/recap /macro /holdings /watch /digest /review /why /proposals /tasks /status /usage /stop /help")
+        "发下面这些词，马上就有（不调用模型）：\n"
+        "今日 — 你的股票今天有什么事\n"
+        "市场 — 复盘（涨停、题材、情绪）· 宏观（PMI、利率）\n"
+        "持仓 — 持仓 · 自选：现价和盈亏\n"
+        "回顾 — 回顾（之前的判断对不对）· 对账 · 建议单\n\n"
+        "研究时：/quick 问题（快）· /deep 问题（完整）· 停（停掉正在查的）\n"
+        "看不懂的词：解释 封板率。其余命令：帮助 全部")
+HELP_ALL = ("今日：简报 /digest · 任务 /tasks\n"
+            "研究：/quick 问题 · /deep 问题 · /rewrite 要求（把上一个回答换个写法）· /stock 名称 · /new 新会话 · 停 /stop\n"
+            "市场：复盘 /recap · 宏观 /macro\n"
+            "持仓：持仓 /holdings · 自选 /watch\n"
+            "回顾：回顾 /review · 建议单 /proposals · 对账 /why · 记一笔 宁德时代 储能订单超预期 来自 朋友\n"
+            "其他：状态 /status · 用量 /usage · 解释 封板率 · 帮助 /help")
 FALLBACK_WHY = {'balance': '余额不足', 'auth': '的 Key 无效', 'model': '模型名不对', 'rate_limit': '被限流', 'network': '连不上'}
 STATUS = {"passed": "已通过校验", "partial": "部分证据缺失", "rejected": "未通过校验，未发布", "insufficient_data": "证据不足，未发布", "failed": "执行失败"}
 
@@ -233,6 +239,8 @@ class Bot:
         word = text.strip().lstrip("/")
         if word in glossary.COMMAND_WORDS:          # 手机上打斜杠和英文不方便：整句话正好是"复盘""持仓"就当命令
             text = glossary.COMMAND_WORDS[word]
+        elif word in ("帮助 全部", "帮助全部", "全部命令"):
+            text = "/help all"
         elif text.startswith("记一笔 "):            # “记一笔 宁德时代 理由…”：记买入理由，不是提问
             text = "/why " + text.split(None, 1)[1]
         command, _, rest = text.partition(" ")
@@ -241,7 +249,7 @@ class Bot:
             await self.api.send(chat_id, glossary.explain(rest))
             return
         if command in ("/start", "/help"):
-            await self.api.send(chat_id, HELP)
+            await self.api.send(chat_id, HELP_ALL if rest in ("all", "全部") else HELP)
         elif command == "/digest":
             await self._digest(chat_id, run=rest == "run")
         elif command == "/review":
@@ -275,7 +283,7 @@ class Bot:
             await self._tasks(chat_id)
         elif command == "/why":
             await self._why(chat_id, rest)
-        elif command == "/recap":
+        elif command in ("/recap", "/market"):         # 手机上“大盘”“市场”给的就是当天的复盘
             from wealthpilot.services import recap
             await self.api.send(chat_id, recap.text(await recap.build()))
         elif command == "/macro":
@@ -289,7 +297,7 @@ class Bot:
             # 没有按钮的渠道：按钮被写成了这几个命令
             await self._button(chat_id, f"{command[1:]}:{rest.lstrip('#')}")
         elif text.startswith("/"):
-            await self.api.send(chat_id, "没有这个命令。\n\n" + HELP)
+            await self.api.send(chat_id, "没有这个命令。\n\n" + HELP_ALL)
         elif text:
             await self._research(chat_id, self._with_image(text), "auto")
 

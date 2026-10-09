@@ -43,9 +43,9 @@ async def test_chinese_words_work_as_commands_in_the_terminal_and_typos_get_a_hi
     await app_.handle("/recpa")
     assert "是不是想用 /recap" in out.getvalue()
     await app_.handle("/zzzzzz")
-    assert "/help 看全部" in out.getvalue()
+    assert "/help all 看全部" in out.getvalue()
     await app_.handle("/help")
-    assert "不想记命令" in out.getvalue() and "/glossary 封板率" in out.getvalue()
+    assert "中文词直接打就行" in out.getvalue() and "/glossary 封板率" in out.getvalue()
 
 
 async def test_a_question_that_merely_contains_a_command_word_is_still_a_question():
@@ -86,7 +86,7 @@ async def test_the_phone_takes_plain_words_and_explains_terms(monkeypatch):
         await bot.message("me", "状态")
         assert "模型：" in sink.sent[-1]
         await bot.message("me", "帮助")
-        assert "直接发这几个词" in sink.sent[-1] and "解释 封板率" in sink.sent[-1]
+        assert "发下面这些词" in sink.sent[-1] and "解释 封板率" in sink.sent[-1]
         await bot.message("me", "宏观环境对白酒有什么影响")              # 只是包含"宏观"两个字：照常研究
         assert asked == ["宏观环境对白酒有什么影响"]
     finally:
@@ -97,13 +97,15 @@ def test_command_line_help_is_grouped_by_purpose_and_lists_every_command():
     import subprocess
     import sys
 
-    from wealthpilot.__main__ import OVERVIEW
+    from wealthpilot.__main__ import OVERVIEW, OVERVIEW_ALL
     shown = subprocess.run([sys.executable, "-m", "wealthpilot", "--help"], capture_output=True, text=True).stdout
-    assert "第一次用" in shown and "不调用模型、马上就有的" in shown and "出了问题" in shown
+    assert "第一次用" in shown and "进去之后只有五件事" in shown and "出了问题" in shown and len(shown.splitlines()) <= 40   # 连同启动参数一屏看完
+    everything = subprocess.run([sys.executable, "-m", "wealthpilot", "help"], capture_output=True, text=True).stdout
+    assert everything.strip() == OVERVIEW_ALL and "connectors" in everything and "connectors" not in OVERVIEW        # 不常用的收在全表里
     assert "positional arguments" not in shown and "{run,setup" not in shown                     # argparse 那张平铺的表收起来了
     bash = subprocess.run([sys.executable, "-m", "wealthpilot", "completion", "bash"], capture_output=True, text=True).stdout
     commands = bash.split('compgen -W "')[1].split('"')[0].split()
-    missing = [c for c in commands if c not in OVERVIEW and c not in ("chat", "tui")]           # 旧入口不再往外介绍
+    missing = [c for c in commands if c not in OVERVIEW + OVERVIEW_ALL and c not in ("chat", "tui")]   # 旧入口不再往外介绍
     assert not missing, f"帮助里漏了这些命令：{missing}"
     one = subprocess.run([sys.executable, "-m", "wealthpilot", "model", "--help"], capture_output=True, text=True).stdout
     assert "fallback" in one                                                                    # 单个命令的帮助照旧

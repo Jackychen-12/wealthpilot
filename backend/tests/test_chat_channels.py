@@ -312,7 +312,14 @@ async def test_deep_and_rewrite_reach_the_research_with_the_right_arguments():
     await bot.message("me", "/new")
     assert bot.last_message_id is None and bot.history == []
     for command in ("/deep", "/rewrite", "/stop", "/status", "/usage", "/holdings", "/watch", "/tasks"):
-        assert command in channels.HELP
+        assert command in channels.HELP_ALL                                  # 全表里都有
+    assert len(channels.HELP.splitlines()) <= 10 and "帮助 全部" in channels.HELP   # 默认的帮助一屏看完
+    for section in ("今日", "市场", "持仓", "回顾"):
+        assert section in channels.HELP
+    await bot.message("me", "帮助 全部")
+    assert "/rewrite" in sink.last()
+    await bot.message("me", "大盘")                                          # 手机上“大盘”“市场”给当天的复盘
+    assert "/rewrite" not in sink.last()
 
 
 async def test_read_only_commands_answer_from_local_data(monkeypatch):

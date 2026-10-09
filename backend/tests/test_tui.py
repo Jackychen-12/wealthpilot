@@ -213,8 +213,14 @@ async def test_help_is_grouped_and_covers_every_command():
     for name in tui.COMMANDS:
         if name not in ("/quit", "/help"):
             assert hasattr(app, f"cmd_{name[1:]}"), name
+    assert [title for title, _ in tui.HELP_GROUPS] == ["今日", "研究", "市场", "持仓", "回顾", "设置"]       # 和网页左边栏是同一套划分
     await app.handle("/help")
-    assert "自己干活" in out.getvalue() and "/rewrite" in out.getvalue()
+    core = out.getvalue()
+    assert "直接打字就是提问" in core and "/rewrite" not in core and len(core.splitlines()) <= 16          # 默认只给常用的，一屏之内
+    for section in ("今日", "研究", "市场", "持仓", "回顾"):
+        assert section in core
+    await app.handle("/help all")
+    assert "/rewrite" in out.getvalue() and "/audit" in out.getvalue()
 
 
 async def test_first_run_setup_walks_model_then_holdings():

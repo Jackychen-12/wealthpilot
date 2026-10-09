@@ -109,7 +109,7 @@ const ConnectorsPage: React.FC = () => {
           <li>按上面「要什么」把对方的账号、Key 准备好。</li>
           <li>终端里运行 <code className={code}>wealthpilot connectors add 名字 --url 服务地址 --token 令牌</code>。地址和令牌该不该填，看那一条的说明；令牌存进你自己的 <code className={code}>.env</code>，不会写进配置文件。</li>
           <li><code className={code}>wealthpilot connectors test 名字</code>，或者回到这一页点「测试连接」：看连不连得上、哪些工具可用、哪些被屏蔽。</li>
-          <li>之后在 AI 研究里问到相关内容时，Agent 会连同这些外部工具一起用，取回来的数据同样进证据链、接受校验。不想用了：<code className={code}>wealthpilot connectors remove 名字</code>。</li>
+          <li>之后在「研究」里问到相关内容时，Agent 会连同这些外部工具一起用，取回来的数据同样进证据链、接受校验。不想用了：<code className={code}>wealthpilot connectors remove 名字</code>。</li>
         </ol>
       </Section>
     </Page>
