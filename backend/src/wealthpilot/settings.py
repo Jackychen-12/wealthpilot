@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     research_reuse_hours: float = Field(default=4, ge=0, description="几小时内对同一只股票再做深度研究时，沿用上一次取到的数据而不是重新取数；0 = 每次都重新取")
     update_check: bool = Field(default=True, description="启动时看一眼有没有新版本（只读取本仓库的远端，不上传任何东西）")
 
-    # 手机触达：Telegram 机器人。令牌在网页「设置」里填；绑定哪个聊天由配对码决定，存在数据库里
+    # 手机渠道：Telegram 机器人。令牌在网页「设置」里填；绑定哪个聊天由配对码决定，存在数据库里
     telegram_bot_token: str = Field(default="", description="Telegram 机器人令牌（@BotFather 给的）")
     telegram_api_base: str = Field(default="https://api.telegram.org", description="Telegram 接口地址；需要走中转时改这里")
 

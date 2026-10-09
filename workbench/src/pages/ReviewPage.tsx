@@ -78,7 +78,7 @@ const ReviewPage: React.FC = () => {
   const open = (proposals.data ?? []).filter((p) => p.status === 'proposed')
 
   return (
-    <Page title="验证与回溯" description="每次研究最关键的几条判断会被记成验证点，到期后由代码取数核对：当时说的，后来对不对"
+    <Page title="验证与回溯" description="每次研究最关键的几条判断会被记成验证点，到期后由代码取数核对：当时说的，后来对不对" terms={['验证点', '成立率', '建议单']}
       actions={(
         <>
           {DEMO ? null : <Button size="sm" variant="secondary" loading={busy} onClick={() => void verify()}><RefreshCw className="h-3.5 w-3.5" />立即核对</Button>}

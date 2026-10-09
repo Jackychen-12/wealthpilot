@@ -158,7 +158,7 @@ const TodayPage: React.FC = () => {
   }
 
   return (
-    <Page title="今日" description="有什么等你处理，你的股票现在怎么样，当初的判断还成立几条">
+    <Page title="今日" description="有什么等你处理，你的股票现在怎么样，当初的判断还成立几条" terms={['每日简报', '验证点', '建议单']}>
       <form onSubmit={(e) => { e.preventDefault(); ask(draft) }}
         className="flex items-center gap-2 rounded-xl border border-hairline-strong bg-canvas p-2 shadow-subtle focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
         <input value={draft} onChange={(e) => setDraft(e.target.value)} disabled={DEMO} aria-label="向 AI 提问"

@@ -173,7 +173,7 @@ def cmd_setup(args, *, ask: Ask = input, secret: Ask = getpass.getpass, out: Out
         out("\n3/3 好了。接下来：\n"
             "  wealthpilot            开始用：终端里直接提问，网页版同时在 http://localhost:8000\n"
             "  wealthpilot doctor     哪里不通，它会告诉你卡在哪一环\n"
-            "  想在手机上用：网页版「设置 → 手机触达」里接 Telegram、飞书或企业微信")
+            "  想在手机上用：网页版「设置 → 手机渠道」里接 Telegram、飞书或企业微信")
     return 0
 
 
@@ -331,7 +331,7 @@ def cmd_status(_args, *, out: Out = print) -> int:
         out(f"  备用模型   {PROVIDER_LABEL[backup]} · {_model_of(s, backup)}")
     out(f"  持仓与自选 {holdings} 只持仓，{watching} 只自选" + ("" if holdings or watching else "  ← 还是空的：wealthpilot setup 或 wealthpilot import"))
     out(f"  每日盯盘   {'开着，' + s.watch_time if s.watch_enabled else '关着'}；自动任务 {len(autos)} 条开着")
-    out(f"  手机       {'、'.join(paired) + ' 已绑定' if paired else '没有绑定（网页版「设置 → 手机触达」）'}")
+    out(f"  手机       {'、'.join(paired) + ' 已绑定' if paired else '没有绑定（网页版「设置 → 手机渠道」）'}")
     limit = f"，上限 {s.daily_token_budget / 1e4:.0f} 万" if s.daily_token_budget else ""
     out(f"  今天用量   {today['tokens'] / 1e4:.1f} 万 token{limit}")
     out("开始用：wealthpilot    自检：wealthpilot doctor")

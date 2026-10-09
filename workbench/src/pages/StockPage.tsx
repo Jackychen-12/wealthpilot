@@ -33,7 +33,7 @@ const StockPage: React.FC = () => {
   const code = useParams().code ?? ''
   const navigate = useNavigate()
   return (
-    <Page title="个股" description="A 股个股与 ETF：行情走势、财务、估值分位、同行与公告">
+    <Page title="个股" description="A 股个股与 ETF：行情走势、财务、估值分位、同行与公告" terms={['PE', 'PB', '历史分位', 'ROE', '毛利率', '换手率', '主力资金', '融资余额', '股东户数', '北向资金', '一致预期', '限售解禁']}>
       <div className="flex flex-wrap items-center gap-3">
         <SecuritySearch className="w-full max-w-sm" placeholder="输入名称或代码，如 宁德时代、600519" onPick={(s) => navigate(securityPath(s))} />
         {DEMO && !code ? <Button size="sm" variant="secondary" onClick={() => navigate(`/stock/${DEMO_DEFAULTS.stock}`)}>查看示例：贵州茅台</Button> : null}

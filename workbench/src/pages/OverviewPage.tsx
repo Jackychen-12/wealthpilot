@@ -129,7 +129,7 @@ const OverviewPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   if (embedded) return <div className="flex flex-col gap-10">{body}</div>
 
   return (
-    <Page title="总览" description="市值、收益、归因与市场动态"
+    <Page title="总览" description="市值、收益、归因与市场动态" terms={['收益归因', '最大回撤']}
       actions={<Button size="sm" variant="secondary" onClick={() => navigate('/holdings')}>管理持仓</Button>}>
       {body}
 

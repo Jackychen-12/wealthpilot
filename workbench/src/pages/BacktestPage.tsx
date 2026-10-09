@@ -47,7 +47,7 @@ const BacktestPage: React.FC = () => {
   ] : []
 
   return (
-    <Page title="规则回测" description="分批建仓规则先拿历史验一遍，并和一次性买入、定投两个基线比"
+    <Page title="规则回测" description="分批建仓规则先拿历史验一遍，并和一次性买入、定投两个基线比" terms={['回测', '定投', '最大回撤']}
       actions={code.trim() && valid.length ? <AskAi question={`${code.trim()} ${ruleText}的分批建仓规则，历史上比一次性买入好吗`} /> : undefined}>
       <Section title="规则" hint="每一档：从高点回撤达到多少时，投入总资金的百分之多少。每档只触发一次">
         <form onSubmit={(e) => void run(e)} className="flex max-w-[760px] flex-col gap-4">

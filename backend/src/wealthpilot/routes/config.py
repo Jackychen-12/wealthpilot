@@ -99,7 +99,7 @@ def usage(request: Request):
 
 @router.get("/doctor")
 async def doctor(request: Request, model: bool = False):
-    """自检：数据源、模型、数据库、手机触达、版本，各自通不通、不通怎么修。model=1 时实测一次模型调用。"""
+    """自检：数据源、模型、数据库、手机渠道、版本，各自通不通、不通怎么修。model=1 时实测一次模型调用。"""
     from wealthpilot.services import doctor as checks
 
     _local_only(request)

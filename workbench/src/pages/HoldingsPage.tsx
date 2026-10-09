@@ -155,7 +155,7 @@ const HoldingsPage: React.FC<{ initialTab?: string }> = ({ initialTab = 'list' }
     setEditing((ed) => (ed ? { ...ed, form: { ...ed.form, [key]: value } } : ed))
 
   return (
-    <Page title="持仓" description="股票、ETF 和基金放在一起：明细、分布、收益与归因"
+    <Page title="持仓" description="股票、ETF 和基金放在一起：明细、分布、收益与归因" terms={['收益归因', '集中度', '市值']}
       actions={(
         <>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => setPasting(true)}><ClipboardPaste className="h-4 w-4" />粘贴导入</Button>

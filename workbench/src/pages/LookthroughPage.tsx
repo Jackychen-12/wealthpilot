@@ -34,7 +34,7 @@ const LookthroughPage: React.FC = () => {
   const options = funds.map((f) => ({ value: f.fund_code, label: `${f.fund_name}（${f.fund_code}）` }))
 
   return (
-    <Page title="持仓穿透" description="把基金拆到个股：你真正持有的是什么，哪些票被多只基金同时重仓"
+    <Page title="持仓穿透" description="把基金拆到个股：你真正持有的是什么，哪些票被多只基金同时重仓" terms={['持仓穿透', '集中度']}
       actions={<AskAi question="把我的组合穿透到个股，真实暴露集中在哪里？有没有隐性重叠？" />}>
       <DataState loading={look.loading} error={look.error} onRetry={look.reload} empty={emptyText}>
         {d ? (

@@ -21,7 +21,7 @@ type ChannelName = 'telegram' | 'feishu' | 'dingtalk' | 'wecom'
 const CHANNEL_TABS = [['telegram', 'Telegram'], ['feishu', '飞书'], ['dingtalk', '钉钉'], ['wecom', '企业微信']] as const
 
 /**
- * 手机触达：在 Telegram、飞书或企业微信里收简报和提醒、直接提问、处理建议单。
+ * 手机渠道：在 Telegram、飞书或企业微信里收简报和提醒、直接提问、处理建议单。
  * 应用的凭证和其他设置一起保存；认谁做主人靠配对码 —— 在这里生成，在那个应用里发给机器人，谁发对了谁就是主人。
  */
 const Reach: React.FC<{
@@ -56,7 +56,7 @@ const Reach: React.FC<{
   )
   const callback = `${window.location.origin}/api/channel/wecom/callback`
   return (
-    <Section title="手机触达" hint="在手机上收每日简报和提醒、直接提问、处理建议单。三个里接一个就行">
+    <Section title="手机渠道" hint="在手机上收每日简报和提醒、直接提问、处理建议单。三个里接一个就行">
       <div className="mb-4 flex items-center gap-4 border-b border-hairline">
         <Segmented value={tab} onChange={(v) => setTab(v as ChannelName)} options={CHANNEL_TABS} />
         <span className="mb-1.5 ml-auto text-[13px] text-steel">
@@ -353,7 +353,7 @@ const SettingsPage: React.FC = () => {
     return <Page title="设置" description="模型、研究方式、模拟盘和每日盯盘"><Callout tone="info">在线演示没有后端，这一页在本地运行后可用。</Callout></Page>
   }
   return (
-    <Page title="设置" description="模型、研究方式、手机触达、模拟盘和每日盯盘。保存后立即生效，不用重启">
+    <Page title="设置" description="模型、研究方式、手机渠道、模拟盘和每日盯盘。保存后立即生效，不用重启" terms={['备用模型', '回答风格', 'token', '每日简报', '模拟盘']}>
       <DataState loading={settings.loading && !data} error={settings.error} onRetry={settings.reload}>
         {data ? (
           <form onSubmit={save} className="flex flex-col gap-10">

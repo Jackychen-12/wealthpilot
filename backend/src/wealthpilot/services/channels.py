@@ -1,4 +1,4 @@
-"""手机触达：在 Telegram、飞书、企业微信里收简报、提问、处理建议单。
+"""手机渠道：在 Telegram、飞书、企业微信里收简报、提问、处理建议单。
 
 三个渠道共用同一个机器人逻辑（Bot），区别只在消息怎么收、怎么发：
 - Telegram：长轮询，不需要公网地址；
@@ -180,7 +180,7 @@ class Bot:
                 set_owner(chat_id, self.channel)
                 await self.api.send(chat_id, "已绑定。之后简报和提醒会发到这里，你也可以直接在这里提问。\n\n" + HELP)
             else:
-                await self.api.send(chat_id, "这个机器人还没有绑定主人。在 WealthPilot 的「设置 → 手机触达」里生成配对码，然后发送：/pair 配对码")
+                await self.api.send(chat_id, "这个机器人还没有绑定主人。在 WealthPilot 的「设置 → 手机渠道」里生成配对码，然后发送：/pair 配对码")
             return
         if chat_id != master:
             return   # 不是主人：不回应，也不透露任何信息

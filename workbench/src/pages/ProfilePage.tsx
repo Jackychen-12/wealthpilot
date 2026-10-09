@@ -43,7 +43,7 @@ const ProfilePage: React.FC = () => {
   }
 
   return (
-    <Page title="风险画像" description="AI 给出任何仓位建议前都会逐条核对的硬约束">
+    <Page title="风险画像" description="AI 给出任何仓位建议前都会逐条核对的硬约束" terms={['风险画像', '最大回撤', '集中度']}>
       <DataState loading={profile.loading} error={profile.error} onRetry={profile.reload}>
         {p ? (
           <Callout tone={p.is_stale ? 'warning' : 'neutral'}>

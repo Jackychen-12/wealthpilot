@@ -288,7 +288,7 @@ def main() -> None:
     completion.add_argument("shell", choices=["zsh", "bash"])
     sub.add_parser("watch", help="跑一次每日盯盘并打印简报（可挂 cron）")
     sub.add_parser("update", help="升级到最新版本（先备份数据库；有本地改动会停下来问）")
-    doctor_p = sub.add_parser("doctor", help="自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修")
+    doctor_p = sub.add_parser("doctor", help="自检：模型、数据源、数据库、手机渠道、版本，哪一环不通、怎么修")
     doctor_p.add_argument("--offline", action="store_true", help="不实测模型调用")
     doctor_p.add_argument("--port", type=int, default=8000)
     sub.add_parser("mcp", help="启动 MCP Server (stdio, for Claude Code)")

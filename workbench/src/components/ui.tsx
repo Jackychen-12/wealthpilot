@@ -2,6 +2,7 @@
 import type React from 'react'
 import { cn } from '../utils/cn'
 import { Button, Spinner } from './kit'
+import { Terms } from './Terms'
 
 // A 股习惯：红涨绿跌
 export const signClass = (v: number | null | undefined) => (v == null || v === 0 ? 'text-ink' : v > 0 ? 'text-up' : 'text-down')
@@ -14,7 +15,7 @@ export const CATEGORY: Record<string, string> = { equity: '权益', bond: '债�
 export const ASSET: Record<string, string> = { fund: '基金', stock: '股票', etf: 'ETF', crypto: '加密货币' }
 
 /** 页面框架：像一页文档 —— 大标题、一句说明，下面是内容。 */
-export const Page: React.FC<{ title: string; description: string; actions?: React.ReactNode; children: React.ReactNode }> = ({ title, description, actions, children }) => (
+export const Page: React.FC<{ title: string; description: string; actions?: React.ReactNode; children: React.ReactNode; terms?: string[] }> = ({ title, description, actions, children, terms }) => (
   <div className="mx-auto w-full max-w-[1120px] px-6 pb-16 pt-10 md:px-10">
     <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
       <div className="min-w-0">
@@ -24,6 +25,8 @@ export const Page: React.FC<{ title: string; description: string; actions?: Reac
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </header>
     <div className="flex flex-col gap-10">{children}</div>
+    {/* 这一页用到的术语：点一个就地展开一两句解释，不用先学一遍 */}
+    {terms?.length ? <Terms words={terms} className="mt-10 border-t border-hairline-soft pt-4" /> : null}
   </div>
 )
 

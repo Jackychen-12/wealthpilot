@@ -60,7 +60,7 @@ export const SkillsPage: React.FC = () => {
   }
 
   return (
-    <Page title="研究方法" description="把你自己的方法写成一个文件教给 AI：什么时候用、派谁去查、各自查什么、报告分哪几节"
+    <Page title="研究方法" description="把你自己的方法写成一个文件教给 AI：什么时候用、派谁去查、各自查什么、报告分哪几节" terms={['研究方法']}
       actions={DEMO || !data ? undefined : <Button size="sm" onClick={() => { setError(''); setEditing({ name: 'my-method', content: data.template, isNew: true }) }}>新建方法</Button>}>
       {error && !editing ? <Callout tone="danger">{error}</Callout> : null}
       {notice ? <Callout tone="success">{notice}</Callout> : null}

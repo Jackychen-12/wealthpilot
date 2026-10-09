@@ -242,7 +242,7 @@ def test_doctor_says_what_is_wrong_and_how_to_fix(monkeypatch):
     assert by_name["模型"]["status"] == "fail" and "设置" in by_name["模型"]["fix"]          # 测试环境没有 Key
     assert by_name["数据库"]["status"] == "ok" and by_name["审计日志"]["status"] == "ok"
     assert by_name["端口 59999"]["detail"].startswith("空闲")
-    assert by_name["手机触达"]["status"] == "warn"
+    assert by_name["手机渠道"]["status"] == "warn"
     assert by_name["版本"]["status"] == "warn" and "wealthpilot update" in by_name["版本"]["fix"]
     text = doctor.render(items)
     assert "✗ 模型" in text and "→" in text and "项不通" in text
@@ -259,7 +259,7 @@ def test_doctor_keeps_going_when_one_check_itself_breaks(monkeypatch):
     items = asyncio.run(doctor.run(online=False, port=59999))
     by_name = {i["name"]: i for i in items}
     assert by_name["版本与研究方法"]["status"] == "warn" and "没查成" in by_name["版本与研究方法"]["detail"]
-    assert by_name["行情（新浪）"]["status"] == "ok" and "数据库" in by_name and "手机触达" in by_name      # 其余照常
+    assert by_name["行情（新浪）"]["status"] == "ok" and "数据库" in by_name and "手机渠道" in by_name      # 其余照常
 
 
 def test_version_and_doctor_routes(monkeypatch):

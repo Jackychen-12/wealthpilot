@@ -15,7 +15,7 @@ const StressPage: React.FC = () => {
   const d = detail.data
 
   return (
-    <Page title="压力测试" description="预设情景下组合会亏多少。幅度是预设口径，不是预测">
+    <Page title="压力测试" description="预设情景下组合会亏多少。幅度是预设口径，不是预测" terms={['压力测试', '最大回撤']}>
       <Section title="各情景下的组合损益" hint={`${all.data?.assumption ?? ''} 点一行查看逐持仓明细。`}>
         <DataState loading={all.loading} error={all.error} onRetry={all.reload}
           empty={scenarios.length === 0 ? all.data?.message ?? '暂无持仓，无法测算' : undefined}>

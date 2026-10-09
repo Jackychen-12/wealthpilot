@@ -128,3 +128,19 @@ def test_workflow_files_only_use_contexts_that_exist_where_they_are_written():
             assert "runner." not in str(job.get("if", "")), f"{file.name} · {name}"
             for step in job.get("steps") or []:
                 assert ("run" in step) != ("uses" in step), f"{file.name} · {name}：每一步要么 run 要么 uses"
+
+
+def test_every_term_a_page_offers_to_explain_actually_has_an_entry():
+    """页面上列出来的词如果词典里没有，那一行会悄悄少一个词 —— 用户以为没得查。"""
+    import re
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[2] / "workbench" / "src"
+    offered: dict[str, str] = {}
+    for file in src.rglob("*.tsx"):
+        for group in re.findall(r"(?:terms|words)=\{\[([^\]]+)\]\}", file.read_text(encoding="utf-8")):
+            for word in re.findall(r"'([^']+)'", group):
+                offered[word] = file.name
+    assert len(offered) >= 40
+    missing = {w: f for w, f in offered.items() if w not in glossary.TERMS}
+    assert not missing, f"词典里没有这些词：{missing}"
+    assert len({f for f in offered.values()}) >= 15                      # 不只是新页面：旧页面也都挂上了

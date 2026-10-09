@@ -73,7 +73,7 @@ COMMANDS: dict[str, str] = {
     "/persona": "/persona [use <预设> | set <一段话> | clear] — 回答风格：你希望它怎么跟你说话（只管语气和详略）",
     "/usage": "今天、近 7 天、近 30 天用了多少 token，都花在哪类问题上",
     "/logs": "/logs [errors] — 后台出了什么事（研究失败、推送没发出去、盯盘出错）",
-    "/doctor": "自检：模型、数据源、数据库、手机触达、版本，哪一环不通、怎么修",
+    "/doctor": "自检：模型、数据源、数据库、手机渠道、版本，哪一环不通、怎么修",
     "/update": "有没有新版本、怎么升级",
     "/setup": "重新走一遍首次配置（模型 Key、示例数据）",
     "/sessions": "/sessions [序号 | 关键词] — 以前的会话；带序号回到那个会话接着聊，带关键词只列提到过它的",
@@ -686,7 +686,7 @@ class App:
             elif line:
                 await self.cmd_add(line)
         c.print("\n[bold]第 3 步 · 问第一个问题[/] [dim]直接打字就行，比如：帮我诊断一下我的持仓 / 帮我深度分析一下招商银行[/]")
-        c.print("[dim]想在手机上收简报和提醒：网页版「设置 → 手机触达」。/help 看全部命令。[/]")
+        c.print("[dim]想在手机上收简报和提醒：网页版「设置 → 手机渠道」。/help 看全部命令。[/]")
 
     async def cmd_setup(self, _: str) -> None:
         if not isinstance(self.backend, LocalBackend):
