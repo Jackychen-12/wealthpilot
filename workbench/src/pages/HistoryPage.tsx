@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, useApi } from '../api'
 import { AnswerMarkdown } from '../components/AnswerMarkdown'
 import { CheckpointTable, ProposalList } from '../components/Checkpoints'
+import { ExportButtons } from '../components/ExportButtons'
 import { securityPath } from '../components/SecuritySearch'
 import { Drawer, Tag } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
@@ -34,6 +35,7 @@ const Detail: React.FC<{ id: number }> = ({ id }) => {
             <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-steel">
               {STATUS[d.meta.status ?? ''] ? <Tag tone={STATUS[d.meta.status ?? ''].tone}>{STATUS[d.meta.status ?? ''].label}</Tag> : null}
               <span className="font-mono">{d.created_at.slice(0, 16).replace('T', ' ')}</span>
+              {d.answer ? <ExportButtons className="ml-auto" item={{ question: d.question, answer: d.answer, when: d.created_at, evidence }} /> : null}
             </p>
           </div>
           {d.meta.debate ? <div className="mb-4"><DebateCard debate={d.meta.debate} /></div> : null}

@@ -12,30 +12,12 @@ const KIND: Record<string, { label: string; tone: Tone }> = {
   custom: { label: '自定义', tone: 'gray' },
 }
 
-// 可以接入的服务类型。这里只说明"能接什么"，不替任何具体厂商背书 —— 对方是否提供 MCP 服务以其官方文档为准。
-const CATALOG = [
-  { kind: 'broker', title: '券商账户（只读）', body: '查询持仓、资金、成交记录，让 AI 研究直接基于你的真实账户，而不必手工录入。' },
-  { kind: 'data', title: '行情与财务数据服务', body: '付费或自建的数据源：更全的财务指标、历史估值分位、分钟线、港美股行情。' },
-  { kind: 'research', title: '研报与资讯', body: '卖方研报、公告、新闻检索，给个股研究补充定性信息。' },
-  { kind: 'custom', title: '自建 MCP 服务', body: '任何遵循 MCP 协议的服务都能接：内部数据库、策略库、公司知识库。' },
-]
-
-const EXAMPLE = `{
-  "connectors": [
-    {
-      "name": "my_broker",
-      "label": "我的券商（只读）",
-      "kind": "broker",
-      "transport": "http",
-      "url": "https://券商提供的地址/mcp",
-      "auth_env": "BROKER_MCP_TOKEN",
-      "enabled": true
-    }
-  ]
-}`
+const STATUS_TONE: Record<string, Tone> = { ready: 'green', needs_url: 'blue', unsupported: 'gray' }
+const code = 'rounded-xs bg-surface px-1 font-mono text-[13px]'
 
 const ConnectorsPage: React.FC = () => {
   const list = useApi(api.connectors)
+  const presets = useApi(api.connectorPresets)
   const [tests, setTests] = useState<Record<string, { loading: boolean; result?: ConnectorTest; error?: string }>>({})
 
   const test = async (name: string) => {
@@ -51,14 +33,14 @@ const ConnectorsPage: React.FC = () => {
   const connectors = list.data?.connectors ?? []
 
   return (
-    <Page title="数据连接" description="把券商、行情数据商等第三方 MCP 服务接进来，让 AI 研究能用上它们的数据">
+    <Page title="数据连接" description="把妙想、iFinD 这类第三方数据服务（MCP）接进来，让 AI 研究能用上它们的数据。不接也能用：A 股、港股、美股的基础数据已经内置">
       <Callout tone="info" title="只读接入">
         外部服务里凡是下单、撤单、转账这类会动账户的工具，都会被强制屏蔽，不会交给 AI，也无法通过本系统调用。WealthPilot 只做研究与分析，不代你交易。
       </Callout>
 
       <Section title="已配置的连接" hint={list.data ? `配置文件：${list.data.config_file}` : undefined}>
         <DataState loading={list.loading} error={list.error} onRetry={list.reload}
-          empty={connectors.length === 0 ? '还没有配置任何连接。按下方说明创建配置文件后，这里会列出来。' : undefined}>
+          empty={connectors.length === 0 ? '还没有接任何外部服务。下面是现成的几家，挑一家按说明在终端里接。' : undefined}>
           <div className="flex flex-col gap-3">
             {connectors.map((c) => {
               const kind = KIND[c.kind] ?? KIND.custom
@@ -101,27 +83,34 @@ const ConnectorsPage: React.FC = () => {
         </DataState>
       </Section>
 
-      <Section title="可以接入什么">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {CATALOG.map((item) => (
-            <Card key={item.kind} className="p-4">
-              <Tag tone={KIND[item.kind].tone}>{KIND[item.kind].label}</Tag>
-              <p className="mt-2 text-sm font-medium text-ink">{item.title}</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-slate">{item.body}</p>
-            </Card>
-          ))}
-        </div>
-        <p className="mt-3 text-[13px] text-steel">具体哪家机构提供 MCP 服务、地址和鉴权方式，以对方的官方文档为准。</p>
+      <Section title="现成的服务" hint="查公开资料整理的清单：是官方的还是社区的、要什么、现在接不接得上。都要账号或 Key，所以这里没有一家实际连过">
+        <DataState loading={presets.loading} error={presets.error} onRetry={presets.reload}>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {(presets.data ?? []).map((p) => (
+              <Card key={p.key} className="flex flex-col gap-1.5 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-ink">{p.label}</span>
+                  <Tag tone={p.official ? 'purple' : 'gray'}>{p.official ? '官方' : '社区'}</Tag>
+                  <Tag tone={STATUS_TONE[p.status] ?? 'gray'}>{p.status_label}</Tag>
+                </div>
+                <p className="text-[13px] leading-relaxed text-charcoal"><span className="text-steel">有什么　</span>{p.provides}</p>
+                <p className="text-[13px] leading-relaxed text-charcoal"><span className="text-steel">要什么　</span>{p.needs}</p>
+                <p className="text-[13px] leading-relaxed text-slate"><span className="text-steel">注意　　</span>{p.caveat}</p>
+                {p.links.length ? <p className="flex flex-wrap gap-x-3 text-[13px]">{p.links.map((l) => <a key={l} href={l} target="_blank" rel="noreferrer" className="truncate text-slate underline underline-offset-2 hover:text-ink">{new URL(l).hostname}</a>)}</p> : null}
+                {p.status !== 'unsupported' ? <p className="mt-auto pt-1.5"><code className={code}>wealthpilot connectors add {p.key}{p.status === 'needs_url' ? ' --url <服务地址>' : ''}</code></p> : null}
+              </Card>
+            ))}
+          </div>
+        </DataState>
       </Section>
 
-      <Section title="怎么接入" hint="连接器在服务器端配置，不通过网页添加：它相当于让服务器替你访问外部服务，应当由部署的人决定">
+      <Section title="怎么接入" hint="在自己电脑的终端里做，不通过网页添加：它相当于让这台机器替你访问外部服务，令牌也只该留在这台机器上">
         <ol className="max-w-[760px] list-decimal space-y-2 pl-5 text-sm leading-relaxed text-charcoal">
-          <li>在 <code className="rounded-xs bg-surface px-1 font-mono text-[13px]">backend/</code> 下把 <code className="rounded-xs bg-surface px-1 font-mono text-[13px]">connectors.example.json</code> 复制为 <code className="rounded-xs bg-surface px-1 font-mono text-[13px]">connectors.json</code>，填入对方提供的地址。</li>
-          <li>令牌不要写进这个文件。<code className="rounded-xs bg-surface px-1 font-mono text-[13px]">auth_env</code> 填环境变量名，令牌本身放进 <code className="rounded-xs bg-surface px-1 font-mono text-[13px]">backend/.env</code>。</li>
-          <li>回到这个页面点"测试连接"，确认哪些工具可用、哪些被屏蔽。</li>
-          <li>把 <code className="rounded-xs bg-surface px-1 font-mono text-[13px]">enabled</code> 设为 true。之后在 AI 研究里问到行情或个股时，Agent 会连同这些外部工具一起使用，结果同样进入证据链接受校验。</li>
+          <li>按上面「要什么」把对方的账号、Key 准备好。</li>
+          <li>终端里运行 <code className={code}>wealthpilot connectors add 名字 --url 服务地址 --token 令牌</code>。地址和令牌该不该填，看那一条的说明；令牌存进你自己的 <code className={code}>.env</code>，不会写进配置文件。</li>
+          <li><code className={code}>wealthpilot connectors test 名字</code>，或者回到这一页点「测试连接」：看连不连得上、哪些工具可用、哪些被屏蔽。</li>
+          <li>之后在 AI 研究里问到相关内容时，Agent 会连同这些外部工具一起用，取回来的数据同样进证据链、接受校验。不想用了：<code className={code}>wealthpilot connectors remove 名字</code>。</li>
         </ol>
-        <pre className="mt-4 max-w-[760px] overflow-x-auto rounded-lg bg-surface p-4 font-mono text-[12.5px] leading-relaxed text-charcoal">{EXAMPLE}</pre>
       </Section>
     </Page>
   )
