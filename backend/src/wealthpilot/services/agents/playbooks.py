@@ -87,7 +87,8 @@ _OVERSEAS_DIMENSIONS = {
     "valuation": "研究{name}（{code}）的估值：用 get_stock_valuation 取当前市盈率、市值和近一年价格区间位置，"
                  "用 get_valuation_history 取市盈率、市净率在近五年自身历史里的分位，"
                  "用 compute_reverse_dcf 看现价隐含的利润增速，并和过去的实际增速放在一起比。"
-                 "这是{market_label}：估值历史只有市盈率和市净率（没有市销率），没有同行对比的数据，不要调用同行对比的工具",
+                 "这是{market_label}：估值历史只有市盈率和市净率（没有市销率）。没有按行业分类的同行数据，不要调用 compare_peers_valuation；"
+                 "想和同行比，自己点名两三家最可比的公司（可以跨市场），用 compare_stocks 取数，并在回答里写明为什么拿它们比",
     "price": "研究{name}（{code}）的走势：最新行情、近一年所处价格区间位置、均线排列与波动率",
     "expectation": "研究{name}（{code}）最近的消息：用 get_stock_news 取近期新闻，再用 web_search 找最近一期业绩、公司给的指引、行业动态和主要风险，"
                    "挑一两条来源可靠的用 read_webpage 读原文。这是{market_label}：没有券商一致预期、研报列表和业绩预告的数据。"
