@@ -1,4 +1,4 @@
-"""给在线演示补录不调用模型的那几块：大盘复盘、宏观、反向 DCF、名词解释、现成的数据服务。
+"""给在线演示补录不调用模型的那几块：大盘复盘、宏观、反向 DCF、名词解释、现成的数据服务、内置数据源的状态。
 
 和 record_demo.py 的区别：那个会调用真实模型（要花钱），这个只取公开行情和财务数据，不花钱。
 它只往 fixtures.json 的 get 里加这几个接口，不动已经录好的研究过程。
@@ -37,6 +37,9 @@ async def main(day: str = "") -> None:
     if dcf and dcf.get("ok"):
         get[f"/api/market/stock/{STOCK}/reverse-dcf"] = dcf
     get["/api/settings/glossary"] = glossary.as_list()
+    from wealthpilot.services import sources
+    checked = await sources.check()                      # 录的是这一刻各个来源的状态
+    get["/api/market/sources"] = checked
     get["/api/connectors/presets"] = [{k: p[k] for k in ("key", "label", "official", "status", "provides", "needs", "links", "caveat")}
                                       | {"status_label": STATUS_LABEL[p["status"]]} for p in PRESETS]
     fixtures["static_recorded_at"] = datetime.now().strftime("%Y-%m-%d")
