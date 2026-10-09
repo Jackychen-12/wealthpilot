@@ -26,7 +26,7 @@ CURRENCY = {"hk": "港元", "us": "美元"}
 MARKET_LABEL = {"hk": "港股", "us": "美股"}
 # 这些工具对港美股也能用；其余带 code 参数的工具只覆盖 A 股
 SUPPORTED_TOOLS = frozenset({"get_stock_quote", "get_stock_valuation", "get_stock_kline", "get_technical_indicators", "get_stock_profile",
-                             "get_stock_financials", "get_financial_indicators", "compute_reverse_dcf", "get_stock_news"})
+                             "get_stock_financials", "get_financial_indicators", "compute_reverse_dcf", "get_stock_news", "get_valuation_history"})
 
 
 def parse(code: str) -> tuple[str, str] | None:
@@ -125,13 +125,18 @@ async def fetch_kline(code: str, days: int = 60) -> list[dict]:
             return []
         symbol = quote["symbol"]
     count = max(5, min(int(days), 1200))
-    try:
-        async with httpx.AsyncClient(timeout=12.0, headers=_UA) as client:
-            resp = await client.get("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get", params={"param": f"{symbol},day,,,{count},qfq"})
-        data = (resp.json().get("data") or {}).get(symbol) or {}
-    except (httpx.HTTPError, ValueError):
-        return []
-    rows = data.get("qfqday") or data.get("day") or []
+
+    async def load():
+        from wealthpilot.services import sources, stocks
+        try:
+            rows = await stocks._tencent_kline(symbol, count)
+        except Exception as e:  # noqa: BLE001
+            sources.fail("tencent_kline", e)
+            return []
+        sources.ok("tencent_kline")
+        return rows
+    # 港股、美股的日线只有腾讯这一个来源：它不通时用上一次取到的
+    rows = await cache.resilient(f"kline:{symbol}:{count}", 5 * cache.MINUTE, load, keep=7 * cache.DAY, what=f"{ticker}.{market.upper()} 的日线") or []
     out, previous = [], None
     for row in rows:
         if len(row) < 6:
@@ -203,4 +208,4 @@ def only_a_share(tool: str, code: str) -> str:
     """A 股才有的数据遇到港美股代码时，给模型和用户的那句话。"""
     market = MARKET_LABEL[parse(code)[0]]
     return (f"未获取到 {canonical(code)} 的这项数据：这个工具（{tool}）只覆盖 A 股，{market}没有。"
-            f"{market}目前能查的是行情、日线与技术指标、财务指标、反向 DCF、新闻，其余可以用联网搜索补。")
+            f"{market}目前能查的是行情、日线与技术指标、财务指标、估值历史分位（市盈率、市净率）、反向 DCF、新闻，其余可以用联网搜索补。")

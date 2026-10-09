@@ -61,7 +61,7 @@ CRITERIA_TOOLS: dict[str, tuple[str, ...]] = {
     "所属行业与同行对比": ("get_industry_peers", "compare_peers_valuation"),
     "资金流向或股东、机构持仓的变化": ("get_capital_flow", "get_shareholder_structure", "get_margin_trading"),
     "卖方一致预期或公司的业绩预告": ("get_consensus_forecast", "get_research_reports", "get_earnings_guidance"),
-    "当前市盈率与现价隐含的增长": ("get_stock_valuation", "get_stock_quote", "compute_reverse_dcf"),
+    "当前市盈率与现价隐含的增长": ("get_stock_valuation", "get_stock_quote", "compute_reverse_dcf", "get_valuation_history"),
     "最近的新闻或公开信息": ("get_stock_news", "web_search", "read_webpage"),
     "验证点的总数与各状态（成立 / 被证伪 / 待核对）的数量": ("get_research_track_record", "list_checkpoints"),
     "筛选条件与匹配到的股票名单": ("screen_stocks",),
@@ -85,8 +85,9 @@ _OVERSEAS_DIMENSIONS = {
                    "结果里的 currency 是财报币种，可能和股价的币种不同；财年也不一定是自然年，引用时照 report_name 写。"
                    "这是{market_label}：主营构成、分红历史、定期报告正文这几个工具没有它的数据，不要调用",
     "valuation": "研究{name}（{code}）的估值：用 get_stock_valuation 取当前市盈率、市值和近一年价格区间位置，"
+                 "用 get_valuation_history 取市盈率、市净率在近五年自身历史里的分位，"
                  "用 compute_reverse_dcf 看现价隐含的利润增速，并和过去的实际增速放在一起比。"
-                 "这是{market_label}：没有估值历史分位和同行对比的数据，不要调用那两个工具，也不要凭印象说“处于历史低位 / 高位”",
+                 "这是{market_label}：估值历史只有市盈率和市净率（没有市销率），没有同行对比的数据，不要调用同行对比的工具",
     "price": "研究{name}（{code}）的走势：最新行情、近一年所处价格区间位置、均线排列与波动率",
     "expectation": "研究{name}（{code}）最近的消息：用 get_stock_news 取近期新闻，再用 web_search 找最近一期业绩、公司给的指引、行业动态和主要风险，"
                    "挑一两条来源可靠的用 read_webpage 读原文。这是{market_label}：没有券商一致预期、研报列表和业绩预告的数据。"
