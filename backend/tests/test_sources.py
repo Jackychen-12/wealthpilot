@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from datetime import date
 
 import httpx
@@ -266,12 +267,16 @@ async def test_announcements_fall_back_to_the_official_disclosure_site(caching, 
         return httpx.Response(200, json={"announcements": [{"announcementTitle": "贵州茅台<em>2026</em>年半年度报告", "announcementTime": 1786723200000, "adjunctUrl": "finalpage/2026-08-15/1.PDF"}]})
     net(monkeypatch, handler)
     cache.write("cninfo:orgs", None)                       # 对照表是长期缓存的：不用别的测试留下的
+    monkeypatch.setenv("TZ", "UTC")                        # 换一个时区跑：公告日期是北京时间的日期，不能跟着机器的时区变（CI 和 Docker 里是 UTC）
+    time.tzset()
     rows = await stocks.fetch_announcements("600519", 5)
     assert rows == [{"date": "2026-08-15", "title": "贵州茅台2026年半年度报告", "url": "http://static.cninfo.com.cn/finalpage/2026-08-15/1.PDF", "source": "巨潮资讯（官方披露，PDF）"}]
     state = {s["name"]: s["status"] for s in sources.health()}
     assert state["eastmoney_notice"] == "failing" and state["cninfo"] == "ok"
     assert await stocks._cninfo_announcements("000001", 5) == []                                  # 对照表里没有这只：就是没有
     cache.write("cninfo:orgs", None)
+    monkeypatch.undo()
+    time.tzset()
 
 
 # ── 日线 ─────────────────────────────────────────────────
