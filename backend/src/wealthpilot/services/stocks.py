@@ -17,7 +17,7 @@ import contextlib
 import json
 import random
 import re
-import time
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -652,6 +652,9 @@ async def _em_announcements(code: str, limit: int) -> list[dict]:
              "url": f"https://data.eastmoney.com/notices/detail/{plain_code(code)}/{i.get('art_code', '')}.html"} for i in (data or {}).get("list") or []]
 
 
+_BEIJING = timezone(timedelta(hours=8))
+
+
 async def _cninfo_org(code: str) -> str:
     """巨潮查公告要用它自己的机构编号。全市场的对照表一个月取一次。"""
     async def load():
@@ -679,7 +682,8 @@ async def _cninfo_announcements(code: str, limit: int) -> list[dict]:
         items = resp.json().get("announcements")
     except (ValueError, AttributeError) as e:
         raise SourceError(f"巨潮公告返回 {resp.status_code}，不是预期的结构") from e
-    return [{"date": time.strftime("%Y-%m-%d", time.localtime(int(i["announcementTime"]) / 1000)), "title": re.sub(r"<[^>]+>", "", str(i.get("announcementTitle") or "")),
+    # 它给的是时间戳。公告日期是北京时间的日期：明确按东八区换算，不能跟着运行这台机器的时区走（服务器、Docker 里多半是 UTC，会早一天）
+    return [{"date": datetime.fromtimestamp(int(i["announcementTime"]) / 1000, _BEIJING).strftime("%Y-%m-%d"), "title": re.sub(r"<[^>]+>", "", str(i.get("announcementTitle") or "")),
              "url": f"http://static.cninfo.com.cn/{i.get('adjunctUrl', '')}", "source": "巨潮资讯（官方披露，PDF）"} for i in items or [] if i.get("announcementTime")]
 
 
