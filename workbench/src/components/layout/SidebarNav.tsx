@@ -50,7 +50,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ onNavigate, backend, use
 
       <SecuritySearch hotkey className="mx-1 mb-3" onPick={(sec) => { navigate(securityPath(sec)); onNavigate?.() }} />
 
-      {/* 只有五件事。其余页面是它们下面的页签，见 sections.tsx */}
+      {/* 哪些是入口、哪些是页签，见 sections.tsx */}
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto" aria-label="主导航">
         {SECTIONS.map(entry)}
       </nav>

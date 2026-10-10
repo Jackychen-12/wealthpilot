@@ -99,7 +99,7 @@ def test_command_line_help_is_grouped_by_purpose_and_lists_every_command():
 
     from wealthpilot.__main__ import OVERVIEW, OVERVIEW_ALL
     shown = subprocess.run([sys.executable, "-m", "wealthpilot", "--help"], capture_output=True, text=True).stdout
-    assert "第一次用" in shown and "进去之后只有五件事" in shown and "出了问题" in shown and len(shown.splitlines()) <= 40   # 连同启动参数一屏看完
+    assert "第一次用" in shown and "进去之后常用的五件事" in shown and "出了问题" in shown and len(shown.splitlines()) <= 40   # 连同启动参数一屏看完
     everything = subprocess.run([sys.executable, "-m", "wealthpilot", "help"], capture_output=True, text=True).stdout
     assert everything.strip() == OVERVIEW_ALL and "connectors" in everything and "connectors" not in OVERVIEW        # 不常用的收在全表里
     assert "positional arguments" not in shown and "{run,setup" not in shown                     # argparse 那张平铺的表收起来了

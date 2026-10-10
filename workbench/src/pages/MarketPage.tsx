@@ -1,6 +1,6 @@
 import type React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, runTool, useApi, type MarketOverview, type Mover, type SectorRanking } from '../api'
+import { api, runTool, useApi, type MarketOverview as MarketOverviewData, type Mover, type SectorRanking } from '../api'
 import { Heatmap } from '../components/charts'
 import { DataState, Metric, Metrics, Page, Section, signClass, signed } from '../components/ui'
 import { cn } from '../utils/cn'
@@ -24,50 +24,49 @@ const MoverList: React.FC<{ title: string; rows: Mover[] }> = ({ title, rows }) 
   </div>
 )
 
-/** 大盘：今天市场本身怎么样。指数和涨跌家数、涨停与题材、行业强弱、涨跌幅榜。都不调用模型。 */
-const MarketPage: React.FC = () => {
+/** 指数与涨跌家数、行业热力图、涨跌幅榜。今日页和「市场 → 大盘」共用这一块。 */
+export const MarketOverview: React.FC<{ title?: string; actions?: React.ReactNode }> = ({ title = '市场', actions }) => {
   const navigate = useNavigate()
-  const market = useApi(() => runTool<MarketOverview | string>('get_market_overview'))
+  const market = useApi(() => runTool<MarketOverviewData | string>('get_market_overview'))
   const sectors = useApi(() => runTool<SectorRanking | string>('get_sector_ranking', { top: 20 }))
   const movers = useApi(api.movers)
   const m = toolData(market.data)
   const s = toolData(sectors.data)
   return (
-    <Page title="大盘" description="今天市场本身怎么样：指数、涨停与题材、行业强弱。收盘后看最完整">
-      <Section title="指数与涨跌家数" hint={m ? `截至 ${m.breadth.trade_date} 收盘` : undefined}>
-        <DataState loading={market.loading} error={market.error} onRetry={market.reload} empty={!market.loading && !m ? String(market.data?.data ?? '没有取到大盘数据') : undefined}>
-          {m ? (
-            <Metrics>
-              {m.indices.map((i) => <Metric key={i.name} label={i.name} value={i.value} tone={i.up ? 'text-up' : 'text-down'} hint={i.change} />)}
-              <Metric label="上涨 / 下跌（家）" value={<><span className="text-up">{m.breadth.up}</span><span className="mx-1.5 text-stone">/</span><span className="text-down">{m.breadth.down}</span></>}
-                hint={`涨跌中位数 ${signed(m.breadth.median_change_pct, 2, '%')}`} />
-            </Metrics>
-          ) : null}
-        </DataState>
-      </Section>
-
-      <RecapSection />
-
-      {s || movers.data?.gainers.length ? (
-        <Section title="行业与个股" hint="哪些行业在涨、哪些在跌，谁涨得最多">
-          {s ? (
-            <>
-              <Heatmap items={[...s.top, ...s.bottom].map((x) => ({ name: x.industry, size: x.stock_count, change: x.median_change_pct, sub: x.leader.name, code: x.leader.code }))}
-                onPick={(i) => i.code && navigate(`/stock/${i.code}`)} />
-              <p className="mt-2 text-[13px] text-steel">块越大公司越多，颜色越深涨跌越大（红涨绿跌）；只画涨跌幅最靠前和最靠后的行业，点一块看它的领涨股。</p>
-            </>
-          ) : null}
-          {movers.data?.gainers.length ? (
-            <div className="mt-3 flex flex-col gap-3 md:flex-row">
-              <MoverList title={`涨幅榜（市值 ${movers.data.min_mv_yi} 亿以上）`} rows={movers.data.gainers} />
-              <MoverList title="跌幅榜" rows={movers.data.losers} />
-            </div>
-          ) : null}
-        </Section>
+    <Section title={title} hint={m ? `截至 ${m.breadth.trade_date} 收盘` : undefined} actions={actions}>
+      <DataState loading={market.loading} error={market.error} onRetry={market.reload} empty={!market.loading && !m ? String(market.data?.data ?? '没有取到大盘数据') : undefined}>
+        {m ? (
+          <Metrics>
+            {m.indices.map((i) => <Metric key={i.name} label={i.name} value={i.value} tone={i.up ? 'text-up' : 'text-down'} hint={i.change} />)}
+            <Metric label="上涨 / 下跌（家）" value={<><span className="text-up">{m.breadth.up}</span><span className="mx-1.5 text-stone">/</span><span className="text-down">{m.breadth.down}</span></>}
+              hint={`涨跌中位数 ${signed(m.breadth.median_change_pct, 2, '%')}`} />
+          </Metrics>
+        ) : null}
+      </DataState>
+      {s ? (
+        <div className="mt-3">
+          <Heatmap items={[...s.top, ...s.bottom].map((x) => ({ name: x.industry, size: x.stock_count, change: x.median_change_pct, sub: x.leader.name, code: x.leader.code }))}
+            onPick={(i) => i.code && navigate(`/stock/${i.code}`)} />
+          <p className="mt-2 text-[13px] text-steel">行业热力图：块越大公司越多，颜色越深涨跌越大（红涨绿跌）；只画涨跌幅最靠前和最靠后的行业，点一块看它的领涨股。</p>
+        </div>
       ) : null}
-    </Page>
+      {movers.data?.gainers.length ? (
+        <div className="mt-3 flex flex-col gap-3 md:flex-row">
+          <MoverList title={`涨幅榜（市值 ${movers.data.min_mv_yi} 亿以上）`} rows={movers.data.gainers} />
+          <MoverList title="跌幅榜" rows={movers.data.losers} />
+        </div>
+      ) : null}
+    </Section>
   )
 }
+
+/** 大盘：今天市场本身怎么样。指数和涨跌家数、行业强弱、涨跌幅榜、涨停与题材。都不调用模型。 */
+const MarketPage: React.FC = () => (
+  <Page title="大盘" description="今天市场本身怎么样：指数、行业强弱、涨停与题材。收盘后看最完整">
+    <MarketOverview title="指数与行业" />
+    <RecapSection />
+  </Page>
+)
 
 /** 宏观：个股研究之外的那层背景。月度数据，不用天天看。 */
 export const MacroPage: React.FC = () => (

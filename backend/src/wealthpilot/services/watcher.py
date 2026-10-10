@@ -151,7 +151,7 @@ async def run(db: Session, user_id: int, *, today: date | None = None, push: boo
                 for d in report["datasets"]:
                     if d["state"] == "down":
                         events.append({"kind": "source", "code": "", "name": "数据源", "held": True,
-                                       "text": f"{d['label']}今天取不到（{'、'.join(c['label'] for c in d['chain'])}都不通）。之前取到过的会接着用并标明日期；在「设置 → 数据连接」看详情"})
+                                       "text": f"{d['label']}今天取不到（{'、'.join(c['label'] for c in d['chain'])}都不通）。之前取到过的会接着用并标明日期；在「数据连接」看详情"})
 
     # 6) 今天早些时候跑过的定时任务、触发过的提醒：还没有简报时记在待并入的位置，有了之后直接写在简报里
     from wealthpilot.services import automations  # 放在这里导入：automations 也要用到简报表

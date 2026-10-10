@@ -19,7 +19,6 @@ import StockPage from './pages/StockPage'
 import ConnectorsPage from './pages/ConnectorsPage'
 import TodayPage from './pages/TodayPage'
 import MarketPage, { MacroPage } from './pages/MarketPage'
-import MorePage from './pages/MorePage'
 import WatchlistPage from './pages/WatchlistPage'
 import ScreenerPage from './pages/ScreenerPage'
 import HistoryPage from './pages/HistoryPage'
@@ -58,7 +57,6 @@ const App: React.FC = () => {
           <Route path="/research" element={<ResearchPage key={epoch} />} />
           <Route path="/market" element={<MarketPage key={epoch} />} />
           <Route path="/macro" element={<MacroPage key={epoch} />} />
-          <Route path="/more" element={<MorePage />} />
           <Route path="/screener" element={<ScreenerPage key={epoch} />} />
           <Route path="/watchlist" element={<WatchlistPage key={epoch} />} />
           <Route path="/skills" element={<SkillsPage key={epoch} />} />
