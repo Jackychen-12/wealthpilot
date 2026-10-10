@@ -52,7 +52,7 @@ async def fetch_consensus(code: str) -> dict | None:
         return {"name": r.get("SECURITY_NAME_ABBR") or "", "org_count": r.get("RATING_ORG_NUM") or 0, "ratings": ratings, "eps": eps,
                 "target_price_low": _r(r.get("DEC_AIMPRICEMIN")), "target_price_high": _r(r.get("DEC_AIMPRICEMAX")),
                 "concepts": [c for c in str(r.get("CONCEPTINDEX_BOARD") or "").split(",") if c][:12]}
-    return await cache.cached(f"consensus:{plain_code(code)}", 6 * cache.HOUR, load)
+    return await cache.resilient(f"consensus:{plain_code(code)}", 6 * cache.HOUR, load, keep=45 * cache.DAY, what=f"{plain_code(code)} 的一致预期")
 
 
 async def fetch_research_reports(code: str, limit: int = 8, months: int = 6) -> list[dict]:
@@ -73,7 +73,7 @@ async def fetch_research_reports(code: str, limit: int = 8, months: int = 6) -> 
             "eps_this_year": _r(_f(r.get("predictThisYearEps"))), "eps_next_year": _r(_f(r.get("predictNextYearEps"))),
             "url": f"https://data.eastmoney.com/report/info/{r['infoCode']}.html" if r.get("infoCode") else "",
         } for r in data.get("data") or []]
-    return await cache.cached(f"reports:{plain_code(code)}:{limit}:{months}", 6 * cache.HOUR, load) or []
+    return await cache.resilient(f"reports:{plain_code(code)}:{limit}:{months}", 6 * cache.HOUR, load, keep=45 * cache.DAY, what=f"{plain_code(code)} 的研报列表") or []
 
 
 async def fetch_guidance(code: str) -> dict | None:

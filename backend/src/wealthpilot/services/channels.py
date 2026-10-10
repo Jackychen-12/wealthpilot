@@ -454,13 +454,16 @@ class Bot:
         if not rows:
             await self.api.send(chat_id, "还没有持仓。在网页版「持仓」里录入，或在终端运行 wealthpilot import。")
             return
+        from wealthpilot.services import fx
         quotes = await fetch_sina_quotes([r.fund_code for r in rows if r.asset_type in ("stock", "etf")])
         lines, value, cost = [], 0.0, 0.0
         for r in rows:
             price = (quotes.get(r.fund_code) or {}).get("price")
-            if price and r.cost_price:
-                value, cost = value + price * r.shares, cost + r.cost_price * r.shares
-                lines.append(f"{r.fund_name} {r.fund_code}  {r.shares:g} 股  现价 {price:g}  {(price / r.cost_price - 1) * 100:+.1f}%")
+            factor = await fx.factor(r.fund_code) if price else None       # 账是人民币的：港股美股的现价先折算
+            if price and factor and r.cost_price:
+                value, cost = value + price * factor * r.shares, cost + r.cost_price * r.shares
+                shown = f"{price:g}" if factor == 1.0 else f"{fx.SIGN[r.currency]}{price:g}"
+                lines.append(f"{r.fund_name} {r.fund_code}  {r.shares:g} 股  现价 {shown}  {(price * factor / r.cost_price - 1) * 100:+.1f}%")
             else:
                 lines.append(f"{r.fund_name} {r.fund_code}  {r.shares:g} 份  成本 {r.cost_price:g}")
         if cost:

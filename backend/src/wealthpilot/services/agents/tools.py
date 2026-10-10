@@ -564,12 +564,12 @@ def _pick(*names: str) -> list[dict]:
 AGENT_TOOLS: dict[str, list[dict]] = {
     "fundamental": _pick("resolve_security", "get_stock_profile", "get_stock_financials",
                          "get_financial_indicators", "get_business_segments", "get_dividend_history", "read_latest_report"),
-    "valuation": _pick("resolve_security", "get_stock_valuation", "get_valuation_history", "compare_peers_valuation", "compute_reverse_dcf"),
+    "valuation": _pick("resolve_security", "get_stock_valuation", "get_valuation_history", "compare_peers_valuation", "compute_reverse_dcf", "compare_stocks"),
     "price": _pick("resolve_security", "get_stock_quote", "get_stock_kline", "get_technical_indicators",
                    "calculate_return", "get_max_drawdown", "backtest_rule"),
     "industry": _pick("resolve_security", "get_industry_peers", "get_sector_ranking", "get_stock_announcements",
                       "read_announcement", "search_market_news", "get_stock_news", "get_market_overview", "web_search", "read_webpage",
-                      "get_market_recap", "get_macro_indicators", "get_concept_boards", "get_concept_stocks"),
+                      "get_market_recap", "get_macro_indicators", "get_concept_boards", "get_concept_stocks", "compare_stocks"),
     # 资金与筹码：钱往哪走、票在谁手里、内部人在干什么
     "capital": _pick("resolve_security", *insight_tools.CAPITAL),
     # 预期与消息：卖方怎么看、公司怎么预告、最近有什么新闻
@@ -601,7 +601,30 @@ async def execute_tool(
     nav_history: dict[str, list[dict]] | None = None,
     profile: InvestorProfile | None = None,
 ) -> str:
-    """统一工具执行器。"""
+    """统一工具执行器。数据源这次取不到、用上一次取到的顶上的，在结果里写明 —— 模型和校验都要知道这不是今天的数。"""
+    from wealthpilot.services import cache
+    stale = cache.collect_stale()
+    out = await _run_tool(name, input_data, holdings, nav_data, nav_history, profile)
+    if not stale:
+        return out
+    warning = "注意：" + "；".join(dict.fromkeys(stale)) + "。引用这些数时写明数据日期，不要当成最新的。"
+    try:
+        data = json.loads(out)
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        return json.dumps({**data, "data_freshness": warning}, ensure_ascii=False)
+    return f"{out}\n（{warning}）"
+
+
+async def _run_tool(
+    name: str,
+    input_data: dict,
+    holdings: list[PortfolioHolding],
+    nav_data: dict[str, float],
+    nav_history: dict[str, list[dict]] | None = None,
+    profile: InvestorProfile | None = None,
+) -> str:
     code_arg = str(input_data.get("code") or "") if isinstance(input_data, dict) else ""
     if code_arg and global_stocks.is_global(code_arg):
         if name not in global_stocks.SUPPORTED_TOOLS:
@@ -665,9 +688,12 @@ async def execute_tool(
         history = await fetch_valuation_history(input_data["code"], years)
         if not history:
             return f"未获取到 {input_data['code']} 的历史估值"
+        sparse = "百度" in (history[0].get("source") or "")
         return json.dumps({"code": input_data["code"], "name": history[0]["name"], **summarize_valuation(history),
+                           "source": history[0].get("source") or "东方财富数据中心",
                            "note": "percentile 为当前值在窗口内自身历史中的分位（0 最便宜，100 最贵）；"
-                                   "只和自己的历史比，不代表绝对便宜或贵"}, ensure_ascii=False)
+                                   "只和自己的历史比，不代表绝对便宜或贵"
+                                   + ("。这份来自百度股市通：trading_days 是数据点的个数（不是每个交易日都有），没有市销率" if sparse else "")}, ensure_ascii=False)
 
     if name in ("compare_peers_valuation", "get_industry_peers"):
         data = await fetch_industry_peers(input_data["code"])

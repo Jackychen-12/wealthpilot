@@ -11,7 +11,7 @@ class PortfolioCreate(BaseModel):
     fund_code: str = Field(..., description="标的代码", examples=["007340", "600519", "BTC"])
     fund_name: str = Field(..., description="基金名称", examples=["国泰半导体芯片ETF联接"])
     shares: float = Field(..., gt=0, description="持有份额")
-    cost_price: float = Field(..., gt=0, description="成本净值")
+    cost_price: float = Field(..., gt=0, description="成本价。港股填港元、美股填美元，入账时按买入日的人民币中间价折算")
     buy_date: date = Field(..., description="买入日期")
     category: str = Field(default="equity", description="equity/bond/money/hybrid")
     industry: str = Field(default="", description="行业标签")
@@ -40,6 +40,12 @@ class PortfolioResponse(BaseModel):
     market_value: float | None = None
     total_return: float | None = None
     return_pct: float | None = None
+    # 港股美股才有：账是人民币的，这几项是原币种的数和折算用的汇率
+    currency: str = "CNY"
+    cost_native: float | None = None
+    cost_fx: float | None = None
+    native_price: float | None = None
+    fx_rate: float | None = None
 
 
 # === Market ===

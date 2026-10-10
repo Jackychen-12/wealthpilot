@@ -56,7 +56,7 @@ async def test_existing_functions_route_overseas_codes_and_refuse_a_share_only_d
     assert (await stocks.fetch_financial_indicators("00700.HK", 4))[0]["annual"] is True
     valuation = json.loads(await execute_tool("get_stock_valuation", {"code": "hk00700"}, [], {}))
     assert valuation["code"] == "00700.HK" and valuation["currency"] == "港元" and valuation["market"] == "港股" and "price_range_1y" in valuation
-    for a_only in ("get_capital_flow", "get_valuation_history", "compare_peers_valuation", "get_margin_trading", "get_consensus_forecast", "read_latest_report"):
+    for a_only in ("get_capital_flow", "compare_peers_valuation", "get_margin_trading", "get_consensus_forecast", "read_latest_report"):
         said = await execute_tool(a_only, {"code": "00700.HK"}, [], {})
         assert said.startswith("未获取到 00700.HK") and "只覆盖 A 股" in said and "联网搜索" in said, a_only
     dcf = json.loads(await execute_tool("compute_reverse_dcf", {"code": "00700.HK"}, [], {}))
@@ -77,13 +77,13 @@ def test_overseas_research_drops_what_cannot_be_evidenced():
     cn = {"code": "600519", "name": "贵州茅台", "asset_type": "stock", "market": "cn"}
     tasks = playbooks.build_tasks("stock_deep", [hk], [], {}, "帮我分析一下腾讯")
     assert [t.agent for t in tasks] == ["fundamental", "valuation", "price", "expectation"]              # 没有资金与筹码、行业对比这两路
-    assert "compute_reverse_dcf" in tasks[1].goal and "不要凭印象" in tasks[1].goal and "港股" in tasks[0].goal and "web_search" in tasks[3].goal
+    assert "compute_reverse_dcf" in tasks[1].goal and "get_valuation_history" in tasks[1].goal and "港股" in tasks[0].goal and "web_search" in tasks[3].goal
     book = playbooks.book_for("stock_deep", [hk])
     assert "资金" not in book.sections and "行业" not in book.sections and book.key == "stock_deep"      # 还是同一类研究，只是章节减了
     assert all(c in playbooks.CRITERIA_TOOLS for c in book.criteria)                                    # 每条证据要求都有工具能满足，不会被判"证据不足"
     assert len(playbooks.build_tasks("stock_deep", [cn], [], {}, "分析茅台")) == 6 and "资金" in playbooks.book_for("stock_deep", [cn]).sections
     mixed = playbooks.build_tasks("stock_compare", [cn, hk], [], {}, "对比")
-    assert [t.id for t in mixed] == ["s1_fundamental", "s1_valuation", "s2_fundamental", "s2_valuation"] and "历史分位" not in mixed[3].goal.replace("没有估值历史分位", "")
+    assert [t.id for t in mixed] == ["s1_fundamental", "s1_valuation", "s2_fundamental", "s2_valuation"] and "get_valuation_history" in mixed[3].goal and "compare_stocks" in mixed[3].goal
     assert playbooks.book_for("stock_compare", [cn, hk]).criteria[1] == "每只股票的市盈率与现价隐含的增长"
 
 
@@ -118,14 +118,6 @@ async def test_search_and_question_parsing_find_overseas_stocks(monkeypatch):
     monkeypatch.setattr(securities, "snapshot", empty_snapshot)
     found = await securities.resolve_text("对比一下 00700.HK 和 $AAPL，PE 和 ROE 哪个更好")
     assert {s["code"] for s in found} == {"00700.HK", "AAPL.US"}                               # PE、ROE 这种大写缩写不会被当成美股代码
-
-
-def test_overseas_stocks_cannot_be_booked_as_holdings_yet():
-    from fastapi.testclient import TestClient
-
-    from wealthpilot.main import app
-    resp = TestClient(app).post("/api/portfolio", json={"fund_code": "00700.HK", "fund_name": "腾讯控股", "shares": 100, "cost_price": 400, "asset_type": "stock", "buy_date": "2026-01-05"})
-    assert resp.status_code == 422 and "汇率折算还没做" in resp.json()["detail"]
 
 
 async def test_eastmoney_requests_are_spaced_and_capped(monkeypatch):

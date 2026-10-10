@@ -15,9 +15,17 @@ from datetime import date, timedelta
 
 import httpx
 
-from wealthpilot.services import cache
+from wealthpilot.services import cache, sources
 from wealthpilot.services.assets import sina_symbol
-from wealthpilot.services.stocks import _r, datacenter, plain_code
+from wealthpilot.services.sources import SourceError
+from wealthpilot.services.stocks import (
+    _HEADERS,
+    SLOW,
+    _r,
+    datacenter,
+    fetch_stock_kline,
+    plain_code,
+)
 
 _SINA_FLOW = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php"
 _SINA_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://vip.stock.finance.sina.com.cn/"}
@@ -93,7 +101,7 @@ async def fetch_fund_flow(code: str, days: int = 30) -> dict | None:
             }
         return out if rows or "main" in out else None
 
-    return await cache.cached(f"flow:{plain_code(code)}:{days}", 10 * cache.MINUTE, load)
+    return await cache.resilient(f"flow:{plain_code(code)}:{days}", 10 * cache.MINUTE, load, keep=3 * cache.DAY, what=f"{plain_code(code)} 的资金流向")
 
 
 def summarize_flow(flow: dict) -> dict:
@@ -116,16 +124,89 @@ def summarize_flow(flow: dict) -> dict:
 # ── 融资融券 ────────────────────────────────────────────
 
 async def fetch_margin(code: str, days: int = 60) -> list[dict]:
-    """逐日融资融券，最新在前。不是两融标的的股票没有数据。"""
-    async def load():
-        rows, _ = await datacenter("RPTA_WEB_RZRQ_GGMX", filter=_code_filter(code, "SCODE"), page_size=max(5, min(days, 250)), sort="DATE")
+    """逐日融资融券，最新在前。不是两融标的的股票没有数据。
+
+    先问东方财富（一次给全，带融资余额占流通市值的比例）；不通时直接问交易所 —— 两融数据本来就是交易所每天公布的。
+    交易所的那份没有收盘价和占比，深交所一天一个请求，所以只取最近一个月。
+    """
+    days = max(5, min(days, 250))
+
+    async def eastmoney():
+        rows, _ = await datacenter("RPTA_WEB_RZRQ_GGMX", filter=_code_filter(code, "SCODE"), page_size=days, sort="DATE", strict=True)
         return [{
             "date": _day(r.get("DATE")), "close": r.get("SPJ"),
             "financing_balance_yi": _yi(r.get("RZYE")), "financing_buy_yi": _yi(r.get("RZMRE")),
             "financing_net_buy_yi": _yi(r.get("RZJME")), "short_balance_yi": _yi(r.get("RQYE"), 4),
             "financing_to_float_mv_pct": _r(r.get("RZYEZB")),
         } for r in rows]
-    return await cache.cached(f"margin:{plain_code(code)}:{days}", 2 * cache.HOUR, load) or []
+
+    async def load():
+        plain = plain_code(code)
+        exchange = [("exchange", lambda: _margin_sse(plain, days))] if plain.startswith(("6", "5")) else \
+                   [("exchange", lambda: _margin_szse(plain, min(days, 21)))] if plain.startswith(("0", "3", "1")) else []
+        rows, _ = await sources.first([("eastmoney", eastmoney), *exchange])
+        return rows or []
+    return await cache.resilient(f"margin:{plain_code(code)}:{days}", 2 * cache.HOUR, load, keep=14 * cache.DAY, what=f"{plain_code(code)} 的融资融券") or []
+
+
+async def _margin_sse(plain: str, days: int, today: date | None = None) -> list[dict]:
+    """上海证券交易所公布的融资融券明细：一个请求给一段日期。金额原始单位是元。"""
+    today = today or date.today()
+    params = {"isPagination": "true", "tabType": "mxtype", "detailsDate": "", "stockCode": plain,
+              "beginDate": (today - timedelta(days=int(days * 1.6) + 10)).strftime("%Y%m%d"), "endDate": today.strftime("%Y%m%d"),
+              "pageHelp.pageSize": str(days + 5), "pageHelp.pageNo": "1"}
+    async with httpx.AsyncClient(timeout=12.0, headers={**_HEADERS, "Referer": "http://www.sse.com.cn/market/othersdata/margin/detail/"}) as client:
+        resp = await client.get("http://query.sse.com.cn/marketdata/tradedata/queryMargin.do", params=params)
+    try:
+        items = resp.json()["pageHelp"]["data"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise SourceError(f"上交所融资融券返回 {resp.status_code}，不是预期的结构") from e
+    out = []
+    for r in items or []:
+        day, balance = str(r.get("opDate") or ""), r.get("rzye")
+        if len(day) != 8 or not isinstance(balance, (int, float)):
+            continue
+        buy, repay = r.get("rzmre"), r.get("rzche")
+        out.append({"date": f"{day[:4]}-{day[4:6]}-{day[6:]}", "close": None, "financing_balance_yi": _yi(balance), "financing_buy_yi": _yi(buy),
+                    "financing_net_buy_yi": _yi(buy - repay) if isinstance(buy, (int, float)) and isinstance(repay, (int, float)) else None,
+                    "short_balance_yi": _yi(r.get("rqylje"), 4), "financing_to_float_mv_pct": None, "source": "上海证券交易所"})
+    if items and not out:
+        raise SourceError("上交所融资融券的字段变了：找不到 opDate / rzye")
+    return sorted(out, key=lambda r: r["date"], reverse=True)[:days]
+
+
+async def _margin_szse(plain: str, days: int) -> list[dict]:
+    """深圳证券交易所公布的融资融券明细：一天一个请求，所以先用日线拿到最近的交易日，再逐日取。"""
+    bars = await fetch_stock_kline(plain, days + 1)
+    dates = [b["nav_date"] for b in bars][1:days + 1] or [b["nav_date"] for b in bars][:days]     # 当天的两融第二天早上才公布：从上一个交易日起
+    if not dates:
+        raise SourceError("拿不到最近的交易日，没法逐日问深交所")
+    gate = asyncio.Semaphore(4)
+
+    def number(text) -> float | None:
+        return _f(str(text or "").replace(",", ""))
+
+    async def one(client: httpx.AsyncClient, day: str) -> dict | None:
+        async with gate:
+            resp = await client.get("https://www.szse.cn/api/report/ShowReport/data", params={
+                "SHOWTYPE": "JSON", "CATALOGID": "1837_xxpl", "txtDate": day, "tab2PAGENO": "1", "TABKEY": "tab2", "txtZqdm": plain})
+        try:
+            table = next(t for t in resp.json() if t["metadata"]["tabkey"] == "tab2")
+        except (ValueError, KeyError, TypeError, StopIteration) as e:
+            raise SourceError(f"深交所融资融券返回 {resp.status_code}，不是预期的结构") from e
+        row = next((r for r in table.get("data") or [] if r.get("zqdm") == plain), None)
+        if row is None:
+            return None                               # 那天它不是两融标的，或者还没公布
+        if "jrrzye" not in row:
+            raise SourceError("深交所融资融券的字段变了：找不到 jrrzye")
+        short = number(row.get("jrrjye"))             # 万元
+        return {"date": day, "close": None, "financing_balance_yi": number(row.get("jrrzye")), "financing_buy_yi": number(row.get("jrrzmr")),
+                "financing_net_buy_yi": None, "short_balance_yi": round(short / 1e4, 4) if short is not None else None,
+                "financing_to_float_mv_pct": None, "source": "深圳证券交易所"}
+
+    async with httpx.AsyncClient(timeout=12.0, headers={**_HEADERS, "Referer": "https://www.szse.cn/disclosure/margin/margin/index.html"}) as client:
+        rows = await asyncio.gather(*(one(client, day) for day in dates))
+    return sorted((r for r in rows if r), key=lambda r: r["date"], reverse=True)
 
 
 def summarize_margin(rows: list[dict]) -> dict:
@@ -149,7 +230,7 @@ async def fetch_holder_counts(code: str, periods: int = 8) -> list[dict]:
             "avg_shares": _r(r.get("AVG_HOLD_NUM"), 0), "avg_value_wan": _wan(r.get("AVG_MARKET_CAP")),
             "price_change_pct": _r(r.get("INTERVAL_CHRATE")), "close": r.get("CLOSE_PRICE"), "notice_date": _day(r.get("HOLD_NOTICE_DATE")),
         } for r in rows]
-    return await cache.cached(f"holders:{plain_code(code)}:{periods}", cache.DAY, load) or []
+    return await cache.resilient(f"holders:{plain_code(code)}:{periods}", cache.DAY, load, keep=SLOW, what=f"{plain_code(code)} 的股东户数") or []
 
 
 async def fetch_top_holders(code: str) -> dict | None:
@@ -167,7 +248,7 @@ async def fetch_top_holders(code: str) -> dict | None:
             "change": r.get("HOLDNUM_CHANGE_NAME") or str(r.get("HOLD_NUM_CHANGE") or ""),
             "change_shares_wan": _wan(_f(r.get("HOLD_NUM_CHANGE"))),
         } for r in top[:10]]}
-    return await cache.cached(f"topholders:{plain_code(code)}", cache.DAY, load)
+    return await cache.resilient(f"topholders:{plain_code(code)}", cache.DAY, load, keep=SLOW, what=f"{plain_code(code)} 的十大流通股东")
 
 
 async def fetch_institutions(code: str) -> dict | None:
@@ -186,7 +267,7 @@ async def fetch_institutions(code: str) -> dict | None:
             } for r in rows if r.get("REPORT_DATE") == day and r.get("ORG_TYPE_NAME")]
             return {"report_date": _day(day), "by_type": sorted(items, key=lambda i: -(i["float_ratio_pct"] or 0))}
         return {"latest": period(dates[0]), "previous": period(dates[1]) if len(dates) > 1 else None}
-    return await cache.cached(f"orghold:{plain_code(code)}", cache.DAY, load)
+    return await cache.resilient(f"orghold:{plain_code(code)}", cache.DAY, load, keep=SLOW, what=f"{plain_code(code)} 的机构持仓")
 
 
 async def fetch_northbound(code: str, periods: int = 4) -> list[dict]:
@@ -195,7 +276,7 @@ async def fetch_northbound(code: str, periods: int = 4) -> list[dict]:
         rows, _ = await datacenter("RPT_MUTUAL_HOLDSTOCKNORTH_STA", filter=_code_filter(code), page_size=max(1, periods), sort="TRADE_DATE")
         return [{"date": _day(r.get("TRADE_DATE")), "shares_wan": _wan(r.get("HOLD_SHARES")), "value_yi": _yi(r.get("HOLD_MARKET_CAP")),
                  "float_ratio_pct": _r(r.get("FREE_SHARES_RATIO"))} for r in rows]
-    return await cache.cached(f"north:{plain_code(code)}:{periods}", cache.DAY, load) or []
+    return await cache.resilient(f"north:{plain_code(code)}:{periods}", cache.DAY, load, keep=SLOW, what=f"{plain_code(code)} 的北向持股") or []
 
 
 # ── 内部人与大额交易 ────────────────────────────────────

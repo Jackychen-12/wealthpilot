@@ -10,7 +10,7 @@ from wealthpilot.services.agents.tools import execute_tool
 mcp = MCPServer(
     "wealthpilot",
     instructions=(
-        "WealthPilot 智能投顾工具集：58 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、资金与筹码、一致预期与消息、选股、联网搜索、每日复盘、宏观、反向 DCF）、基金查询、持仓分析、风险评估、穿透与回测。"
+        "WealthPilot 智能投顾工具集：59 个实时投资分析工具，覆盖 A 股个股研究（基本面、估值分位、走势、同行、资金与筹码、一致预期与消息、选股、联网搜索、每日复盘、宏观、反向 DCF）、基金查询、持仓分析、风险评估、穿透与回测。"
         "市场工具无需持仓数据即可使用；持仓/风险工具会自动从本地数据库加载用户持仓。"
     ),
 )
@@ -512,6 +512,13 @@ async def compute_reverse_dcf(code: str) -> str:
     """Reverse DCF: the profit growth the current market cap implies, next to the past three-year growth. Not a price target.
     反向 DCF：现价隐含了多高的利润增速。不是目标价。"""
     return await execute_tool("compute_reverse_dcf", {"code": code}, [], {}, None)
+
+
+@mcp.tool()
+async def compare_stocks(codes: list[str]) -> str:
+    """Compare 2-6 stocks you name side by side (A-share, HK and US can be mixed): market cap, PE, PB, 5-year percentiles, latest growth and margins.
+    把点名的几只股票放在一张表里比，A 股、港股、美股可以混着比。比谁由你决定。"""
+    return await execute_tool("compare_stocks", {"codes": codes}, [], {}, None)
 
 
 def main() -> None:

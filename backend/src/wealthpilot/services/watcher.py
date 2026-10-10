@@ -141,7 +141,19 @@ async def run(db: Session, user_id: int, *, today: date | None = None, push: boo
     if open_count:
         events.append({"kind": "proposal", "code": "", "name": "", "held": True, "text": f"有 {open_count} 条操作建议单等你决定"})
 
-    # 5) 今天早些时候跑过的定时任务、触发过的提醒：还没有简报时记在待并入的位置，有了之后直接写在简报里
+    # 5) 数据源：每天把各个来源问一遍。只有哪类数据彻底取不到了才写进简报；换到备用来源的记在日志和「数据连接」页
+    if getattr(settings, "source_check", False) and today == date.today():
+        with contextlib.suppress(Exception):     # 探测本身出错不该拦住简报
+            from wealthpilot.services import sources
+            if not cache.read(f"sources:checked:{today}", cache.DAY):
+                report = await sources.check()
+                cache.write(f"sources:checked:{today}", {"problems": sources.problems(report)})
+                for d in report["datasets"]:
+                    if d["state"] == "down":
+                        events.append({"kind": "source", "code": "", "name": "数据源", "held": True,
+                                       "text": f"{d['label']}今天取不到（{'、'.join(c['label'] for c in d['chain'])}都不通）。之前取到过的会接着用并标明日期；在「设置 → 数据连接」看详情"})
+
+    # 6) 今天早些时候跑过的定时任务、触发过的提醒：还没有简报时记在待并入的位置，有了之后直接写在简报里
     from wealthpilot.services import automations  # 放在这里导入：automations 也要用到简报表
     events += automations.pending_events(user_id, today)
     digest = db.exec(select(Digest).where(Digest.user_id == user_id, Digest.day == str(today))).first() \
@@ -149,7 +161,7 @@ async def run(db: Session, user_id: int, *, today: date | None = None, push: boo
     with contextlib.suppress(ValueError):
         events += [e for e in json.loads(digest.events_json) if e.get("kind") in ("task", "alert") and e not in events]
 
-    order = {"checkpoint": 0, "alert": 1, "report": 2, "filing": 3, "valuation": 4, "move": 5, "task": 6, "proposal": 7, "sync": 8}
+    order = {"checkpoint": 0, "alert": 1, "report": 2, "filing": 3, "valuation": 4, "move": 5, "task": 6, "proposal": 7, "source": 8, "sync": 9}
     events.sort(key=lambda e: (order.get(e["kind"], 9), not e["held"]))
     notable = [e for e in events if e["kind"] not in ("sync", "proposal")]
     summary = (f"盯了 {len(watch)} 只，{len(notable)} 件事值得看" if notable else f"盯了 {len(watch)} 只，今日无事") if watch \

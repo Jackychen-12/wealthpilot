@@ -109,7 +109,7 @@ const StockDetail: React.FC<{ code: string }> = ({ code }) => {
           {isOverseas(code) ? (
             <Callout tone="neutral">
               这是{/\.HK$/i.test(code) ? '港股' : '美股'}，金额单位是{/\.HK$/i.test(code) ? '港元' : '美元'}（财报的币种由公司决定，见财务页）。
-              目前有行情、走势、财务指标、反向 DCF；估值历史分位、同行对比、资金与筹码、一致预期和公告只有 A 股有。让 AI 研究时，这些它会用新闻和联网搜索补。
+              目前有行情、走势、财务指标、市盈率和市净率的历史分位、反向 DCF；同行对比、资金与筹码、一致预期和公告只有 A 股有。让 AI 研究时，这些它会用新闻和联网搜索补。
             </Callout>
           ) : null}
           <div className="border-b border-hairline"><Segmented value={tab} onChange={setTab} options={isOverseas(code) ? OVERSEAS_TABS : TABS} /></div>
@@ -397,7 +397,7 @@ const ValuationTab: React.FC<{ code: string }> = ({ code }) => {
   const p = peer.value
   return (
     <>
-      <Section title="估值历史分位" hint={h ? `${h.window_start} 至 ${h.as_of} · ${h.trading_days} 个交易日` : undefined}>
+      <Section title="估值历史分位" hint={h ? `${h.window_start} 至 ${h.as_of} · ${h.trading_days} 个${h.source?.includes('百度') ? '数据点' : '交易日'}${h.source ? ` · ${h.source}` : ''}` : undefined}>
         <DataState loading={hist.loading} error={hist.error} onRetry={hist.reload} empty={hist.missing || undefined}>
           {h ? (
             <>

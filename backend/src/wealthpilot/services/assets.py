@@ -213,7 +213,11 @@ async def fetch_prices_by_type(items: list[tuple[str, str]]) -> dict[str, float]
 
     market_codes = by_type.get("stock", []) + by_type.get("etf", [])
     for code, quote in (await fetch_sina_quotes(market_codes)).items():
-        prices[code] = quote["price"]
+        # 这个函数是给持仓估值用的，持仓的账是人民币的：港股美股的现价折成人民币。取不到汇率就当没取到价，不拿原币种的数混进去
+        from wealthpilot.services import fx
+        factor = await fx.factor(code)
+        if factor is not None:
+            prices[code] = round(quote["price"] * factor, 4) if factor != 1.0 else quote["price"]
 
     for code, quote in (await fetch_crypto_quotes(by_type.get("crypto", []))).items():
         prices[code] = quote["price"]

@@ -28,6 +28,8 @@ os.environ["ADVICE_MODE"] = "false"
 os.environ["BROKER"] = "none"
 os.environ["SKILLS_DIR"] = str(_TMP_DIR / "skills")   # 默认没有技能，免得示例技能的触发词影响别的测试
 os.environ["WATCH_ENABLED"] = "false"
+os.environ["SOURCE_CHECK"] = "false"   # 盯盘时不去探测数据源：测试不联网
+os.environ["WEALTHPILOT_NO_FETCH_CACHE"] = "1"   # 取数层的缓存关掉：各个测试自己造数据，不能读到别的测试缓存下来的
 os.environ["CONNECTORS_FILE"] = str(_TMP_DIR / "connectors.json")
 
 import pytest  # noqa: E402 — 必须在设置 DB_PATH 之后
@@ -56,6 +58,13 @@ def _no_network_security_resolution(monkeypatch):
         return {}
 
     monkeypatch.setattr(checkpoints, "current_values", no_values)
+
+
+@pytest.fixture(autouse=True)
+def _short_source_probes(monkeypatch):
+    """有的冒烟测试会真的去探测数据源（只要求不报 500）。连不上时别让它等满二十几秒。"""
+    from wealthpilot.services import sources
+    monkeypatch.setattr(sources, "PROBE_TIMEOUT", 3.0)
 
 
 @pytest.fixture(scope="session", autouse=True)

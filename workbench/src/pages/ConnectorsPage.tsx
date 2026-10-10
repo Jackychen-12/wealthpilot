@@ -1,7 +1,7 @@
 import type React from 'react'
 import { useState } from 'react'
 import { PlugZap } from 'lucide-react'
-import { api, useApi, type ConnectorTest } from '../api'
+import { DEMO, api, useApi, type ConnectorTest, type DataSources } from '../api'
 import { Button, Callout, Card, Tag, type Tone } from '../components/kit'
 import { DataState, Page, Section, Table, Td } from '../components/ui'
 
@@ -14,6 +14,56 @@ const KIND: Record<string, { label: string; tone: Tone }> = {
 
 const STATUS_TONE: Record<string, Tone> = { ready: 'green', needs_url: 'blue', unsupported: 'gray' }
 const code = 'rounded-xs bg-surface px-1 font-mono text-[13px]'
+
+const STATE: Record<string, { label: string; tone: Tone }> = {
+  ok: { label: '正常', tone: 'green' }, fallback: { label: '在用备用来源', tone: 'yellow' }, down: { label: '取不到', tone: 'pink' }, unknown: { label: '还没用到', tone: 'gray' },
+}
+
+/** 内置数据源：每类数据先用谁、不行换谁，现在各自通不通。不用配置，这里只是让人看得见。 */
+const BuiltinSources: React.FC = () => {
+  const sources = useApi(api.dataSources)
+  const [checked, setChecked] = useState<DataSources | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const check = async () => {
+    setBusy(true); setError('')
+    try { setChecked(await api.checkDataSources()) } catch (e) { setError(e instanceof Error ? e.message : '没有查成') } finally { setBusy(false) }
+  }
+  const data = checked ?? sources.data
+  const failing = (data?.sources ?? []).filter((s) => s.status === 'failing')
+  return (
+    <Section title="内置数据源" hint={data?.checked_at ? `${data.checked_at.replace('T', ' ')} 查过一遍` : '不用配置。每类数据排了先后两个来源，前一个不通自动换后一个；都不通时用上一次取到的，并标明日期'}
+      actions={DEMO ? undefined : <Button size="sm" variant="secondary" loading={busy} onClick={() => void check()}><PlugZap className="h-3.5 w-3.5" />现在查一遍</Button>}>
+      <DataState loading={sources.loading && !data} error={sources.error || error} onRetry={sources.reload}>
+        <Table minWidth={720} head={[{ label: '数据' }, { label: '来源（按先后）' }, { label: '现在' }]}>
+          {(data?.datasets ?? []).map((d) => (
+            <tr key={d.key}>
+              <Td className="w-[30%] align-top"><span className="font-medium text-ink">{d.label}</span>{d.note ? <p className="mt-0.5 text-[13px] text-steel">{d.note}</p> : null}</Td>
+              <Td className="align-top">
+                <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]">
+                  {d.chain.map((s, i) => (
+                    <span key={s.name} className="inline-flex items-center gap-1">
+                      {i > 0 ? <span className="text-stone">→</span> : null}
+                      <span className={s.status === 'failing' ? 'text-on-rose line-through decoration-1' : 'text-charcoal'}>{s.label}</span>
+                      {s.official ? <Tag tone="purple" className="!py-0">官方</Tag> : null}
+                    </span>
+                  ))}
+                </span>
+              </Td>
+              <Td className="whitespace-nowrap align-top"><Tag tone={STATE[d.state].tone}>{STATE[d.state].label}</Tag></Td>
+            </tr>
+          ))}
+        </Table>
+        {failing.length ? (
+          <Callout tone="warning" className="mt-3" title="现在不通的来源">
+            <ul className="list-disc pl-5">{failing.map((s) => <li key={s.name}>{s.label}（{s.what}）：{s.error || '取不到'}{s.failing_since ? `，从 ${s.failing_since.replace('T', ' ')} 开始` : ''}</li>)}</ul>
+          </Callout>
+        ) : null}
+        <p className="mt-3 max-w-[820px] text-[13px] leading-relaxed text-steel">{data?.statement}</p>
+      </DataState>
+    </Section>
+  )
+}
 
 const ConnectorsPage: React.FC = () => {
   const list = useApi(api.connectors)
@@ -33,8 +83,10 @@ const ConnectorsPage: React.FC = () => {
   const connectors = list.data?.connectors ?? []
 
   return (
-    <Page title="数据连接" description="把妙想、iFinD 这类第三方数据服务（MCP）接进来，让 AI 研究能用上它们的数据。不接也能用：A 股、港股、美股的基础数据已经内置">
-      <Callout tone="info" title="只读接入">
+    <Page title="数据连接" description="数据从哪来、现在通不通；想要更全、有保障的数据，可以把自己的妙想、iFinD 这类账号接进来">
+      <BuiltinSources />
+
+      <Callout tone="info" title="接外部服务：只读">
         外部服务里凡是下单、撤单、转账这类会动账户的工具，都会被强制屏蔽，不会交给 AI，也无法通过本系统调用。WealthPilot 只做研究与分析，不代你交易。
       </Callout>
 

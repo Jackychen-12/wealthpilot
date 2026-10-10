@@ -87,7 +87,7 @@ async def test_real_stdio_connection_lists_tools_and_feeds_the_agent(config):
              "args": [f"WEALTHPILOT_HOME={os.environ['WEALTHPILOT_HOME']}", f"DB_PATH={os.environ['DB_PATH']}", sys.executable, "-m", "wealthpilot", "mcp"]}])
     connector = svc.load_connectors()[0]
     tools = await svc.list_tools(connector)
-    assert len(tools) == 58 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
+    assert len(tools) == 59 and all(t["allowed"] for t in tools if t["name"].startswith("get_"))
 
     definitions, index = await svc.agent_tools()
     assert "ext_self_get_stock_quote" in index

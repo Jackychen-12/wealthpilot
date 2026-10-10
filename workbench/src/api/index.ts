@@ -60,6 +60,8 @@ export interface Holding {
   id: number; asset_type: string; fund_code: string; fund_name: string; shares: number; cost_price: number
   buy_date: string; category: string; industry: string
   latest_nav: number | null; market_value: number | null; total_return: number | null; return_pct: number | null
+  /** 港股美股才有：账是人民币的，这几项是原币种的成本、现价，和折算用的汇率 */
+  currency?: 'CNY' | 'HKD' | 'USD'; cost_native?: number | null; cost_fx?: number | null; native_price?: number | null; fx_rate?: number | null
 }
 export interface HoldingInput {
   asset_type: string; fund_code: string; fund_name: string; shares: number; cost_price: number
@@ -208,6 +210,8 @@ export const api = {
   doctor: (model = false) => request<{ items: DoctorItem[] }>(`/api/settings/doctor${model ? '?model=1' : ''}`),
   connectors: () => request<{ config_file: string; configured: boolean; connectors: ConnectorInfo[] }>('/api/connectors'),
   connectorPresets: () => request<ConnectorPreset[]>('/api/connectors/presets'),
+  dataSources: () => request<DataSources>('/api/market/sources'),
+  checkDataSources: () => request<DataSources>('/api/market/sources/check', { method: 'POST' }),
   testConnector: (name: string) => request<ConnectorTest>(`/api/connectors/${name}/test`, { method: 'POST' }),
   fundNav: (code: string, days: number) => request<{ count: number; data: NavPoint[] }>(`/api/market/fund/${code}/nav?days=${days}`),
   login: (username: string, password: string) =>
@@ -266,6 +270,11 @@ export interface Decision { id: number; code: string; name: string; action: stri
 interface DecisionHorizon { settled: number; beat: number; avg_excess_pct: number | null }
 export interface DecisionGroup { source: string; count: number; d20: DecisionHorizon; d60: DecisionHorizon }
 export interface DecisionReview { decisions: Decision[]; by_source: DecisionGroup[]; by_name: DecisionGroup[]; note: string; benchmark: string }
+type SourceStatus = 'ok' | 'failing' | 'unknown'
+export interface DataSources {
+  datasets: { key: string; label: string; note: string; state: 'ok' | 'fallback' | 'down' | 'unknown'; chain: { name: string; label: string; official: boolean; status: SourceStatus }[] }[]
+  sources: { name: string; label: string; official: boolean; what: string; status: SourceStatus; last_ok: string; last_fail: string; failing_since: string; error: string }[]
+  statement: string; checked_at?: string }
 export interface ConnectorPreset { key: string; label: string; official: boolean; status: 'ready' | 'needs_url' | 'unsupported'; status_label: string; provides: string; needs: string; links: string[]; caveat: string }
 export interface TradesReport { ok: boolean; reason?: string; problems: string[]; trades: number; stocks?: number; closed?: number; period?: { from: string; to: string }
   findings?: { key: string; label: string; flag: boolean; text: string; examples: string[] }[]; flagged?: string[]; worst_stocks?: { name: string; pnl: number }[]
@@ -288,7 +297,7 @@ export interface ScreenStock { code: string; name: string; industry: string; pri
   pe_ttm: number | null; pb: number | null; roe_pct: number | null; roe_annual_pct?: number | null; revenue_yoy_pct: number | null; profit_yoy_pct: number | null }
 export interface ScreenResult { criteria: Record<string, unknown>; matched: number; shown: number; stocks: ScreenStock[]; trade_date: string; report_date: string; note: string }
 export interface ValuationBand { current: number | null; percentile: number | null; min?: number; median?: number; max?: number; note?: string }
-export interface ValuationHistory { name: string; as_of: string; window_start: string; trading_days: number; pe: ValuationBand; pb: ValuationBand; ps: ValuationBand }
+export interface ValuationHistory { name: string; as_of: string; window_start: string; trading_days: number; pe: ValuationBand; pb: ValuationBand; ps: ValuationBand; source?: string }
 export interface Indicator { report_date: string; report_name: string; revenue_yi: number | null; revenue_yoy_pct: number | null; net_profit_yi: number | null; net_profit_yoy_pct: number | null
   deducted_net_profit_yi: number | null; roe_pct: number | null; gross_margin_pct: number | null; net_margin_pct: number | null; debt_ratio_pct: number | null; eps: number | null; operating_cashflow_per_share: number | null }
 export interface Peer { code: string; name: string; pe_ttm: number | null; pb: number | null; total_mv_yi: number | null; change_pct: number | null }
@@ -325,7 +334,7 @@ export interface ReportExcerpts { title: string; date: string; category: string;
 export interface ScreenBacktest { start: string; end: string; top_n: number; total_return_pct: number; benchmark_return_pct: number; excess_return_pct: number; annualized_pct: number
   max_drawdown_pct: number; periods_beating_benchmark: number; period_count: number; benchmark: string; limitations: string[]
   periods: { start: string; end: string; picked: number; held?: number; return_pct: number | null; benchmark_pct: number | null; equity?: number; benchmark_equity?: number; top: { code: string; name: string; return_pct: number }[] }[] }
-export interface DeskStock { code: string; name: string; asset_type: string; held: boolean; price: number | null; change_pct: number | null; market_value: number | null; return_pct: number | null
+export interface DeskStock { code: string; name: string; asset_type: string; held: boolean; price: number | null; change_pct: number | null; currency?: 'CNY' | 'HKD' | 'USD'; market_value: number | null; return_pct: number | null
   pe_percentile: number | null; checkpoints: { pending: number; held: number; broken: number }; last_research: { id: number; date: string; status: string } | null; open_proposals: number }
 export interface Desk { sample?: boolean; stocks: DeskStock[]; todo: { proposals: number; broken: number; pending: number; unresearched: number }; verified_recent: Checkpoint[]; digest: Digest | null }
 export interface Thesis { code: string; latest: { id: number; date: string; status: string; playbook: string; conclusion: string; stance: string } | null; research_dates: string[]
@@ -381,7 +390,7 @@ export interface DebateSide { points: { text: string; evidence: string[] }[]; we
 export interface Debate { bull: DebateSide; bear: DebateSide }
 export interface SkillPreview { content: string; skill: SkillInfo | null; problems: string[] }
 export interface Onboarding { steps: { key: string; title: string; done: boolean; to: string; hint: string; optional?: boolean }[]; complete: boolean; dismissed: boolean }
-export interface ParsedHolding { line: string; query: string; shares: number | null; cost: number | null; code: string; name: string; asset_type: string; problem: string; ok: boolean }
+export interface ParsedHolding { line: string; query: string; shares: number | null; cost: number | null; code: string; name: string; asset_type: string; problem: string; ok: boolean; note?: string }
 export interface Automation { id: number; kind: 'task' | 'alert'; title: string; enabled: boolean; last_run_at: string | null; last_status: string; last_result: string; created_at: string
   schedule?: string; prompt?: string; depth?: string; last_message_id?: number | null; next_run_at?: string | null
   code?: string; name?: string; metric?: string; op?: '>=' | '<='; threshold?: number; repeat?: boolean; condition?: string; unit?: string }
